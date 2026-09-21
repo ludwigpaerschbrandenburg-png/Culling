@@ -25,6 +25,7 @@ from . import dateitypen
 # Kamera-Ordner brauchen. Gruppenpraefixe weggelassen: ExifTool liefert
 # den Namen ohne Gruppe, egal aus welchem Block der Wert stammt.
 FELDER_FOTO: tuple[str, ...] = (
+    "Error",                 # Lesefehler von ExifTool - sonst unsichtbar
     "DateTimeOriginal",
     "CreateDate",
     "DateTimeDigitized",
@@ -32,6 +33,7 @@ FELDER_FOTO: tuple[str, ...] = (
     "Model",
 )
 FELDER_VIDEO: tuple[str, ...] = (
+    "Error",
     "DateTimeOriginal",
     "CreateDate",
     "MediaCreateDate",
@@ -42,6 +44,7 @@ FELDER_VIDEO: tuple[str, ...] = (
     "Model",
 )
 FELDER_SIDECAR_XML: tuple[str, ...] = (
+    "Error",
     "NonRealTimeMetaCreationDateValue",  # Sony-XML-Sidecar C0001M01.XML
     "NonRealTimeMetaDeviceModelName",
 )
@@ -51,6 +54,25 @@ STAPELGROESSE = 200
 
 class MetadatenFehler(Exception):
     """ExifTool konnte eine Datei nicht lesen."""
+
+
+def schluessel(pfad) -> str:
+    """Pfad in der Form, unter der die ExifTool-Antwort zugeordnet wird.
+
+    ExifTool schreibt SourceFile unter Windows mit Schraegstrichen zurueck,
+    egal wie der Pfad uebergeben wurde. Damit die Antwort zur Datenbank
+    passt, werden beide Seiten auf Schraegstriche gebracht.
+    """
+    return str(pfad).replace("\\", "/")
+
+
+def unzulaessig_fuer_exiftool(pfad) -> bool:
+    """Ein Zeilenumbruch im Namen wuerde in der Argumentdatei (-@) zu
+    weiteren Argumenten - im schlimmsten Fall zu Schreibbefehlen. Solche
+    Pfade gehen nie an ExifTool (SPEC Abschnitt 4 Phase 2: nichts anfassen).
+    """
+    text = str(pfad)
+    return "\n" in text or "\r" in text
 
 
 def prozesse_bestimmen(konf) -> int:
@@ -93,6 +115,9 @@ class _Prozess:
         if not pfade_typ:
             return {}
         typ = pfade_typ[0][1]
+        pfade_typ = [(p, t) for p, t in pfade_typ if not unzulaessig_fuer_exiftool(p)]
+        if not pfade_typ:
+            return {}
         self.zaehler += 1
         nummer = self.zaehler
         zeilen = _argumente(typ) + [p for p, _ in pfade_typ]
@@ -111,14 +136,14 @@ class _Prozess:
                 break
             puffer.extend(zeile)
 
-        text = puffer.decode("utf-8", "replace").strip()
+        text = puffer.decode("utf-8", "surrogateescape").strip()
         ergebnis: dict[str, dict] = {}
         if text:
             try:
                 for eintrag in json.loads(text):
                     quelle = eintrag.pop("SourceFile", None)
                     if quelle is not None:
-                        ergebnis[str(quelle)] = eintrag
+                        ergebnis[schluessel(quelle)] = eintrag
             except json.JSONDecodeError as fehler:
                 raise MetadatenFehler(f"ExifTool-Antwort nicht lesbar: {fehler}") from fehler
         return ergebnis
@@ -191,15 +216,23 @@ def stapel_bilden(
     Die Reihenfolge nach Quellordner bleibt erhalten, damit die Platte
     moeglichst sequentiell liest (SPEC Abschnitt 7).
     """
+    def art(typ: str) -> str:
+        if typ == dateitypen.VIDEO:
+            return "video"
+        return "sidecar" if typ == dateitypen.SIDECAR else "foto"
+
+    # Erst nach Art sammeln (stabil, also innerhalb der Art weiter nach
+    # Ordner), sonst ergaebe ein Handy-Ordner mit IMG_0001.JPG/IMG_0002.MOV
+    # im Wechsel lauter Stapel mit einer einzigen Datei.
     stapel: list[list[tuple[str, str]]] = []
     aktuell: list[tuple[str, str]] = []
     aktueller_typ = None
-    for pfad, typ in eintraege:
-        schluessel = "video" if typ == dateitypen.VIDEO else ("sidecar" if typ == dateitypen.SIDECAR else "foto")
-        if aktuell and (schluessel != aktueller_typ or len(aktuell) >= groesse):
+    for pfad, typ in sorted(eintraege, key=lambda e: art(e[1])):
+        kennung = art(typ)
+        if aktuell and (kennung != aktueller_typ or len(aktuell) >= groesse):
             stapel.append(aktuell)
             aktuell = []
-        aktueller_typ = schluessel
+        aktueller_typ = kennung
         aktuell.append((pfad, typ))
     if aktuell:
         stapel.append(aktuell)

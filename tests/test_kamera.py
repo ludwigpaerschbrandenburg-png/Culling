@@ -22,7 +22,7 @@ from fotosort import config, kamera
         ({"Model": "Punkt am Ende."}, "Punkt am Ende", "Punkt am Ende."),
         ({}, "Unbekannte_Kamera", ""),
         ({"Model": ""}, "Unbekannte_Kamera", ""),
-        ({"Make": "SONY"}, "SONY", "SONY"),  # nur Hersteller: besser als nichts
+        ({"Make": "SONY"}, "Unbekannte_Kamera", ""),  # nur Hersteller ist kein Modell (SPEC §3)
         ({"DeviceModelName": "ILCE-7CM2"}, "A7C2", "ILCE-7CM2"),  # Sony-Video-XML
         ({"Model": "///"}, "Unbekannte_Kamera", "///"),  # nach Bereinigung leer
     ],

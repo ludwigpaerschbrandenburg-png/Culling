@@ -725,10 +725,23 @@ def analyse_zusammenfassung(z: dict) -> str:
         "  Aliase fuer unbekannte Modelle traegt man in der config.toml unter"
         " [kamera.aliase] nach (fotosort config), BEVOR kopiert wird."
     )
-    zeilen.append(f"  Ohne sicheres Datum (kommt nach _Ohne_Datum): {anzahl(z.get('unsicher', 0))}")
+    zeilen.append(f"  Ohne sicheres Datum (nur Aenderungsdatum):    {anzahl(z.get('unsicher', 0))}")
+    zeilen.append(f"  Namenskonflikte (gleicher Zielname, Phase 3): {anzahl(z.get('namenskonflikte', 0))}")
     zeilen.append(f"  Zeitzone angenommen (Video ohne Offset):     {anzahl(z.get('zeitzone_angenommen', 0))}")
     zeilen.append(f"  Datum aus Dateiname ohne Uhrzeit:            {anzahl(z.get('ohne_uhrzeit', 0))}")
     zeilen.append(f"  Sidecars ohne Hauptdatei:                    {anzahl(z.get('sidecar_ohne_haupt', 0))}")
     zeilen.append(f"  Fehler:                                      {anzahl(z.get('fehler', 0))}")
     zeilen.append(f"  Noch nicht analysiert:                       {anzahl(z.get('offen', 0))}")
     return "\n".join(zeilen)
+
+
+def abbruch_allgemein() -> str:
+    return "Abgebrochen. Das Bisherige ist gespeichert; der naechste Lauf macht dort weiter."
+
+
+def zeitzone_ungueltig(name) -> str:
+    return (
+        f"Die Heimat-Zeitzone \"{name}\" ist unbekannt (config.toml, [datum] heimat_zeitzone).\n"
+        "Erwartet wird ein Name wie \"Europe/Berlin\". Ohne gueltige Zeitzone wuerden alle\n"
+        "Videos ohne Offset falsch einsortiert; deshalb wird abgebrochen."
+    )

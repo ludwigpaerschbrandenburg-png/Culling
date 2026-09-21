@@ -154,6 +154,11 @@ _ID_MUSTER = re.compile(r"^[0-9a-f]{32}$")
 _ROH_KENNZEICHEN = "\ufffd%"
 
 
+def ist_roh_kodiert(text: str) -> bool:
+    """Steht der Pfad in der umkehrbaren Roh-Schreibweise (kein gueltiges UTF-8)?"""
+    return str(text).startswith(_ROH_KENNZEICHEN)
+
+
 def pfad_text(pfad) -> str:
     """Pfad in die Form bringen, in der er in der Datenbank steht."""
     text = os.fsdecode(pfad) if isinstance(pfad, bytes) else str(pfad)
@@ -679,10 +684,14 @@ class Datenbank:
         anfang = ordner_text.rstrip(trenner) + trenner
         zeilen = self.verbindung.execute(
             "SELECT quellpfad, dateityp, status, kamera, kamera_modell, aufnahme_zeit,"
-            " datum_quelle, datum_sicher, datum_hinweis, zielpfad, gruppe, mtime, groesse"
+            " datum_quelle, datum_sicher, datum_hinweis, zielpfad, gruppe, mtime, groesse,"
+            " fehlergrund"
             " FROM dateien WHERE quellpfad > ? AND quellpfad < ?"
             f" AND dateityp IN {self.ECHTE_TYPEN_SQL} ORDER BY quellpfad",
-            (anfang, anfang + "\uffff"),
+            # Obergrenze: das hoechste UTF-8-Zeichen (F4 8F BF BF). U+FFFF
+            # (EF BF BF) laege VOR Emoji und allem ab U+10000 - Dateien mit
+            # solchen Namen fielen sonst still aus dem Bereich.
+            (anfang, anfang + "\U0010ffff"),
         ).fetchall()
         # Nur direkte Kinder: kein weiterer Trenner hinter dem Anfang.
         return [z for z in zeilen if trenner not in z["quellpfad"][len(anfang):]]
@@ -759,6 +768,12 @@ class Datenbank:
             ),
             "fehler": zaehlen("SELECT COUNT(*) FROM dateien WHERE status = 'fehler'"),
             "offen": self.anzahl_zu_analysieren(),
+            # Namenskonflikte: derselbe Zielpfad fuer mehrere Dateien. Phase 3
+            # loest sie mit dem Anhang _1; hier nur die Vorschau (SPEC §4 Phase 2).
+            "namenskonflikte": zaehlen(
+                "SELECT COUNT(*) FROM (SELECT zielpfad FROM dateien WHERE status = 'analysiert'"
+                " AND zielpfad != '' GROUP BY zielpfad HAVING COUNT(*) > 1)"
+            ),
         }
 
     # -- Ereignisse -------------------------------------------------------

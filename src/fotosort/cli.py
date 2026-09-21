@@ -570,7 +570,9 @@ def main(argv: list[str] | None = None) -> int:
     # archiv_oeffnen - erst dort ist die Konfiguration geladen, und nur
     # dann kann der Wert exiftool_pfad ueberhaupt wirken. Befehle, die kein
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
-    if args.befehl not in ("scan", "status", "config"):
+    # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
+    # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
+    if args.befehl not in ("scan", "status", "config", "analyse"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -610,7 +612,7 @@ def main(argv: list[str] | None = None) -> int:
         return FEHLER
     except KeyboardInterrupt:
         konsole.print("")
-        konsole.print(meldungen.scan_abgebrochen())
+        konsole.print(meldungen.abbruch_allgemein())
         return ABGEBROCHEN
 
 

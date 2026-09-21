@@ -156,3 +156,26 @@ def test_zielstruktur_liest_jeden_ordner_nur_einmal(tmp_path, konf, monkeypatch)
 def test_zeit_text():
     assert ziel.zeit_text(datetime(2026, 1, 1, 12, 30, 5)) == "2026-01-01T12:30:05"
     assert ziel.zeit_text(None) == ""
+
+
+# --------------------------------------------- Befunde der Abnahme -----
+
+
+def test_kamera_ebene_nur_exakt(tmp_path, konf):
+    """'iPhone 15'-Bilder duerfen nicht im Ordner 'iPhone 15 Pro' landen."""
+    (tmp_path / "2026" / "2026-01 Januar" / "2026-01-01" / "iPhone 15 Pro").mkdir(parents=True)
+    s = ziel.Zielstruktur(tmp_path)
+    pfad, ort = ziel.zielpfad(s, _d(2026, 1, 1), "iPhone 15", "a.jpg", konf)
+    assert pfad.parent.name == "iPhone 15" and not ort.wiederverwendet
+
+
+def test_zusatz_ebenen_folgen_der_vorlage():
+    assert ziel.zusatz_ebenen("{jahr}/{jahr}-{monat} {monatsname}/{jahr}-{monat}-{tag}/{kamera}") == [True, True, True, False]
+    assert ziel.zusatz_ebenen("_Ohne_Datum/{kamera}") == [False, False]
+
+
+def test_ohne_datum_ordner_wird_nicht_mit_zusatz_verwechselt(tmp_path, konf):
+    (tmp_path / "_Ohne_Datum alt").mkdir()
+    s = ziel.Zielstruktur(tmp_path)
+    pfad, _ = ziel.zielpfad(s, datum.Datum(None, 0, False), "A7C", "a.jpg", konf)
+    assert pfad.parent.parent.name == "_Ohne_Datum"

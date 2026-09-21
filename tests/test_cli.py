@@ -326,8 +326,11 @@ def test_exiftool_fehlt_stoert_status_und_config_nicht(
 
 @pytest.mark.parametrize("befehl", ["analyse", "start"])
 def test_ohne_exiftool_harter_abbruch_fuer_metadaten_befehle(
-    befehl, capsys, ziel, monkeypatch
+    befehl, capsys, quelle, ziel, monkeypatch
 ):
+    # Ein Archiv muss da sein: analyse prueft ExifTool erst mit der geladenen
+    # Konfiguration (SPEC Abschnitt 2, Vorrang exiftool_pfad).
+    _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
     monkeypatch.setattr(cli, "exiftool_finden", lambda konf=None: (None, "nirgends"))
     rueckgabe, ausgabe = _laufen(capsys, befehl, "--ziel", str(ziel))
     assert rueckgabe == cli.FEHLER

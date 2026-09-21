@@ -93,9 +93,34 @@ def test_mehrere_stapel_nacheinander_im_selben_prozess(pool, baum):
 def test_stapel_bilden_trennt_nach_typ_und_groesse():
     eintraege = [(f"a{i}.jpg", FOTO) for i in range(5)] + [("v.mp4", VIDEO), ("w.mp4", VIDEO), ("b.arw", RAW)]
     stapel = metadaten.stapel_bilden(eintraege, groesse=2)
-    assert [len(s) for s in stapel] == [2, 2, 1, 2, 1]
+    # erst alle Fotos/RAW (stabil in Ordnerreihenfolge), dann die Videos
+    assert [len(s) for s in stapel] == [2, 2, 2, 2]
+    assert stapel[2] == [("a4.jpg", FOTO), ("b.arw", RAW)]
     assert stapel[3] == [("v.mp4", VIDEO), ("w.mp4", VIDEO)]
-    assert stapel[4] == [("b.arw", RAW)]
+
+
+def test_schluessel_normiert_windows_pfade():
+    assert metadaten.schluessel("C:\\Fotos\\DSC01234.JPG") == "C:/Fotos/DSC01234.JPG"
+    assert metadaten.schluessel("/a/b.jpg") == "/a/b.jpg"
+
+
+def test_zeilenumbruch_im_namen_geht_nie_an_exiftool(pool, tmp_path, baum):
+    boese = tmp_path / "harmlos\n-Model=GEAENDERT\n-overwrite_original\nrest.jpg"
+    boese.write_bytes(testbaum._JPEG)
+    opfer = baum["jpg"]
+    vorher = opfer.read_bytes()
+    ergebnis = pool.lesen([(str(boese), FOTO), (str(opfer), FOTO)])
+    assert opfer.read_bytes() == vorher
+    assert str(boese) not in ergebnis
+    assert ergebnis[str(opfer)]["Model"] == "ILCE-7CM2"
+    assert not list(tmp_path.glob("*_original")) and not list(opfer.parent.glob("*_original"))
+
+
+def test_leere_datei_liefert_error_feld(pool, tmp_path):
+    leer = tmp_path / "leer.jpg"
+    leer.write_bytes(b"")
+    ergebnis = pool.lesen([(str(leer), FOTO)])
+    assert "Error" in ergebnis.get(str(leer), {})
 
 
 def test_prozesse_bestimmen(konf, monkeypatch):

@@ -55,13 +55,32 @@ def teile_aus_vorlage(vorlage: str, tag: date | None, kamera: str) -> list[str]:
     return teile
 
 
-def ordner_teile(d: datum_modul.Datum, kamera: str, konf) -> list[str]:
-    """Ordner-Teile fuer eine Datei nach Datum und Konfiguration."""
+def _vorlage_fuer(d: datum_modul.Datum, konf) -> tuple[str, "date | None"]:
     verhalten = str(konf.wert("datum.unsicheres_datum") or "ohne_datum")
     if d.zeit is None or (not d.sicher and verhalten != "mtime"):
-        return teile_aus_vorlage(str(konf.wert("ordner.vorlage_ohne_datum")), None, kamera)
+        return str(konf.wert("ordner.vorlage_ohne_datum")), None
     tag = datum_modul.tagesdatum(d.zeit, konf.wert("datum.tagesgrenze"), d.uhrzeit_bekannt)
-    return teile_aus_vorlage(str(konf.wert("ordner.vorlage")), tag, kamera)
+    return str(konf.wert("ordner.vorlage")), tag
+
+
+def ordner_teile(d: datum_modul.Datum, kamera: str, konf) -> list[str]:
+    """Ordner-Teile fuer eine Datei nach Datum und Konfiguration."""
+    vorlage, tag = _vorlage_fuer(d, konf)
+    return teile_aus_vorlage(vorlage, tag, kamera)
+
+
+def zusatz_ebenen(vorlage: str) -> list[bool]:
+    """Je Vorlagenteil: darf ein vorhandener Ordner mit Zusatz benutzt werden?
+
+    SPEC Abschnitt 3 kennt den Zusatz nur fuer Tages-, Monats- und
+    Jahresordner. Auf der Kamera-Ebene zaehlt nur der exakte Name - sonst
+    landeten "iPhone 15"-Bilder im Ordner "iPhone 15 Pro".
+    """
+    return [
+        any(feld in stueck for feld in ("{jahr}", "{monat}", "{tag}"))
+        for stueck in str(vorlage).replace("\\", "/").split("/")
+        if stueck.strip()
+    ]
 
 
 class Zielstruktur:
@@ -113,17 +132,22 @@ class Zielstruktur:
                     return True
         return False
 
-    def finden(self, teile: list[str]) -> Zielort:
-        """Den Zielordner bestimmen; vorhandene Ordner mit Zusatz vorziehen."""
+    def finden(self, teile: list[str], zusatz_erlaubt: list[bool] | None = None) -> Zielort:
+        """Den Zielordner bestimmen; vorhandene Ordner mit Zusatz vorziehen.
+
+        zusatz_erlaubt: je Ebene, ob ein Ordner mit Zusatz benutzt werden
+        darf (Datumsebenen). Ohne Angabe gilt es fuer alle Ebenen.
+        """
         aktuell = self.ziel
         mehrdeutig = False
         wiederverwendet = False
-        for gewuenscht in teile:
+        for i, gewuenscht in enumerate(teile):
             vorhanden = self._ordner_in(aktuell)
             if gewuenscht in vorhanden:
                 aktuell = aktuell / gewuenscht
                 continue
-            kandidaten = [n for n in vorhanden if self.passt(n, gewuenscht)]
+            erlaubt = True if zusatz_erlaubt is None or i >= len(zusatz_erlaubt) else zusatz_erlaubt[i]
+            kandidaten = [n for n in vorhanden if self.passt(n, gewuenscht)] if erlaubt else []
             if not kandidaten:
                 aktuell = aktuell / gewuenscht
                 continue
@@ -137,7 +161,9 @@ class Zielstruktur:
 
 def zielpfad(struktur: Zielstruktur, d: datum_modul.Datum, kamera: str, name: str, konf) -> tuple[Path, Zielort]:
     """Vollstaendiger Zielpfad einer Datei (Ordner plus Originalname)."""
-    ort = struktur.finden(ordner_teile(d, kamera, konf))
+    vorlage, tag = _vorlage_fuer(d, konf)
+    teile = teile_aus_vorlage(vorlage, tag, kamera)
+    ort = struktur.finden(teile, zusatz_ebenen(vorlage))
     return ort.ordner / name, ort
 
 

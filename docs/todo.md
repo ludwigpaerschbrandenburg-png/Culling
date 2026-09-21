@@ -41,6 +41,27 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 - [x] Kamera-Aliase, Gruppen, Zielpfad-Berechnung, Ordner mit Zusatz
 - [x] Testbaum um den vorbelegten Zielnamen erweitert (`ziel_vorbelegen`)
 
+### Aus der Abnahme von Phase 2 (nicht in Phase 2 gebaut)
+
+- [ ] **Entscheidung: „Duplikate erkennen" in SPEC §4 Phase 2.** Die SPEC nennt für die
+      Analyse „Duplikate und Namenskonflikte erkennen … Anzahl Duplikate". Duplikate brauchen
+      den Hash, und der entsteht laut §7 beim Kopieren („Quelle nur einmal lesen") — also in
+      Phase 3. Gebaut ist in Phase 2 die Zählung der **Namenskonflikte** (gleicher Zielpfad) in
+      der Zusammenfassung; die Duplikate kommen mit dem Hash in Phase 3. Wenn das so bleiben
+      soll, §4 Phase 2 entsprechend umformulieren; sonst wäre ein zweites Lesen aller Dateien
+      in Phase 2 nötig.
+- [ ] **Gruppenmitglieder in späteren Status (Phase 3).** Wird eine Hauptdatei nach der Analyse
+      geändert, ziehen Mitglieder mit Status `analysiert` mit (gebaut). Mitglieder, die schon
+      `kopiert` oder `geprueft` sind, bleiben stehen — dort muss Phase 3 entscheiden, ob sie
+      im Ziel umziehen oder als Ereignis gemeldet werden.
+- [ ] **Zeitlimit beim Lesen eines ExifTool-Stapels (Phase 6).** Bleibt ExifTool an einer
+      Datei hängen, steht der Lauf. Ein Zeitlimit je Stapel mit Neustart des Prozesses
+      gehört in die Robustheits-Runde.
+- [ ] **Eigene Vorlage mit Kamera im Datumsordner (`{jahr}-{monat}-{tag} {kamera}`).** Der
+      Zusatz-Abgleich gilt je Ebene mit Datumsfeld; in einer gemischten Ebene könnte
+      `2026-01-01 Geburtstag` für `2026-01-01 A7C` gewählt werden. Mit der Standardvorlage
+      unmöglich; für eigene Vorlagen in der `LIESMICH.md` (Phase 6) erklären.
+
 ### Offen, mit echten Dateien zu prüfen
 
 - [ ] **Echte Sony-Dateien (A7C, A7C II).** Das eingebettete XML (`CreationDateValue`) und der

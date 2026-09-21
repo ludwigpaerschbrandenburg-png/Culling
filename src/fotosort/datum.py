@@ -32,10 +32,25 @@ class Datum:
     quelle: int                # 1..6, 0 = gar nichts gefunden
     sicher: bool
     hinweis: str = ""          # "" | zeitzone_angenommen | dateiname_ohne_uhrzeit
+    # Nur mit bekannter Uhrzeit wird die Tagesgrenze angewendet. Das gilt fuer
+    # den Dateinamen (SPEC Abschnitt 3) und aus demselben Grund fuer einen
+    # Metadaten-Wert, der nur ein Datum traegt ("2026:01:01").
+    uhrzeit_bekannt: bool = True
 
-    @property
-    def uhrzeit_bekannt(self) -> bool:
-        return self.hinweis != HINWEIS_OHNE_UHRZEIT
+    def __post_init__(self) -> None:
+        if self.hinweis == HINWEIS_OHNE_UHRZEIT:
+            self.uhrzeit_bekannt = False
+
+
+class ZeitzoneUngueltig(ValueError):
+    """Die eingestellte Heimat-Zeitzone kennt das System nicht."""
+
+
+def zeitzone_pruefen(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(str(name))
+    except Exception as fehler:
+        raise ZeitzoneUngueltig(str(name)) from fehler
 
 
 # ------------------------------------------------------------- Parsen ----
@@ -45,6 +60,25 @@ _ZEIT = re.compile(
     r"(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?)?"
     r"\s*(Z|[+\-]\d{2}:?\d{2})?\s*$"
 )
+
+
+@dataclass
+class Zeitwert:
+    zeit: datetime | None
+    offset: timedelta | None   # None: kein Offset angegeben
+    hat_uhrzeit: bool
+    ist_utc_marke: bool        # "Z": der Wert IST UTC, keine Ortszeit
+
+
+def zeit_genau(text) -> Zeitwert:
+    """Wie zeit_parsen, aber mit Uhrzeit-Kennung und UTC-Marke ("Z")."""
+    zeit, offset = zeit_parsen(text)
+    if zeit is None:
+        return Zeitwert(None, None, False, False)
+    m = _ZEIT.match(str(text))
+    hat_uhrzeit = m is not None and m.group(4) is not None
+    ist_z = m is not None and m.group(7) == "Z"
+    return Zeitwert(zeit, offset, hat_uhrzeit, ist_z)
 
 
 def zeit_parsen(text) -> tuple[datetime | None, timedelta | None]:
@@ -89,32 +123,31 @@ def ist_kaputt(zeit: datetime | None, jetzt: datetime | None = None) -> bool:
     return zeit > grenze
 
 
-def _gueltig(text, jetzt=None) -> datetime | None:
-    zeit, _ = zeit_parsen(text)
-    return None if ist_kaputt(zeit, jetzt) else zeit
+def _gueltig(text, jetzt=None) -> Zeitwert | None:
+    w = zeit_genau(text)
+    return None if ist_kaputt(w.zeit, jetzt) else w
 
 
-def _mit_offset(text, jetzt=None) -> datetime | None:
-    """Nur Werte, die einen Zeitzonen-Offset tragen; Ortszeit ohne Offset."""
-    zeit, offset = zeit_parsen(text)
-    if zeit is None or offset is None or ist_kaputt(zeit, jetzt):
+def _mit_offset(text, jetzt=None) -> Zeitwert | None:
+    """Nur Werte mit echtem Zeitzonen-Offset: Ortszeit direkt angegeben.
+
+    "Z" zaehlt nicht - das ist UTC, keine Ortszeit.
+    """
+    w = zeit_genau(text)
+    if w.zeit is None or w.offset is None or w.ist_utc_marke or ist_kaputt(w.zeit, jetzt):
         return None
-    return zeit
+    return w
 
 
-def _utc_nach_heimat(text, zeitzone: str, jetzt=None) -> datetime | None:
-    zeit, offset = zeit_parsen(text)
-    if zeit is None or ist_kaputt(zeit, jetzt):
-        return None
-    if offset is not None:
-        # Traegt der Wert doch einen Offset, ist er bereits Ortszeit.
-        return zeit
-    utc = zeit.replace(tzinfo=timezone.utc)
-    try:
-        ort = utc.astimezone(ZoneInfo(zeitzone))
-    except Exception:  # unbekannte Zeitzone: lieber unverändert als falsch
-        return zeit
-    return ort.replace(tzinfo=None)
+def _utc_nach_heimat(text, zeitzone: ZoneInfo, jetzt=None) -> tuple[Zeitwert | None, bool]:
+    """(Wert in der Heimat-Zeitzone, wurde umgerechnet?)."""
+    w = zeit_genau(text)
+    if w.zeit is None or ist_kaputt(w.zeit, jetzt):
+        return None, False
+    if w.offset is not None and not w.ist_utc_marke:
+        return w, False  # traegt einen Offset: bereits Ortszeit
+    ort = w.zeit.replace(tzinfo=timezone.utc).astimezone(zeitzone)
+    return Zeitwert(ort.replace(tzinfo=None), w.offset, w.hat_uhrzeit, w.ist_utc_marke), True
 
 
 # ---------------------------------------------------------- Dateiname ----
@@ -173,39 +206,40 @@ def bestimmen(
     ist_video = dateityp == dateitypen.VIDEO
 
     # 1. DateTimeOriginal
-    zeit = _gueltig(felder.get("DateTimeOriginal"), jetzt)
-    if zeit is not None:
-        return Datum(zeit, 1, True)
+    w = _gueltig(felder.get("DateTimeOriginal"), jetzt)
+    if w is not None:
+        return Datum(w.zeit, 1, True, uhrzeit_bekannt=w.hat_uhrzeit)
 
     if ist_video:
         # 2. Felder MIT Offset: aus der Datei, dann der Sony-XML-Sidecar
         for feld in ("CreationDate", "CreationDateValue"):
-            zeit = _mit_offset(felder.get(feld), jetzt)
-            if zeit is not None:
-                return Datum(zeit, 2, True)
-        zeit = _mit_offset(sidecar_felder.get("NonRealTimeMetaCreationDateValue"), jetzt)
-        if zeit is not None:
-            return Datum(zeit, 2, True)
-        # 3. CreateDate / MediaCreateDate als UTC in die Heimat-Zeitzone
-        zeitzone = str(konf.wert("datum.heimat_zeitzone"))
-        for feld in ("CreateDate", "MediaCreateDate"):
-            roh = felder.get(feld)
-            _, offset = zeit_parsen(roh)
-            zeit = _utc_nach_heimat(roh, zeitzone, jetzt)
-            if zeit is not None:
-                return Datum(zeit, 2 if offset is not None else 3, True,
-                             "" if offset is not None else HINWEIS_ZEITZONE)
+            w = _mit_offset(felder.get(feld), jetzt)
+            if w is not None:
+                return Datum(w.zeit, 2, True, uhrzeit_bekannt=w.hat_uhrzeit)
+        w = _mit_offset(sidecar_felder.get("NonRealTimeMetaCreationDateValue"), jetzt)
+        if w is not None:
+            return Datum(w.zeit, 2, True, uhrzeit_bekannt=w.hat_uhrzeit)
+        # 3. UTC in die Heimat-Zeitzone: CreateDate / MediaCreateDate - und
+        #    ein "Z"-Wert aus den Offset-Feldern, denn der IST UTC.
+        zeitzone = zeitzone_pruefen(konf.wert("datum.heimat_zeitzone"))
+        for feld in ("CreationDate", "CreationDateValue", "CreateDate", "MediaCreateDate"):
+            w, umgerechnet = _utc_nach_heimat(felder.get(feld), zeitzone, jetzt)
+            if w is not None:
+                return Datum(w.zeit, 3 if umgerechnet else 2, True,
+                             HINWEIS_ZEITZONE if umgerechnet else "",
+                             uhrzeit_bekannt=w.hat_uhrzeit)
     else:
         # 4. nur Fotos: CreateDate / DateTimeDigitized als Kamera-Ortszeit
         for feld in ("CreateDate", "DateTimeDigitized"):
-            zeit = _gueltig(felder.get(feld), jetzt)
-            if zeit is not None:
-                return Datum(zeit, 4, True)
+            w = _gueltig(felder.get(feld), jetzt)
+            if w is not None:
+                return Datum(w.zeit, 4, True, uhrzeit_bekannt=w.hat_uhrzeit)
 
     # 5. Datum im Dateinamen
     zeit, mit_uhrzeit = aus_dateiname(name, jetzt)
     if zeit is not None:
-        return Datum(zeit, 5, True, "" if mit_uhrzeit else HINWEIS_OHNE_UHRZEIT)
+        return Datum(zeit, 5, True, "" if mit_uhrzeit else HINWEIS_OHNE_UHRZEIT,
+                     uhrzeit_bekannt=mit_uhrzeit)
 
     # 6. Aenderungsdatum - unsicher
     if mtime and mtime > 0:

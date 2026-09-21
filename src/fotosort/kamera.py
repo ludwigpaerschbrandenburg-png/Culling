@@ -22,11 +22,7 @@ def rohmodell(felder: dict | None) -> str:
     Sony-Videos tragen das Modell im eingebetteten XML (DeviceModelName).
     """
     felder = felder or {}
-    model = str(felder.get("Model") or felder.get("DeviceModelName") or "").strip()
-    make = str(felder.get("Make") or "").strip()
-    if model:
-        return model
-    return make
+    return str(felder.get("Model") or felder.get("DeviceModelName") or "").strip()
 
 
 def _bereinigen(text: str) -> str:

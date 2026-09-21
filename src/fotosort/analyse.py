@@ -10,16 +10,19 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import dateitypen, db, gruppen, kamera, meldungen, metadaten
+from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten
 from . import datum as datum_modul
 from . import ziel as ziel_modul
 
 ART_ZIELORDNER_MEHRDEUTIG = "zielordner_mehrdeutig"
 GRUND_SIDECAR_OHNE_HAUPT = "Sidecar ohne Hauptdatei"
 GRUND_METADATEN = "Metadaten nicht lesbar"
+GRUND_ZEILENUMBRUCH = "Zeilenumbruch im Dateinamen - bitte umbenennen"
+GRUND_KEIN_UTF8 = "Dateiname ist kein gueltiges UTF-8 - bitte umbenennen"
+GRUND_HAUPTDATEI = "Hauptdatei"
 
 SEITE = 5000
 _ANZEIGE_ALLE = 100
@@ -38,6 +41,7 @@ class Ergebnis:
     prozesse: int = 0
     sekunden: float = 0.0
     abgebrochen: bool = False
+    mehrdeutig_gemeldet: set = field(default_factory=set)
 
 
 def _leer(row) -> bool:
@@ -51,6 +55,10 @@ def ausfuehren(
     begonnen = time.monotonic()
     ergebnis = Ergebnis()
     ergebnis.prozesse = prozesse or metadaten.prozesse_bestimmen(konf)
+    try:
+        datum_modul.zeitzone_pruefen(konf.wert("datum.heimat_zeitzone"))
+    except datum_modul.ZeitzoneUngueltig as fehler:
+        raise FotosortFehler(meldungen.zeitzone_ungueltig(fehler)) from fehler
     struktur = ziel_modul.Zielstruktur(ziel)
     trenner = os.sep
     gesamt = dbank.anzahl_zu_analysieren()
@@ -64,12 +72,22 @@ def ausfuehren(
                 if not seite:
                     break
                 ab = seite[-1]["quellpfad"]
-                ordner: list[str] = []
+                ordner: dict[str, None] = {}
                 for z in seite:
-                    o = db.pfad_text(Path(db.text_pfad(z["quellpfad"])).parent)
-                    if not ordner or ordner[-1] != o:
-                        ordner.append(o)
-                _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebnis, anzeige)
+                    if db.ist_roh_kodiert(z["quellpfad"]):
+                        # Kein gueltiges UTF-8 im Namen: ExifTool-Antwort und
+                        # Ordnersuche koennten nie passen. Sichtbar melden
+                        # statt still auf "gefunden" liegen zu lassen.
+                        _fehler_setzen(dbank, z["quellpfad"], GRUND_KEIN_UTF8, "")
+                        ergebnis.fehler += 1
+                        ergebnis.bearbeitet += 1
+                        anzeige.weiter(1)
+                        continue
+                    # Unterordner sortieren zwischen die Dateien eines Ordners
+                    # ("o/a.jpg", "o/b/x.jpg", "o/k.jpg"); jeder Ordner darf
+                    # trotzdem nur einmal in der Liste stehen.
+                    ordner.setdefault(db.pfad_text(Path(db.text_pfad(z["quellpfad"])).parent))
+                _seite_bearbeiten(list(ordner), trenner, struktur, konf, dbank, lauf, pool, ergebnis, anzeige)
         except KeyboardInterrupt:
             ergebnis.abgebrochen = True
         finally:
@@ -100,11 +118,15 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
             aufgaben.append((o, g, nach_name))
             haupt = nach_name[g.haupt]
             if _leer(haupt):
-                zu_lesen.append((db.text_pfad(haupt["quellpfad"]), haupt["dateityp"]))
+                haupt_pfad = db.text_pfad(haupt["quellpfad"])
+                if metadaten.unzulaessig_fuer_exiftool(haupt_pfad):
+                    continue  # bekommt unten Status fehler, geht nie an ExifTool
+                zu_lesen.append((haupt_pfad, haupt["dateityp"]))
                 if haupt["dateityp"] == dateitypen.VIDEO:
                     for s in g.sidecars:
-                        if s.lower().endswith(".xml"):
-                            zu_lesen.append((db.text_pfad(nach_name[s]["quellpfad"]), dateitypen.SIDECAR))
+                        s_pfad = db.text_pfad(nach_name[s]["quellpfad"])
+                        if s.lower().endswith(".xml") and not metadaten.unzulaessig_fuer_exiftool(s_pfad):
+                            zu_lesen.append((s_pfad, dateitypen.SIDECAR))
 
     # 2. Metadaten in Stapeln lesen, parallel ueber die ExifTool-Prozesse.
     felder_von: dict[str, dict] = {}
@@ -130,17 +152,27 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
     for o, g, nach_name in aufgaben:
         haupt = nach_name[g.haupt]
         haupt_pfad = db.text_pfad(haupt["quellpfad"])
-        if _leer(haupt):
-            felder = felder_von.get(haupt_pfad)
+        haupt_neu = _leer(haupt)
+        if haupt_neu:
+            if metadaten.unzulaessig_fuer_exiftool(haupt_pfad):
+                _gruppe_fehler(g, nach_name, dbank, GRUND_ZEILENUMBRUCH, ergebnis, anzeige)
+                continue
+            felder = felder_von.get(metadaten.schluessel(haupt_pfad))
             if felder is None:
                 _gruppe_fehler(g, nach_name, dbank, GRUND_METADATEN, ergebnis, anzeige)
+                continue
+            if felder.get("Error"):
+                _gruppe_fehler(g, nach_name, dbank, f"{GRUND_METADATEN}: {felder['Error']}", ergebnis, anzeige)
                 continue
             sidecar_felder = None
             for s in g.sidecars:
                 if s.lower().endswith(".xml"):
-                    sidecar_felder = felder_von.get(db.text_pfad(nach_name[s]["quellpfad"]))
-                    if sidecar_felder:
+                    sidecar_felder = felder_von.get(
+                        metadaten.schluessel(db.text_pfad(nach_name[s]["quellpfad"]))
+                    )
+                    if sidecar_felder and not sidecar_felder.get("Error"):
                         break
+                    sidecar_felder = None
             if sidecar_felder and not kamera.rohmodell(felder):
                 # Sony-Sidecar kennt das Modell, die Videodatei nicht.
                 felder = dict(felder, Model=sidecar_felder.get("NonRealTimeMetaDeviceModelName", ""))
@@ -155,24 +187,36 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
             )
             if ort.mehrdeutig:
                 ergebnis.mehrdeutig += 1
-                dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1,
-                               "mehrere passende Ordner mit Zusatz, alphabetisch erster gewaehlt")
+                if ort.ordner not in ergebnis.mehrdeutig_gemeldet:
+                    ergebnis.mehrdeutig_gemeldet.add(ort.ordner)
+                    dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1,
+                                   "mehrere passende Ordner mit Zusatz, alphabetisch erster gewaehlt")
             if ort.wiederverwendet:
                 ergebnis.wiederverwendet += 1
             zielordner = ort.ordner
-        else:
-            # Hauptdatei schon analysiert: Mitglieder erben ihre Werte.
+        elif haupt["zielpfad"]:
+            # Hauptdatei schon analysiert: neue Mitglieder erben ihre Werte.
             werte = dict(
                 kamera=haupt["kamera"], kamera_modell=haupt["kamera_modell"],
                 aufnahme_zeit=haupt["aufnahme_zeit"], datum_quelle=haupt["datum_quelle"] or 0,
                 datum_sicher=haupt["datum_sicher"] or 0, datum_hinweis=haupt["datum_hinweis"],
             )
-            zielordner = Path(db.text_pfad(haupt["zielpfad"])).parent if haupt["zielpfad"] else None
+            zielordner = Path(db.text_pfad(haupt["zielpfad"])).parent
+        else:
+            # Hauptdatei hat keinen Zielpfad (Status fehler): Ein neues
+            # Mitglied darf nicht "analysiert" ohne Ziel werden.
+            grund = f"{GRUND_HAUPTDATEI}: {haupt['fehlergrund'] or haupt['status']}"
+            _gruppe_fehler(g, nach_name, dbank, grund, ergebnis, anzeige)
+            continue
 
         ergebnis.gruppen += 1
+        offen = 0
         for n in g.alle:
             z = nach_name[n]
-            if not _leer(z):
+            # Wird die Hauptdatei neu analysiert, ziehen bereits analysierte,
+            # noch nicht kopierte Mitglieder mit (SPEC §3: wandern gemeinsam).
+            mitziehen = haupt_neu and z["status"] == "analysiert"
+            if not (_leer(z) or mitziehen):
                 continue
             dbank.analyse_setzen(
                 z["quellpfad"], gruppe=haupt["quellpfad"],
@@ -180,7 +224,17 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
                 **werte,
             )
             ergebnis.bearbeitet += 1
-        anzeige.weiter(sum(1 for n in g.alle if _leer(nach_name[n])))
+            if _leer(z):
+                offen += 1
+        anzeige.weiter(offen)
+
+
+def _fehler_setzen(dbank, quellpfad, grund: str, gruppe) -> None:
+    dbank.analyse_setzen(
+        quellpfad, kamera="", kamera_modell="", aufnahme_zeit="", datum_quelle=0,
+        datum_sicher=0, datum_hinweis="", gruppe=gruppe, zielpfad="",
+        status="fehler", fehlergrund=grund,
+    )
 
 
 def _gruppe_fehler(g, nach_name, dbank, grund, ergebnis, anzeige) -> None:

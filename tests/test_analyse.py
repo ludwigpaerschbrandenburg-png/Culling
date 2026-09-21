@@ -299,3 +299,155 @@ def test_cli_analyse_ohne_exiftool_bricht_hart_ab(capsys, quelle, ziel, monkeypa
     rueckgabe, ausgabe = _laufen(capsys, "analyse", "--ziel", ziel)
     assert rueckgabe == cli.FEHLER
     assert "ExifTool" in ausgabe
+
+
+# ------------------------------------------ Befunde der Abnahme (Phase 2) --
+
+
+def test_zeilenumbruch_im_dateinamen_wird_nie_an_exiftool_gegeben(vorbereitet, ziel, konf, quelle, baum):
+    """Ein Name mit Zeilenumbruch koennte ExifTool Schreibbefehle unterschieben."""
+    dbank, lauf, _ = vorbereitet
+    boese = quelle / "2026" / "harmlos\n-Model=GEAENDERT\n-overwrite_original\nrest.jpg"
+    boese.write_bytes(testbaum._JPEG)
+    nachbarn = {p: p.read_bytes() for p in (quelle / "2026").iterdir() if p.is_file()}
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    e = _analyse(dbank, lauf, ziel, konf)
+    assert {p: p.read_bytes() for p in nachbarn} == nachbarn  # nichts angefasst
+    assert not list((quelle / "2026").glob("*_original"))
+    z = _zeile(dbank, boese)
+    assert z["status"] == "fehler" and "Zeilenumbruch" in z["fehlergrund"]
+    assert dbank.zaehler_je_status().get("gefunden", 0) == 0
+    assert e.fehler == 1
+
+
+def test_emoji_im_dateinamen_wird_analysiert(vorbereitet, ziel, konf, quelle):
+    dbank, lauf, _ = vorbereitet
+    for name in ("😀.jpg", "𝕏.jpg", "b😀.jpg"):
+        (quelle / "2026" / name).write_bytes(testbaum._JPEG)
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    assert dbank.zaehler_je_status().get("gefunden", 0) == 0
+    for name in ("😀.jpg", "𝕏.jpg", "b😀.jpg"):
+        assert _zeile(dbank, quelle / "2026" / name)["status"] == "analysiert"
+
+
+def test_nicht_utf8_dateiname_bekommt_sichtbaren_fehler(vorbereitet, ziel, konf, quelle):
+    import os
+
+    dbank, lauf, _ = vorbereitet
+    roh = os.path.join(os.fsencode(quelle / "2026"), b"latin1_\xe9.jpg")
+    with open(roh, "wb") as f:
+        f.write(testbaum._JPEG)
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    e = _analyse(dbank, lauf, ziel, konf)
+    assert dbank.zaehler_je_status().get("gefunden", 0) == 0
+    fehler = dbank.verbindung.execute(
+        "SELECT fehlergrund FROM dateien WHERE status = 'fehler'"
+    ).fetchall()
+    assert any("UTF-8" in z[0] for z in fehler) and e.fehler == 1
+
+
+def test_ordner_mit_unterordnern_liest_jede_datei_genau_einmal(ziel, archiv_basis, konf, tmp_path, monkeypatch):
+    from fotosort import metadaten
+
+    quelle = tmp_path / "q"
+    (quelle / "o" / "b").mkdir(parents=True)
+    (quelle / "o" / "m").mkdir()
+    for rel in ("o/a.jpg", "o/b/x.jpg", "o/k.jpg", "o/m/y.jpg", "o/z.jpg"):
+        (quelle / rel).write_bytes(testbaum._JPEG)
+    gesehen: list[str] = []
+    original = metadaten.ExifToolPool.einreichen
+
+    def zaehlen(self, pfade_typ):
+        gesehen.extend(p for p, _ in pfade_typ)
+        return original(self, pfade_typ)
+
+    monkeypatch.setattr(metadaten.ExifToolPool, "einreichen", zaehlen)
+    dbank = db.Datenbank.oeffnen(archiv_basis / "u")
+    try:
+        lauf = dbank.lauf_beginnen("test")
+        scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+        e = _analyse(dbank, lauf, ziel, konf)
+    finally:
+        dbank.schliessen()
+    assert sorted(gesehen) == sorted(str(quelle / r) for r in ("o/a.jpg", "o/b/x.jpg", "o/k.jpg", "o/m/y.jpg", "o/z.jpg"))
+    assert e.bearbeitet == 5 and e.gruppen == 5
+
+
+def test_geaenderte_hauptdatei_zieht_die_gruppe_mit(vorbereitet, ziel, konf, quelle, baum):
+    """SPEC §3: Mitglieder wandern gemeinsam - auch nach einer Korrektur der RAW."""
+    dbank, lauf, _ = vorbereitet
+    _analyse(dbank, lauf, ziel, konf)
+    testbaum._exiftool([["-overwrite_original", "-EXIF:DateTimeOriginal=2025:07:07 07:07:07", str(baum["raw"])]])
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)  # RAW faellt auf gefunden zurueck
+    assert _zeile(dbank, baum["raw"])["status"] == "gefunden"
+    assert _zeile(dbank, baum["jpg"])["status"] == "analysiert"
+    _analyse(dbank, lauf, ziel, konf)
+    for schluessel in ("raw", "jpg", "sidecar_form1", "sidecar_form2"):
+        z = _zeile(dbank, baum[schluessel])
+        assert z["aufnahme_zeit"] == "2025-07-07T07:07:07", schluessel
+        assert "/2025-07-07/" in z["zielpfad"].replace("\\", "/"), schluessel
+
+
+def test_sidecar_zu_hauptdatei_mit_fehler_wird_nicht_analysiert_ohne_ziel(vorbereitet, ziel, konf, quelle):
+    dbank, lauf, _ = vorbereitet
+    weg = quelle / "2026" / "weg.jpg"
+    weg.write_bytes(b"x")
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    weg.unlink()
+    _analyse(dbank, lauf, ziel, konf)
+    assert _zeile(dbank, weg)["status"] == "fehler"
+    sidecar = quelle / "2026" / "weg.xmp"
+    sidecar.write_text("<x/>", encoding="utf-8")
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    z = _zeile(dbank, sidecar)
+    assert z["status"] == "fehler" and z["fehlergrund"].startswith("Hauptdatei")
+    assert z["zielpfad"] == ""
+
+
+def test_leere_datei_bekommt_fehler_mit_exiftool_grund(vorbereitet, ziel, konf, quelle):
+    dbank, lauf, _ = vorbereitet
+    leer = quelle / "2026" / "leer.jpg"
+    leer.write_bytes(b"")
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    e = _analyse(dbank, lauf, ziel, konf)
+    z = _zeile(dbank, leer)
+    assert z["status"] == "fehler" and "Metadaten nicht lesbar" in z["fehlergrund"]
+    assert "empty" in z["fehlergrund"].lower() or "leer" in z["fehlergrund"].lower()
+    assert e.fehler == 1
+
+
+def test_ungueltige_zeitzone_bricht_verstaendlich_ab(vorbereitet, ziel, konf):
+    from fotosort import FotosortFehler
+
+    dbank, lauf, _ = vorbereitet
+    konf.alle()["datum"]["heimat_zeitzone"] = "Europa/Berlin"
+    with pytest.raises(FotosortFehler) as fehler:
+        _analyse(dbank, lauf, ziel, konf)
+    assert "Europa/Berlin" in str(fehler.value)
+    assert dbank.zaehler_je_status().get("analysiert", 0) == 0
+
+
+def test_zusammenfassung_zaehlt_namenskonflikte(vorbereitet, ziel, konf):
+    dbank, lauf, _ = vorbereitet
+    _analyse(dbank, lauf, ziel, konf)
+    z = dbank.analyse_zusammenfassung()
+    assert z["namenskonflikte"] >= 1  # 2026/DSC01234.JPG und Namenskonflikt/DSC01234.JPG
+
+
+def test_cli_analyse_mit_exiftool_pfad_nur_in_config(capsys, quelle, ziel, monkeypatch, archiv_basis):
+    """SPEC §2: der Konfigurationswert exiftool_pfad muss fuer analyse wirken."""
+    import shutil
+
+    programm = shutil.which("exiftool")
+    _laufen(capsys, "scan", "--quelle", quelle, "--ziel", ziel)
+    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
+    konf_pfad = archiv_basis / kennung / "config.toml"
+    text = konf_pfad.read_text(encoding="utf-8")
+    text = text.replace('exiftool_pfad = ""', f'exiftool_pfad = "{programm}"')
+    konf_pfad.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("PATH", str(ziel))  # kein exiftool mehr ueber PATH
+    monkeypatch.delenv("FOTOSORT_EXIFTOOL", raising=False)
+    rueckgabe, ausgabe = _laufen(capsys, "analyse", "--ziel", ziel)
+    assert rueckgabe == cli.OK, ausgabe

@@ -222,3 +222,37 @@ def test_tagesdatum(zeit, grenze, uhrzeit_bekannt, erwartet):
 def test_tagesgrenze_gilt_auch_fuer_umgerechnete_videos(konf):
     d = bestimmen({"CreateDate": "2026:01:01 23:30:00"}, typ=VIDEO, konf=konf)  # -> 02.01. 00:30
     assert datum.tagesdatum(d.zeit, "04:00", d.uhrzeit_bekannt) == date(2026, 1, 1)
+
+
+# --------------------------------------------- Befunde der Abnahme -----
+
+
+def test_z_bedeutet_utc_und_wird_umgerechnet(konf):
+    d = bestimmen({"CreationDate": "2026:01:01 23:30:00Z"}, typ=VIDEO, konf=konf)
+    assert d.zeit == datetime(2026, 1, 2, 0, 30)
+    assert d.quelle == 3 and d.hinweis == datum.HINWEIS_ZEITZONE
+    d = bestimmen({"CreateDate": "2026:01:01 23:30:00Z"}, typ=VIDEO, konf=konf)
+    assert d.zeit == datetime(2026, 1, 2, 0, 30) and d.quelle == 3
+
+
+def test_plus_null_offset_ist_ortszeit_nicht_utc(konf):
+    d = bestimmen({"CreationDate": "2026:01:01 23:30:00+00:00"}, typ=VIDEO, konf=konf)
+    assert d.zeit == datetime(2026, 1, 1, 23, 30) and d.quelle == 2
+
+
+def test_metadaten_datum_ohne_uhrzeit_ohne_tagesgrenze(konf):
+    d = bestimmen({"DateTimeOriginal": "2026:01:01"}, konf=konf)
+    assert d.zeit == datetime(2026, 1, 1) and d.quelle == 1
+    assert d.uhrzeit_bekannt is False
+    assert datum.tagesdatum(d.zeit, "04:00", d.uhrzeit_bekannt) == date(2026, 1, 1)
+
+
+def test_uhrzeit_bekannt_folgt_dem_dateinamen_hinweis():
+    assert datum.Datum(datetime(2026, 1, 1), 5, True, datum.HINWEIS_OHNE_UHRZEIT).uhrzeit_bekannt is False
+    assert datum.Datum(datetime(2026, 1, 1, 8), 5, True, "").uhrzeit_bekannt is True
+
+
+def test_ungueltige_zeitzone_wirft(konf):
+    konf.alle()["datum"]["heimat_zeitzone"] = "Europa/Berlin"
+    with pytest.raises(datum.ZeitzoneUngueltig):
+        bestimmen({"CreateDate": "2026:01:01 23:30:00"}, typ=VIDEO, konf=konf)
