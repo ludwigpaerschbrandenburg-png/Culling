@@ -63,7 +63,10 @@ Oberste Regel: **Es darf niemals ein Bild verloren gehen.** Geschwindigkeit ist 
 Reihenfolge der Quellen, die erste gültige gewinnt:
 
 1. `DateTimeOriginal`
-2. Video-Felder **mit** Zeitzonen-Offset (z. B. QuickTime `CreationDate`, Sony-XML-Sidecar). Sie geben die Ortszeit der Aufnahme direkt an und werden bevorzugt.
+2. Video-Felder **mit** Zeitzonen-Offset. Sie geben die Ortszeit der Aufnahme direkt an und werden bevorzugt, in dieser Reihenfolge:
+   1. ein Feld mit Offset **aus der Videodatei selbst** — QuickTime `CreationDate` (Apple, viele Kameras) oder die in Sony-MP4-Dateien eingebetteten Sony-XML-Metadaten (ExifTool-Feld `CreationDateValue`, Sony A7C, A7C II und andere);
+   2. der **Sony-XML-Sidecar** `C0001M01.XML` (Feld `CreationDate` mit Offset, dritte Sidecar-Form, siehe „Zusammengehörige Dateien"); er wird für die Videodatei gelesen, zu der er gehört.
+   Für Videos wird ExifTool ohne `-fast2` aufgerufen, falls diese Felder damit nicht mehr geliefert werden (Sony legt seine XML-Metadaten am Ende der Datei ab; das wird beim Bau geprüft und im Code festgehalten).
 3. **Nur bei Video-Dateitypen:** `CreateDate` / `MediaCreateDate` ohne Zeitzonen-Offset – der Wert wird als UTC behandelt und in die eingestellte **Heimat-Zeitzone** umgerechnet (Standard `Europe/Berlin`). Diese Dateien werden im Bericht als „Zeitzone angenommen" gekennzeichnet.
 4. **Nur bei Fotos:** `CreateDate` / `DateTimeDigitized` – der Wert wird als Kamera-Ortszeit gelesen, **nie als UTC**. Es wird nicht umgerechnet, und es wird nichts als „Zeitzone angenommen" gekennzeichnet. Die UTC-Annahme aus Quelle 3 gilt ausschließlich für Videos.
 5. Datum im Dateinamen (Muster wie `IMG_20260101_…`, `2026-01-01 …`, `PXL_20260101…`)
@@ -115,7 +118,11 @@ Diese vier Gruppen sind die **echten Dateitypen**. `sonstiges` gehört nicht daz
 
 Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet das Programm auf den Nutzer.
 
-1. **Scan** – Quelle rekursiv durchlaufen (`os.scandir`), Dateien zählen, Gesamtgröße ermitteln. Ergebnis sofort anzeigen: Anzahl Dateien, Größe, Aufteilung nach Typ.
+1. **Scan** – jede Quelle rekursiv durchlaufen (`os.scandir`), Dateien zählen, Gesamtgröße ermitteln. Ergebnis sofort anzeigen: Anzahl Dateien, Größe, Aufteilung nach Typ — **je Quelle und gesamt**.
+   **Ein Archiv hat eine Liste von Quellen**, nicht eine einzige (Tabelle `quellen`, §6; Bedienung in §8). Alle gehen in dasselbe Ziel. Jede Datei merkt sich ihre Quelle (`quellwurzel`).
+   **Überschneidungen werden abgefangen**, je Quelle und auf aufgelösten Pfaden, bevor sie durchlaufen wird: Ist eine neue Quelle gleich einer bekannten, wird sie nicht doppelt aufgenommen. Liegt sie **innerhalb** einer bekannten Quelle oder **enthält** sie eine bekannte, wird sie mit Meldung **abgelehnt** (Ereignis `quelle_abgelehnt`) und die übrigen Quellen laufen weiter — sonst würde dieselbe Datei zweimal erfasst. Gegen das Ziel gelten die Regeln unten je Quelle.
+   **Nicht erreichbare Quelle:** Ist eine bekannte Quelle beim Scan kein Ordner (Platte nicht eingesteckt, Netzlaufwerk nicht eingebunden), wird sie als `quelle_nicht_erreichbar` gemeldet und in `quellen` mit `erreichbar` = 0 vermerkt; der Rest läuft weiter. **Ihre Dateien gelten dabei nicht als „Quelle nicht mehr vorhanden"** — die Auswertung aus §6 läuft nur für Quellen, die in diesem Lauf tatsächlich durchlaufen wurden. Sonst ließe eine abgezogene Platte alle ihre Bilder als verschwunden erscheinen.
+   **Parallel je physischem Laufwerk:** Quellen werden nach der Laufwerkskennung gruppiert (`quellen.laufwerk`). Gruppen laufen parallel, innerhalb einer Gruppe nacheinander — zwei gleichzeitige Durchläufe auf derselben Platte machen sie nur langsamer. Kennung: unter Linux die Gerätenummer (`st_dev`) der Wurzel; unter Windows der Laufwerksbuchstabe, bei Netzpfaden der **Server** (`\\server`), nicht die Freigabe, weil mehrere Freigaben meist auf denselben Platten liegen. Dass zwei Laufwerksbuchstaben auf derselben physischen Platte liegen können, wird hier nicht erkannt (vermerkt für Phase 6). Der Zugriff auf die Datenbank bleibt einsträngig: Die parallelen Durchläufe sammeln nur, verbucht wird an einer Stelle.
    **Vor dem Durchlauf wird die Lage von Quelle und Ziel geprüft.** Beide Pfade werden mit `Path.resolve()` aufgelöst, Verknüpfungen also mit aufgelöst. Danach gilt genau das:
    - Quelle gleich Ziel → **Abbruch** mit Meldung.
    - Ziel liegt innerhalb der Quelle → der Zielordner wird **vom Scan ausgeschlossen**, mit Meldung. Der Lauf geht weiter.
@@ -215,26 +222,36 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
 
 ### Was ein Lauf ist
 
-- **Ein Lauf ist ein Programmstart.** Jeder Start legt in der Tabelle `laeufe` eine Zeile an; beim Beenden wird dort das Ende eingetragen. Ein neuer Start ist ein neuer Lauf, auch wenn er nur dieselbe Phase fortsetzt. Ein Lauf endet mit dem Programm, auch bei Absturz oder Abbruch (die Zeile behält dann ein leeres Ende).
+- **Ein Lauf ist ein Programmstart eines verändernden Befehls.** `scan`, `analyse`, `kopieren`, `pruefen`, `aufraeumen`, `ziel-index`, `wiederherstellen` und `start` legen beim Start in der Tabelle `laeufe` eine Zeile an; beim Beenden wird dort das Ende eingetragen. `status`, `config` und `bericht` lesen nur und legen **keinen** Lauf an — sonst würde `status` sich selbst als „letzten Lauf" nennen. Ein neuer Start ist ein neuer Lauf, auch wenn er nur dieselbe Phase fortsetzt. Ein Lauf endet mit dem Programm, auch bei Absturz oder Abbruch (die Zeile behält dann ein leeres Ende; ein geordneter Abbruch mit Strg+C trägt das Ende ein und vermerkt das Ereignis `abgebrochen`).
 - Die Spalte `bestaetigt_in_lauf` einer Datei speichert die **Nummer des Laufs**, in dem Quelldatei und Zieldatei zuletzt frisch gelesen und ihre Hashes verglichen wurden.
 - Die Regel gilt für `geprueft` und `duplikat_bestaetigt` **gleichermaßen**: Steht in `bestaetigt_in_lauf` nicht die Nummer des laufenden Laufs, wird vor dem Löschen erneut frisch gelesen und verglichen — Quelle **und** Ziel (§4 Phase 5, §5). Lässt sich dabei nicht beides bestätigen, wird nicht gelöscht.
 
 ### Tabellen und Spalten
 
-Vier Tabellen: `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`.
+Fünf Tabellen: `quellen`, `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`. Die Datenbank trägt eine Schema-Version (`PRAGMA user_version`); eine Datei mit älterer Version wird mit verständlicher Meldung abgelehnt, nicht stillschweigend weiterbenutzt.
+
+**`quellen`** — eine Zeile je Quellwurzel eines Archivs (§4 Phase 1, §8):
+
+- `wurzel` — aufgelöster Pfad des Quell-Wurzelordners; eindeutig.
+- `hinzugefuegt_in_lauf` — Lauf, in dem die Quelle aufgenommen wurde.
+- `zuletzt_gescannt_in_lauf` — Lauf, in dem sie zuletzt durchlaufen wurde.
+- `erreichbar` — 0 oder 1, Stand des letzten Scans. Eine nicht erreichbare Quelle (Platte nicht eingesteckt, Netz nicht eingebunden) bleibt bekannt.
+- `laufwerk` — Kennung des physischen Laufwerks, nach der Quellen beim Scan gruppiert werden (§4 Phase 1).
 
 **`dateien`** — eine Zeile je Quelldatei; der Quellpfad ist eindeutig (Schlüssel):
 
 - `quellpfad` — absoluter, aufgelöster Pfad der Quelldatei; eindeutig.
-- `quellwurzel` — der beim Scan angegebene Quell-Wurzelordner, zu dem diese Datei gehört. Daraus ergibt sich der relative Pfad für die Ausschlussmuster (§9). So muss `--quelle` nur beim Scan angegeben werden (§8).
+- `quellwurzel` — die Quelle aus der Tabelle `quellen`, zu der diese Datei gehört. Daraus ergibt sich der relative Pfad für die Ausschlussmuster (§9), und danach werden Zusammenfassung und Bericht je Quelle aufgeteilt (§10).
 - `groesse` — Größe der Quelldatei in Byte beim letzten Scan.
 - `mtime` — Änderungsdatum der Quelldatei beim letzten Scan; zusammen mit `groesse` die Grundlage der Änderungserkennung („Zweiter Scan").
 - `dateityp` — `foto`, `raw`, `video`, `sidecar` oder `sonstiges` (§3). Nur die ersten vier gelten als echter Dateityp; `sonstiges` steht für jede Datei außerhalb der Typenlisten und geht mit Status `uebersprungen` einher.
 - `hash` — BLAKE3 der Quelldatei, beim Kopieren mitberechnet (§7) oder beim Prüfen eines Duplikat-Verdachts eigens ermittelt; leer, solange die Datei noch nicht gelesen wurde.
 - `kamera` — Ordnername der Kamera nach Anwendung der Alias-Tabelle (§3).
+- `kamera_modell` — der rohe Modellname aus den Metadaten (`Model`, ersatzweise `Make Model`), bevor die Alias-Tabelle griff. Daraus entsteht die Liste „gefundene Kameramodelle mit Anzahl" (§4 Phase 2), mit der der Nutzer fehlende Aliase nachträgt.
 - `aufnahme_zeit` — Aufnahmezeitpunkt als Ortszeit, aus dem die Ordner gebildet werden.
 - `datum_quelle` — welche der sechs Datumsquellen aus §3 gewonnen hat (1 bis 6). Daraus ergibt sich auch die Kennzeichnung „Zeitzone angenommen" für den Bericht: genau dann, wenn `datum_quelle` = 3.
 - `datum_sicher` — 0 oder 1; unsicher (0) ist ausschließlich das Datum aus Quelle 6 (§3).
+- `datum_hinweis` — leer, `zeitzone_angenommen` (Quelle 3, §3) oder `dateiname_ohne_uhrzeit` (Quelle 5 ohne Uhrzeit, Tagesgrenze nicht angewendet, §3). Daraus kommen die beiden Zählungen in §10 auch nach einem Neustart aus der Datenbank.
 - `gruppe` — Kennung der zusammengehörigen Dateien (RAW + JPG + Sidecars, §3). Alle Dateien einer Gruppe bekommen denselben Zielordner und denselben Namensanhang.
 - `zielpfad` — berechneter oder tatsächlicher Zielpfad, einschließlich des Anhangs `_1`, `_2` … bei Namenskonflikten; leer, solange nicht berechnet.
 - `status` — einer der oben genannten Statuswerte.
@@ -263,7 +280,7 @@ Die Metadaten stehen in **eigenen Spalten** (`kamera`, `aufnahme_zeit`, `datum_q
 **`lauf_ereignisse`** — eine Zeile je Ereignis, das zu **keiner** Datei in `dateien` gehört und trotzdem in den Bericht muss:
 
 - `lauf_nummer` — zu welchem Lauf das Ereignis gehört.
-- `art` — Kurzkennung, z. B. `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen).
+- `art` — Kurzkennung. Bisher vergeben: `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `ordner_nicht_lesbar`, `quelle_veraendert` (§6 zweiter Scan), `quelle_nicht_erreichbar` (§4 Phase 1), `quelle_abgelehnt` (Überschneidung, §4 Phase 1), `abgebrochen` (geordneter Abbruch), `zielordner_mehrdeutig` (§3), `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen). Neue Arten werden hier ergänzt.
 - `pfad` — betroffener Pfad, falls es einen gibt; sonst leer.
 - `anzahl` — für reine Zähler; sonst 1.
 - `text` — Klartext für den Bericht; sonst leer.
@@ -287,7 +304,7 @@ Der Scan ist fortsetzbar. Für jeden gefundenen Quellpfad gilt:
   - Windows: `%LOCALAPPDATA%\fotosortierer\<archiv-id>\`
   - Linux: `${XDG_DATA_HOME:-~/.local/share}/fotosortierer/<archiv-id>/`
   - Docker: derselbe Pfad wie unter Linux. Er wird im Container als Volume eingebunden, damit die Datenbank einen Neustart des Containers übersteht.
-- Darin liegen die Datenbank `fotosort.db` und die Konfiguration `config.toml` (siehe unten). Im laufenden Betrieb kommen die Hilfsdateien `fotosort.db-wal` und `fotosort.db-shm` dazu, die SQLite selbst anlegt und verwaltet; der Ordner enthält also nicht immer genau zwei Dateien.
+- Darin liegen die Datenbank `fotosort.db` und die Konfiguration `config.toml` (siehe unten). Im laufenden Betrieb kommen die Hilfsdateien `fotosort.db-wal` und `fotosort.db-shm` dazu, die SQLite selbst anlegt und verwaltet, sowie die Sperrdatei `fotosort.sperre`: Sie verhindert, dass zwei gleichzeitige Läufe einander die Datenbank wegsperren und beide scheitern. Die Sperre hält das Betriebssystem; stürzt das Programm ab, gibt es sie von selbst frei — eine liegengebliebene Datei blockiert nichts.
 - Der Ort ist überschreibbar: über die Umgebungsvariable `FOTOSORT_DATENBANK` und über den Konfigurationswert `datenbank_ort` (§9). **Vorrang:** Umgebungsvariable, dann Konfigurationswert, zuletzt der Standardpfad des Betriebssystems.
 - Der Konfigurationswert `datenbank_ort` wirkt nur aus einer mit `--config <pfad>` angegebenen Datei. Steht er in der `config.toml` im Archiv-Ordner selbst, ist der Ordner bereits gefunden; der Wert wird dann gemeldet und ignoriert. Anders ginge es nicht: Die Konfiguration liegt im Archiv-Ordner, sie kann ihn nicht selbst verschieben.
 - **Als Netz gelten diese Dateisystemtypen** (Linux, Typ des Einhängepunkts): `cifs`, `smb3`, `nfs`, `nfs4`, `fuse.sshfs`, `9p`, `virtiofs`. Unter Windows: UNC-Pfade sowie Laufwerksbuchstaben, für die `GetDriveType` `DRIVE_REMOTE` liefert (auch für verbundene Laufwerksbuchstaben aufgelöst). `9p` und `virtiofs` gehören dazu, weil Docker Desktop und WSL2 Windows-Pfade so einbinden; die Dateisperren sind dort ebenso unzuverlässig wie über SMB. Dieselbe Liste gilt für die Prüfung „gleiches Laufwerk" (§4 Phase 3).
@@ -345,20 +362,23 @@ Ehrliche Einordnung: Der Prozessor ist selten der Engpass, meistens ist es die F
 
 **Jeder Befehl braucht `--ziel`.** Einzige Ausnahme ist `--help`. Über das Ziel findet das Programm die Archiv-ID und darüber die lokale Datenbank (§6). Ersatzweise darf das Ziel in der Umgebungsvariablen `FOTOSORT_ZIEL` stehen; die Angabe auf der Kommandozeile hat Vorrang. Fehlt beides, bricht der Befehl mit einer verständlichen Meldung ab.
 
-**Nur `scan` braucht zusätzlich `--quelle`.** Die Quelle wird in der Datenbank gespeichert (Spalte `quellwurzel`, §6) und muss bei den folgenden Befehlen nicht wiederholt werden. `start` geht die Phasen ab dem Scan durch und braucht deshalb ebenfalls `--quelle`.
+**Nur `scan` nimmt `--quelle` entgegen, und zwar mehrfach:** `fotosort scan --quelle A --quelle B`. Jede genannte Quelle wird in die Tabelle `quellen` (§6) aufgenommen, wenn sie neu ist, und durchlaufen. **`scan` mit `--quelle` durchläuft nur die genannten Quellen** — so lässt sich eine Quelle später ergänzen, ohne dass die bereits erfassten neu gescannt werden. **`scan` ohne `--quelle` durchläuft alle bekannten Quellen.** Beim allerersten Scan eines Archivs ist `--quelle` Pflicht. Die folgenden Befehle brauchen keine Quelle mehr; `start` geht die Phasen ab dem Scan durch und nimmt `--quelle` wie `scan`.
 
-**Ein Archiv darf mehrere Quellwurzeln haben.** Ein zweiter `scan` mit einer anderen `--quelle` nimmt diese Wurzel dazu, er ersetzt die erste nicht. Das ist der Normalfall: Das Chaos liegt selten in einem einzigen Ordner. Zwei Folgen davon sind festzuhalten: Die Ausschlussmuster (§9) werden je Datei gegen den Pfad relativ zu **ihrer** `quellwurzel` geprüft, nicht gegen eine globale Wurzel. Und „Quelle nicht mehr vorhanden" (§6) wird nach einem Scan nur für die Zeilen ausgewertet, deren `quellwurzel` die gerade gescannte Wurzel ist — sonst gälten nach jedem Scan alle Dateien der anderen Wurzeln als verschwunden.
+`--ziel-anlegen` legt einen noch nicht vorhandenen Zielordner wirklich an. Ohne den Schalter bricht `scan` bei fehlendem Ziel ab: Ein Tippfehler im Pfad oder ein gerade nicht eingebundenes Netzlaufwerk ergäbe sonst ein zweites, leeres Archiv mit neuer Archiv-ID, und das echte Archiv gälte danach als unbekannt (§6).
+
+**Ein Archiv hat mehrere Quellen** (§4 Phase 1). Das ist der Normalfall: Das Chaos liegt selten in einem einzigen Ordner, sondern auf verschiedenen Platten, in verschiedenen Ordnern und auf Netzlaufwerken. Zwei Folgen davon sind festzuhalten: Die Ausschlussmuster (§9) werden je Datei gegen den Pfad relativ zu **ihrer** `quellwurzel` geprüft, nicht gegen eine globale Wurzel. Und „Quelle nicht mehr vorhanden" (§6) wird nach einem Scan nur für die Zeilen ausgewertet, deren `quellwurzel` die gerade gescannte Wurzel ist — sonst gälten nach jedem Scan alle Dateien der anderen Wurzeln als verschwunden.
 
 Zusätzlich gibt es bei jedem Befehl den Schalter `--config <pfad>` für eine andere Konfigurationsdatei (§6).
 
 Kommandozeile (Beispiel, `<Ziel>` steht für `\\truenas\Daten\Lightroom\Medien`):
 
 ```
-fotosort scan               --quelle D:\Chaos --ziel <Ziel>
+fotosort scan               --quelle D:\Chaos --quelle E:\Karte --ziel <Ziel> [--ziel-anlegen]
+fotosort scan               --ziel <Ziel>                       (alle bekannten Quellen)
 fotosort analyse            --ziel <Ziel>
 fotosort kopieren           --ziel <Ziel> [--verschieben] [--dry-run]
 fotosort pruefen            --ziel <Ziel>
-fotosort aufraeumen         --ziel <Ziel> [--leere-ordner] [--dry-run]
+fotosort aufraeumen         --ziel <Ziel> [--quelle A] [--leere-ordner] [--dry-run]
 fotosort status             --ziel <Ziel>
 fotosort bericht            --ziel <Ziel>
 fotosort ziel-index --neu-aufbauen --ziel <Ziel>
@@ -378,6 +398,10 @@ Findet ein anderer Befehl im Ziel eine Archiv-ID, aber keine zugehörige lokale 
 `fotosort status` zeigt die Anzahl der Dateien je Status und die **aktuelle Phase**. Als aktuelle Phase gilt die Phase, die zu dem **niedrigsten Status gehört, in dem noch Dateien stehen** — nach der Reihenfolge `gefunden → analysiert → kopieren_laeuft → kopiert → geprueft → quelle_geloescht`. Stehen also noch Zeilen auf `gefunden`, ist die Analyse offen; steht die niedrigste Zeile auf `analysiert`, ist das Kopieren offen, und so weiter. Die Status `duplikat`, `duplikat_bestaetigt`, `verschoben`, `uebersprungen` und `fehler` zählen dabei nicht mit: Sie sind Abzweigungen, keine Stufen. Dazu wird der letzte Lauf aus der Tabelle `laeufe` genannt (Nummer, Befehl, Start, und ob er beendet wurde). Es braucht dafür keine eigene Spalte — die Phase ergibt sich aus den Zählern.
 
 Dazu ein geführter Modus `fotosort start`, der die Phasen nacheinander durchgeht und zwischen den Schritten fragt.
+
+**Aufräumen je Quelle** (Phase 5): `aufraeumen` und `aufraeumen --leere-ordner` wirken mit `--quelle A` nur auf diese Quelle; ohne Angabe wird je Quelle einzeln gefragt. Jeder Quell-Wurzelordner selbst bleibt stehen.
+
+**Bedienung wie eine normale App** (Vormerk für Phase 7, jetzt nicht gebaut): Unter Windows startet das Programm per Doppelklick und zeigt die Oberfläche in einem **eigenen Fenster** (z. B. `pywebview`), nicht nur als Browser-Tab; Quelle und Ziel werden über den **normalen Windows-Ordnerdialog** gewählt. Auf dem Server läuft **dieselbe Oberfläche im Browser**, mit einem einfachen Ordner-Browser statt des Systemdialogs. Die Regeln unten gelten für beide.
 
 **Weboberfläche** (spätere Phase, lokal im Browser, später im Container auf dem Server):
 
@@ -438,7 +462,7 @@ Die folgende Liste ist **vollständig** und ist zugleich die Vorlage, aus der di
 
 ### `[quelle]`
 
-- `ausschlussmuster` — Glob-Muster für Pfade in der Quelle, die der Scan überspringt (§4 Phase 1). Verglichen wird gegen den Pfad **relativ zur Quellwurzel**, mit Schrägstrich `/` als Trenner, **Groß- und Kleinschreibung wird ignoriert**; Beispiel: `"*/Papierkorb/*"`. Geprüft werden Datei- und Ordnerpfade; trifft ein Muster auf einen Ordner zu, wird er samt Inhalt übersprungen. Ausgeschlossene Pfade kommen nicht in die Datenbank und werden im Bericht gezählt. Standard: `[]` (leere Liste)
+- `ausschlussmuster` — Glob-Muster für Pfade in der Quelle, die der Scan überspringt (§4 Phase 1). Verglichen wird gegen den Pfad **relativ zur Quellwurzel**, mit Schrägstrich `/` als Trenner, **Groß- und Kleinschreibung wird ignoriert**; Beispiel: `"*/Papierkorb/*"` — ein mit `*/` beginnendes Muster wird zusätzlich ohne diesen Anfang geprüft, damit es auch einen Papierkorb-Ordner direkt in der Quellwurzel trifft (dort lautet der relative Pfad schlicht `Papierkorb/…`). Geprüft werden Datei- und Ordnerpfade; trifft ein Muster auf einen Ordner zu, wird er samt Inhalt übersprungen. Ausgeschlossene Pfade kommen nicht in die Datenbank und werden im Bericht gezählt. Standard: `[]` (leere Liste)
 - `verknuepfungen_folgen` — ob der Scan Ordner-Verknüpfungen (Symlinks, Junctions) verfolgt (§4 Phase 1). Standard: `false`
 
 ### `[sicherheit]`
@@ -465,7 +489,7 @@ Alle Angaben mit `0` für „automatisch" werden beim Start als tatsächlich ben
 
 ## 10. Bericht
 
-Nach jedem Lauf ein Bericht als Textdatei und CSV im Ordner `.fotosortierer/berichte/`: Anzahl gefunden / kopiert / verschoben / geprüft / Duplikate / ohne Datum / Fehler, Dauer und Durchsatz je Phase, Liste aller Fehler mit Grund, Liste aller Umbenennungen wegen Namenskonflikt.
+Nach jedem Lauf ein Bericht als Textdatei und CSV im Ordner `.fotosortierer/berichte/`: Anzahl gefunden / kopiert / verschoben / geprüft / Duplikate / ohne Datum / Fehler — **je Quelle und gesamt** —, Dauer und Durchsatz je Phase, Liste aller Fehler mit Grund, Liste aller Umbenennungen wegen Namenskonflikt. Nicht erreichbare und abgelehnte Quellen (§4 Phase 1) werden benannt.
 
 Dazu gehören:
 

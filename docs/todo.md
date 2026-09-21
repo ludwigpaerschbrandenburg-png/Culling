@@ -12,60 +12,20 @@ Phase werden sie abgearbeitet — nicht als Kür, sondern als Teil der Phase.
 
 ## Phase 1 — Grundgerüst, Testbaum, Scan
 
-- [ ] Grundgerüst bauen: `pyproject.toml`, Paket `src/fotosort/`, Kommandozeile
-- [ ] `config.toml` mit Kommentaren aus der Vorlage in SPEC §9
-- [ ] SQLite-Schema: `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`
-- [ ] Testbaum-Skript mit allen Fällen aus SPEC §11
-- [ ] `fotosort scan`, `fotosort status`, `fotosort config`
-- [ ] Archiv-ID, Sicherungskopie von Datenbank und `config.toml`
-- [ ] Prüfung auf ExifTool, Prüfung „Ziel in Quelle"
+Abgenommen (`847f014`). Nachträge aus der Abnahme sind in die SPEC eingearbeitet:
+nur verändernde Befehle legen einen Lauf an (§6), Ereignisarten (§6), `--ziel-anlegen` (§8),
+`fotosort.sperre` (§6), Beispiel `ausschlussmuster` (§9).
 
-### Aus der Abnahme von Phase 1
-
-Diese Punkte sind beim Abarbeiten der Abnahme-Befunde entstanden. Der Code ist jeweils schon
-so gebaut; offen ist nur noch, ob die SPEC beim nächsten Durchgang nachgezogen wird.
-
-- [ ] **Frage an den Nutzer: Legen `status` und `config` einen Lauf an?** SPEC §6 sagt wörtlich
-      „Ein Lauf ist ein Programmstart. Jeder Start legt in der Tabelle `laeufe` eine Zeile an."
-      SPEC §8 verlangt aber, dass `status` „den letzten Lauf" nennt — was sinnlos wäre, wenn
-      `status` dabei selbst einen Lauf anlegt und sich dann selbst nennt. Die SPEC widerspricht
-      sich hier. Gebaut ist die Lesart „nur verändernde Befehle legen einen Lauf an" (nur
-      `scan`). Das ist **bewusst nicht geändert** worden: Nach `CLAUDE.md` wird bei einem
-      Widerspruch nachgefragt, nicht geraten. Zu entscheiden ist eines von beidem:
-      (a) SPEC §6 klarstellen — nur verändernde Befehle legen eine Zeile an (dann bleibt alles,
-      wie es ist), oder (b) auch `status` und `config` schreiben eine Zeile, und `status` zeigt
-      dann ausdrücklich den letzten Lauf **vor** dem eigenen.
-- [ ] **Neue Ereignisarten in SPEC §6 nachtragen.** Die Aufzählung in §6 ist mit „z. B."
-      eingeleitet und damit offen; der Code führt jetzt zusätzlich `ordner_nicht_lesbar`
-      (ein Ordner ließ sich nicht öffnen), `quelle_veraendert` (die Berichtsliste „Quelle
-      verändert, wird neu eingeordnet" aus §10) und `abgebrochen` (geordneter Abbruch, im
-      Unterschied zum Absturz). Sauberer wäre, sie in §6 und in der Berichtsliste in §10
-      mit aufzuzählen.
-- [ ] **Schalter `--ziel-anlegen` in SPEC §8 nachtragen.** Ein nicht vorhandener Zielordner
-      wird nicht mehr stillschweigend angelegt: Ein Tippfehler im Pfad — oder ein Netzlaufwerk,
-      das gerade nicht eingebunden ist — ergäbe sonst ein zweites, leeres Archiv mit neuer
-      Kennung, und das echte Archiv gälte danach als unbekannt (§6 begründet an anderer Stelle
-      genau das). Der Scan bricht jetzt mit Meldung ab; `--ziel-anlegen` legt den Ordner
-      wirklich an. In der Befehlsliste in §8 steht der Schalter noch nicht.
-- [ ] **Sperrdatei im Archiv-Ordner in SPEC §6 nachtragen.** Neben `fotosort.db`,
-      `config.toml` und den SQLite-Hilfsdateien liegt dort jetzt `fotosort.sperre`. Sie
-      verhindert, dass zwei gleichzeitige Läufe einander die Datenbank wegsperren und beide
-      scheitern. Die Sperre hält das Betriebssystem; stürzt das Programm ab, gibt es sie von
-      selbst wieder frei, eine liegengebliebene Datei blockiert also nichts.
-- [ ] **Beispiel für `ausschlussmuster` in SPEC §9 schärfen.** Das Beispiel `"*/Papierkorb/*"`
-      traf einen Papierkorb-Ordner ganz oben in der Quelle nicht, weil der relative Pfad dort
-      schlicht `Papierkorb/…` lautet und `*/` mindestens ein Zeichen davor verlangt. Der Code
-      prüft ein mit `*/` beginnendes Muster jetzt zusätzlich ohne diesen Anfang. In der SPEC
-      und im Kommentar der erzeugten `config.toml` könnte das Beispiel entsprechend erklärt
-      werden.
+- [x] Grundgerüst, `config.toml`, Schema, Testbaum, `scan`/`status`/`config`, Archiv-ID,
+      Sicherung, ExifTool-Prüfung, „Ziel in Quelle"
+- [x] Mehrere Quellen je Archiv (SPEC §4 Phase 1, §6 `quellen`, §8) — Schema direkt geändert
 
 ### Aus der Prüfung
 
-- [ ] **Erkennung des Dateisystemtyps festklopfen.** Unter Linux über den Einhängepunkt in
-      `/proc/mounts` — das ist erprobt und funktioniert. Unter Windows über `GetDriveType`
-      (`DRIVE_REMOTE`) und das UNC-Präfix; das ist hier im Container nicht prüfbar und muss
-      beim ersten Lauf unter Windows nachgezogen werden. Betrifft SPEC §6 (Netzlaufwerk) und
-      §4 Phase 3 (gleiches Laufwerk).
+- [ ] **Erkennung des Dateisystemtyps unter Windows festklopfen.** Linux über `/proc/mounts`
+      ist erprobt. Windows über `GetDriveType` (`DRIVE_REMOTE`) und das UNC-Präfix ist hier
+      nicht prüfbar und muss beim ersten Lauf unter Windows nachgezogen werden. Betrifft
+      SPEC §6 (Netzlaufwerk) und §4 Phase 3 (gleiches Laufwerk).
 
 ---
 
@@ -132,6 +92,13 @@ so gebaut; offen ist nur noch, ob die SPEC beim nächsten Durchgang nachgezogen 
 - [ ] `fotosort start`, großer Testbaum, Profiler, `LIESMICH.md`
 
 ### Aus der Prüfung
+
+- [ ] **Zwei Laufwerksbuchstaben auf derselben physischen Platte.** Die Laufwerkskennung für
+      den parallelen Scan (SPEC §4 Phase 1) nimmt unter Windows den Laufwerksbuchstaben. Zwei
+      Partitionen derselben Platte gelten damit als zwei Laufwerke und werden parallel gelesen,
+      was auf einer Festplatte langsamer ist als nacheinander. Erkennen ließe sich das über die
+      Volume-zu-Disk-Zuordnung (`IOCTL_STORAGE_GET_DEVICE_NUMBER`). Erst messen, ob es
+      überhaupt ins Gewicht fällt.
 
 - [ ] **Doppelte Lesezeit im Verschieben-Modus messen.** Seit SPEC §5 wird vor jeder Löschung
       auch die Quelldatei frisch gelesen, nicht nur die Zieldatei. Das ist richtig und schließt
