@@ -35,6 +35,7 @@ ART_QUELLE_VERAENDERT = "quelle_veraendert"
 ART_ABGEBROCHEN = "abgebrochen"
 ART_QUELLE_NICHT_ERREICHBAR = "quelle_nicht_erreichbar"
 ART_QUELLE_ABGELEHNT = "quelle_abgelehnt"
+ART_NICHT_MEHR_VORHANDEN = "quelle_nicht_mehr_vorhanden"
 
 TEXT_QUELLE_VERAENDERT = "Quelle veraendert, wird neu eingeordnet"
 
@@ -327,6 +328,10 @@ def _abschliessen(quelle_auf: Path, muster, dbank, lauf: int, ergebnis: Ergebnis
     )
     if ergebnis.verschwunden_ausgewertet:
         ergebnis.verschwunden = dbank.nicht_mehr_gesehen_zaehlen(quelle_auf, lauf)
+        if ergebnis.verschwunden:
+            # Fuer den Bericht (SPEC Abschnitt 10): jeden Pfad einzeln.
+            for pfad in dbank.nicht_mehr_gesehen(quelle_auf, lauf):
+                dbank.ereignis(lauf, ART_NICHT_MEHR_VORHANDEN, pfad, 1, "beim Scan nicht mehr gefunden")
     ergebnis.alles_ausgeschlossen = bool(
         muster and ergebnis.dateien == 0 and ergebnis.ausgeschlossen > 0
     )

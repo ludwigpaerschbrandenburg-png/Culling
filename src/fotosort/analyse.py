@@ -229,6 +229,27 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
         anzeige.weiter(offen)
 
 
+def zielpfad_aus_zeile(struktur, zeile, konf) -> Path:
+    """Zielpfad einer analysierten Zeile aus ihren gespeicherten Feldern neu
+    berechnen (Kamera, Aufnahmezeit, Datumsquelle, Sicherheit, Hinweis).
+
+    Gebraucht, wenn eine Datei nach fehlgeschlagener Pruefung neu kopiert
+    werden muss: Ihr zielpfad zeigt dann auf die fehlerhafte Zieldatei oder
+    die Partnerdatei eines Duplikats, nicht mehr auf den berechneten Namen.
+    Braucht kein ExifTool - die Metadaten stehen in der Zeile.
+    """
+    zeit = None
+    if zeile["aufnahme_zeit"]:
+        from datetime import datetime
+
+        zeit = datetime.strptime(zeile["aufnahme_zeit"], "%Y-%m-%dT%H:%M:%S")
+    d = datum_modul.Datum(zeit, int(zeile["datum_quelle"] or 0), bool(zeile["datum_sicher"]),
+                          zeile["datum_hinweis"] or "")
+    name = Path(db.text_pfad(zeile["quellpfad"])).name
+    pfad, _ort = ziel_modul.zielpfad(struktur, d, zeile["kamera"] or konf.wert("kamera.unbekannt"), name, konf)
+    return pfad
+
+
 def _fehler_setzen(dbank, quellpfad, grund: str, gruppe) -> None:
     dbank.analyse_setzen(
         quellpfad, kamera="", kamera_modell="", aufnahme_zeit="", datum_quelle=0,

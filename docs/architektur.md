@@ -42,6 +42,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ hashes.py              BLAKE3-Prüfsummen, Byte-Vergleich
 │  ├─ kopieren.py            Phase 3: übertragen
 │  ├─ pruefen.py             Phase 4: nachrechnen
+│  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
 │  ├─ aufraeumen.py          Phase 5+6: löschen             ← nur nach Statusprüfung
 │  └─ bericht.py             Text- und CSV-Bericht
 └─ tests/

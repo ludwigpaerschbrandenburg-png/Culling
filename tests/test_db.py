@@ -87,7 +87,7 @@ def test_ziel_index_und_laeufe_spalten(datenbank):
     laeufe = {
         z["name"] for z in datenbank.verbindung.execute("PRAGMA table_info(laeufe)")
     }
-    assert laeufe == {"nummer", "befehl", "start", "ende"}
+    assert laeufe == {"nummer", "befehl", "start", "ende", "zusammenfassung"}
     ereignisse = {
         z["name"]
         for z in datenbank.verbindung.execute("PRAGMA table_info(lauf_ereignisse)")

@@ -19,11 +19,17 @@ class Abgebrochen(Exception):
     """Die Kopie wurde ueber das Stop-Signal abgebrochen (Strg+C)."""
 
 
-def blake3_datei(pfad: Path) -> str:
-    """Hash einer vorhandenen Datei, blockweise gelesen."""
+def blake3_datei(pfad: Path, stop: threading.Event | None = None) -> str:
+    """Hash einer vorhandenen Datei, blockweise gelesen.
+
+    Ist "stop" gesetzt, wird nach dem laufenden Block mit Abgebrochen
+    beendet (Strg+C waehrend des Pruefens).
+    """
     h = blake3.blake3()
     with open(pfad, "rb", buffering=0) as f:
         while True:
+            if stop is not None and stop.is_set():
+                raise Abgebrochen()
             block = f.read(BLOCK)
             if not block:
                 break

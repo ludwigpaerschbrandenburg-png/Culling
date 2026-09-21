@@ -34,7 +34,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, db, hashes, meldungen, pfade
+from . import FotosortFehler, db, fortschritt, hashes, meldungen, pfade
 from .scan import ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, TEXT_QUELLE_VERAENDERT
 
 # Ereignisarten dieses Moduls (SPEC Abschnitt 6).
@@ -44,6 +44,7 @@ ART_PART_AUFGERAEUMT = "part_aufgeraeumt"
 ART_ANGEFANGENE_ENTFERNT = "angefangene_zieldatei_entfernt"
 ART_NACHTRAEGLICH_BESTAETIGT = "kopie_nachtraeglich_bestaetigt"
 ART_EXFAT_RUECKFALL = "rueckfall_kopieren"
+ART_NEU_NACH_PRUEFUNG = "neu_nach_pruefung"
 
 # Deutsche Texte, die in die Datenbank gelangen, stehen in meldungen.py.
 GRUND_QUELLE_FEHLT = meldungen.GRUND_QUELLE_FEHLT
@@ -54,7 +55,6 @@ GRUND_PART_BELEGT = meldungen.GRUND_PART_BELEGT
 PART = ".part"
 PROFILE: dict[str, int] = {"hdd": 2, "netzwerk": 4, "ssd": 8}
 SEITE = 2000
-_STILLE_SEKUNDEN = 5.0
 
 
 # ----------------------------------------------------------- Ergebnis ----
@@ -81,6 +81,7 @@ class Ergebnis:
     hash_worker: int = 0
     profil: str = ""
     exfat_rueckfall: bool = False
+    neu_nach_pruefung: int = 0       # nach fehlgeschlagener Pruefung neu zu kopieren
 
 
 @dataclass
@@ -295,7 +296,7 @@ class _Lauf:
         self.offen: list[list[_Auftrag]] = []  # eingereichte Gruppen
         self.wartend: deque[tuple[_Quelle, list]] = deque()
         self.ergebnis = Ergebnis()
-        self.anzeige: _Anzeige | None = None
+        self.anzeige: fortschritt.Fortschritt | None = None
 
     # -- Namen -----------------------------------------------------------
 
@@ -709,6 +710,29 @@ def _quellen(dbank: db.Datenbank, lauf: int, ergebnis) -> dict[str, list[_Quelle
     return je_laufwerk
 
 
+def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: int) -> int:
+    """Zeilen, deren Zielpruefung fehlschlug (Phase 4), wieder zum Kopieren
+    freigeben. Ihr zielpfad zeigt auf die fehlerhafte Zieldatei oder die
+    Partnerdatei eines Duplikats; der berechnete Name wird aus den
+    gespeicherten Feldern neu bestimmt. Die fehlerhafte Zieldatei bleibt
+    liegen ("Niemals ueberschreiben"): Die frische Kopie bekommt bei
+    belegtem Namen den Anhang _1.
+    """
+    from . import analyse
+    from . import ziel as ziel_modul
+
+    zeilen = dbank.zeilen_mit_fehlergrund(meldungen.GRUND_PRUEFUNG)
+    if not zeilen:
+        return 0
+    struktur = ziel_modul.Zielstruktur(ziel)
+    for z in zeilen:
+        neu = analyse.zielpfad_aus_zeile(struktur, z, konf)
+        dbank.zurueck_auf_analysiert(z["quellpfad"], neu)
+        dbank.ereignis(lauf, ART_NEU_NACH_PRUEFUNG, z["quellpfad"], 1, meldungen.EREIGNIS_NEU_NACH_PRUEFUNG)
+    dbank.stapel_schreiben()
+    return len(zeilen)
+
+
 def planen(ziel: Path, dbank: db.Datenbank) -> Plan:
     """--dry-run: nur zaehlen, nichts anfassen, kein Lauf."""
     plan = Plan()
@@ -747,6 +771,9 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     try:
         # 1. Reste eines abgebrochenen Laufs (SPEC Abschnitt 5).
         lauf_zustand.liegengebliebene_aufraeumen()
+        e.neu_nach_pruefung = _nach_pruefung_zuruecksetzen(ziel, konf, dbank, lauf)
+        if e.neu_nach_pruefung and konsole is not None:
+            konsole.print(meldungen.kopieren_neu_nach_pruefung(e.neu_nach_pruefung))
 
         # 2. Vorpruefungen. Gezaehlt wird nur, was aus erreichbaren Quellen
         #    ansteht - sonst waeren Platzpruefung und Anzeige zu hoch.
@@ -760,7 +787,7 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
             raise FotosortFehler(meldungen.zu_wenig_platz(ziel, e.geplant_bytes, frei))
         if konsole is not None:
             konsole.print(meldungen.kopieren_beginnt(e.geplant, e.geplant_bytes, kw, hw, prof, direkt))
-        lauf_zustand.anzeige = _Anzeige(konsole, e.geplant, e.geplant_bytes)
+        lauf_zustand.anzeige = fortschritt.Fortschritt(konsole, e.geplant, e.geplant_bytes, meldungen.kopieren_laeuft)
 
         # 3. Kopieren: Laufwerke abwechselnd, je Laufwerk in Ordnerreihenfolge.
         _schleife(lauf_zustand, je_laufwerk)
@@ -826,58 +853,3 @@ def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:
             quellen.pop(0)
         reihe.pop()                 # erschoepft: das hintere Laufwerk entfernen
     return None
-
-
-# --------------------------------------------------------- Fortschritt ----
-
-
-class _Anzeige:
-    """Fortschritt: Dateien und MB, MB/s, Restzeit; hoechstens 2 Aktualisierungen je Sekunde."""
-
-    def __init__(self, konsole, gesamt: int, gesamt_bytes: int) -> None:
-        self.konsole = konsole
-        self.gesamt = gesamt
-        self.gesamt_bytes = gesamt_bytes
-        self.dateien = 0
-        self.bytes = 0
-        self.begonnen = time.monotonic()
-        self._zuletzt = self.begonnen
-        self.balken = None
-        self.aufgabe = None
-        if konsole is not None and getattr(konsole, "is_terminal", False):
-            from rich.progress import BarColumn, Progress, TextColumn
-
-            self.balken = Progress(
-                TextColumn("{task.description}"), BarColumn(bar_width=None),
-                TextColumn("{task.fields[rest]}"),
-                console=konsole, refresh_per_second=2, transient=True,
-            )
-            self.aufgabe = self.balken.add_task(self._text(), total=gesamt_bytes or None, rest="")
-            self.balken.start()
-
-    def _text(self) -> str:
-        return meldungen.kopieren_laeuft(self.dateien, self.gesamt, self.bytes, self.gesamt_bytes,
-                                         self.bytes / max(1e-9, time.monotonic() - self.begonnen))
-
-    def _rest(self) -> str:
-        verstrichen = time.monotonic() - self.begonnen
-        if self.bytes <= 0 or verstrichen <= 0:
-            return ""
-        rest = (self.gesamt_bytes - self.bytes) * verstrichen / self.bytes
-        return meldungen.restzeit(rest)
-
-    def weiter(self, dateien: int, bytes_: int) -> None:
-        self.dateien += dateien
-        self.bytes += bytes_
-        jetzt = time.monotonic()
-        if jetzt - self._zuletzt < (0.5 if self.balken else _STILLE_SEKUNDEN):
-            return
-        self._zuletzt = jetzt
-        if self.balken is not None:
-            self.balken.update(self.aufgabe, completed=self.bytes, description=self._text(), rest=self._rest())
-        elif self.konsole is not None:
-            self.konsole.print(self._text())
-
-    def stop(self) -> None:
-        if self.balken is not None:
-            self.balken.stop()

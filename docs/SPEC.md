@@ -145,6 +145,11 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
      Ob zwei Pfade wirklich auf demselben Laufwerk liegen, muss sicher festgestellt werden (Kennung des Dateisystems, nicht der Laufwerksbuchstabe im Pfad). Lässt es sich nicht sicher feststellen, wird kopiert statt umbenannt.
      **Ein Netzlaufwerk gilt nie als „gleiches Laufwerk".** Liegt mindestens einer der beiden Pfade auf einem Netzlaufwerk (UNC, SMB, CIFS, NFS), gilt „gleiches Laufwerk" grundsätzlich als **nicht nachgewiesen**; es wird kopiert statt umbenannt. Erkennung: unter Windows über das UNC-Präfix bzw. `GetDriveType` gleich `DRIVE_REMOTE` (auch für verbundene Laufwerksbuchstaben aufgelöst), unter Linux über den Dateisystemtyp des Einhängepunkts (`cifs`, `smb3`, `nfs`, `nfs4`, `fuse.sshfs`, `9p`, `virtiofs`; die vollständige Liste steht in §6 und gilt für beide Prüfungen).
 4. **Prüfen** – jede Zieldatei wird erneut vollständig gelesen und ihr Hash mit dem der Quelle verglichen. Ergebnis: „X von Y geprüft, Z Fehler".
+   Gelesen wird parallel mit den Hash-Workern des Profils (§7, §9), in Ordnerreihenfolge des Ziels; entschieden und gespeichert wird nur im Hauptstrang. Die Phase ist fortsetzbar (bearbeitet werden nur Zeilen mit Status `kopiert`, `duplikat` oder `verschoben`) und lässt sich mit Strg+C sauber abbrechen. Der Ziel-Index bekommt die frisch gelesenen Hashes.
+   - `kopiert` → `geprueft`, wenn der frisch gelesene Hash der Zieldatei dem gespeicherten Quell-Hash entspricht.
+   - `duplikat` → `duplikat_bestaetigt`, wenn die Partnerdatei im Ziel frisch gelesen wurde und ihr Hash dem Quell-Hash entspricht (§5). Zeigen viele Duplikate auf dieselbe Partnerdatei, wird sie je Lauf nur einmal gelesen.
+   - Diese Phase setzt **nicht** `bestaetigt_in_lauf`: Das bedeutet „Quelle **und** Ziel im Lauf frisch gelesen" und ist allein Sache des Aufräumens (Phase 5, §5).
+   - **Schlägt die Prüfung fehl** (Zieldatei fehlt, Größe weicht ab, Inhalt weicht ab, nicht lesbar), bekommt die Zeile Status `fehler` mit Grund und ein Ereignis `pruefung_fehlgeschlagen`. Die fehlerhafte Zieldatei wird **weder gelöscht noch überschrieben**, nur gemeldet. Ein erneutes `fotosort kopieren` gibt solche Zeilen wieder frei (Status `analysiert`, Zielpfad aus den gespeicherten Feldern neu berechnet, Ereignis `neu_nach_pruefung`) und legt nach den Regeln aus §5 eine frische Kopie an; ist der Name belegt, bekommt sie den Anhang `_1`.
    Für umbenannte Dateien (Status `verschoben`) gibt es keine Quelle mehr, gegen die verglichen werden könnte. Für sie wird in dieser Phase der Hash aus der Zieldatei berechnet und in den Ziel-Index geschrieben. Im Bericht werden sie getrennt ausgewiesen.
 5. **Quelle aufräumen** (nur im Kopier-Modus, nur auf ausdrücklichen Befehl) – gelöscht werden ausschließlich Quelldateien mit Status `geprueft` oder `duplikat_bestaetigt` (§5). Kein anderer Status berechtigt zum Löschen.
    **Der Status ist notwendig, aber nicht hinreichend.** Vor jeder einzelnen Löschung werden **beide** Dateien im aktuellen Lauf vollständig neu gelesen: die **Zieldatei** und die **Quelldatei**. Beide Hashes werden mit dem in der Datenbank gespeicherten Quell-Hash verglichen. Das gilt für `geprueft` genauso wie für `duplikat_bestaetigt`; ein Status oder Hash aus einem früheren Lauf genügt für keinen von beiden.
@@ -284,11 +289,12 @@ Die Metadaten stehen in **eigenen Spalten** (`kamera`, `aufnahme_zeit`, `datum_q
 - `befehl` — welcher Befehl gestartet wurde (§8), mit seinen Schaltern.
 - `start` — Zeitpunkt des Starts.
 - `ende` — Zeitpunkt des Endes; leer, solange der Lauf läuft oder wenn er abgestürzt ist.
+- `zusammenfassung` — Zahlen des Laufs (Dateien, Bytes, Sekunden) für „Dauer und Durchsatz je Phase" im Bericht (§10); leer bei Abbruch.
 
 **`lauf_ereignisse`** — eine Zeile je Ereignis, das zu **keiner** Datei in `dateien` gehört und trotzdem in den Bericht muss:
 
 - `lauf_nummer` — zu welchem Lauf das Ereignis gehört.
-- `art` — Kurzkennung. Bisher vergeben: `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `ordner_nicht_lesbar`, `quelle_veraendert` (§6 zweiter Scan), `quelle_nicht_erreichbar` (§4 Phase 1), `quelle_abgelehnt` (Überschneidung, §4 Phase 1), `abgebrochen` (geordneter Abbruch), `zielordner_mehrdeutig` (§3), `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen), `duplikat` (nicht kopiert; `text` nennt die Partnerdatei im Ziel), `namenskonflikt` (mit Anhang abgelegt; `text` nennt den endgültigen Zielpfad), `part_aufgeraeumt`, `angefangene_zieldatei_entfernt` (nur im Rückfall, §5), `kopie_nachtraeglich_bestaetigt` (fertige Kopie aus einem abgebrochenen Lauf, §5). Neue Arten werden hier ergänzt.
+- `art` — Kurzkennung. Bisher vergeben: `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `ordner_nicht_lesbar`, `quelle_veraendert` (§6 zweiter Scan), `quelle_nicht_erreichbar` (§4 Phase 1), `quelle_abgelehnt` (Überschneidung, §4 Phase 1), `abgebrochen` (geordneter Abbruch), `zielordner_mehrdeutig` (§3), `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen), `duplikat` (nicht kopiert; `text` nennt die Partnerdatei im Ziel), `namenskonflikt` (mit Anhang abgelegt; `text` nennt den endgültigen Zielpfad), `part_aufgeraeumt`, `angefangene_zieldatei_entfernt` (nur im Rückfall, §5), `kopie_nachtraeglich_bestaetigt` (fertige Kopie aus einem abgebrochenen Lauf, §5), `quelle_nicht_mehr_vorhanden` (§6 zweiter Scan, je Pfad), `pruefung_fehlgeschlagen` (§4 Phase 4; `text` nennt Zieldatei und Grund), `neu_nach_pruefung` (nach fehlgeschlagener Prüfung wieder zum Kopieren freigegeben). Neue Arten werden hier ergänzt.
 - `pfad` — betroffener Pfad, falls es einen gibt; sonst leer.
 - `anzahl` — für reine Zähler; sonst 1.
 - `text` — Klartext für den Bericht; sonst leer.
@@ -386,7 +392,7 @@ fotosort scan               --ziel <Ziel>                       (alle bekannten 
 fotosort analyse            --ziel <Ziel>
 fotosort kopieren           --ziel <Ziel> [--verschieben] [--dry-run]
                             [--profil hdd|ssd|netzwerk] [--kopier-worker N] [--hash-worker N]
-fotosort pruefen            --ziel <Ziel>
+fotosort pruefen            --ziel <Ziel> [--profil hdd|ssd|netzwerk] [--hash-worker N]
 fotosort aufraeumen         --ziel <Ziel> [--quelle A] [--leere-ordner] [--dry-run]
 fotosort status             --ziel <Ziel>
 fotosort bericht            --ziel <Ziel>
@@ -501,6 +507,8 @@ Alle Angaben mit `0` für „automatisch" werden beim Start als tatsächlich ben
 ## 10. Bericht
 
 Nach jedem Lauf ein Bericht als Textdatei und CSV im Ordner `.fotosortierer/berichte/`: Anzahl gefunden / kopiert / verschoben / geprüft / Duplikate / ohne Datum / Fehler — **je Quelle und gesamt** —, Dauer und Durchsatz je Phase, Liste aller Fehler mit Grund, Liste aller Umbenennungen wegen Namenskonflikt. Nicht erreichbare und abgelehnte Quellen (§4 Phase 1) werden benannt.
+
+Die Dateien heißen `bericht_<Zeit>_lauf<N>.txt` (lesbar), `…_dateien.csv` (eine Zeile je Datei, alle Spalten der Tabelle `dateien`) und `…_ereignisse.csv` (eine Zeile je Ereignis). CSV mit Semikolon als Trenner und UTF-8 mit Kennzeichen, damit Excel unter Windows die Datei direkt richtig öffnet. Jeder verändernde Befehl schreibt den Bericht nach seinem Lauf zusammen mit der Sicherungskopie (§6); `fotosort bericht` schreibt ihn jederzeit auf Verlangen, legt keinen Lauf an und gibt den Text auch auf der Konsole aus. Der Bericht beschreibt immer das ganze Archiv (alle Läufe), nicht nur den letzten.
 
 Dazu gehören:
 

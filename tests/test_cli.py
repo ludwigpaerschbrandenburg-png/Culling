@@ -44,8 +44,6 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
     [
         ("ziel-index", 3),
         ("wiederherstellen", 3),
-        ("pruefen", 4),
-        ("bericht", 4),
         ("aufraeumen", 5),
         ("start", 6),
     ],

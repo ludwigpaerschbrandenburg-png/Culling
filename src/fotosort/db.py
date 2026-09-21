@@ -6,6 +6,7 @@ Gedaechtnis des Archivs: Es wird nie eine Zeile geloescht.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -72,7 +73,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quellen (
@@ -124,10 +125,11 @@ CREATE TABLE IF NOT EXISTS ziel_index (
 CREATE INDEX IF NOT EXISTS ziel_index_hash ON ziel_index (hash);
 
 CREATE TABLE IF NOT EXISTS laeufe (
-    nummer  INTEGER PRIMARY KEY AUTOINCREMENT,
-    befehl  TEXT NOT NULL DEFAULT '',
-    start   TEXT NOT NULL DEFAULT '',
-    ende    TEXT NOT NULL DEFAULT ''
+    nummer          INTEGER PRIMARY KEY AUTOINCREMENT,
+    befehl          TEXT NOT NULL DEFAULT '',
+    start           TEXT NOT NULL DEFAULT '',
+    ende            TEXT NOT NULL DEFAULT '',
+    zusammenfassung TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS lauf_ereignisse (
@@ -474,11 +476,23 @@ class Datenbank:
         )
         return int(zeiger.lastrowid)
 
-    def lauf_beenden(self, nummer: int) -> None:
+    def lauf_beenden(self, nummer: int, zusammenfassung: dict | None = None) -> None:
+        """Ende eintragen; dazu die Zahlen des Laufs (Dateien, Bytes, Sekunden)
+        fuer "Dauer und Durchsatz je Phase" im Bericht (SPEC Abschnitt 10)."""
         self.stapel_schreiben()
+        text = json.dumps(zusammenfassung, ensure_ascii=True) if zusammenfassung else ""
         self.verbindung.execute(
-            "UPDATE laeufe SET ende = ? WHERE nummer = ?", (_jetzt(), nummer)
+            "UPDATE laeufe SET ende = ?, zusammenfassung = ? WHERE nummer = ?",
+            (_jetzt(), text, nummer),
         )
+
+    def laeufe_liste(self) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        return self.verbindung.execute("SELECT * FROM laeufe ORDER BY nummer").fetchall()
+
+    def lauf_zeile(self, nummer: int) -> sqlite3.Row | None:
+        self.stapel_schreiben()
+        return self.verbindung.execute("SELECT * FROM laeufe WHERE nummer = ?", (nummer,)).fetchone()
 
     def letzter_lauf(self) -> sqlite3.Row | None:
         return self.verbindung.execute(
@@ -939,6 +953,132 @@ class Datenbank:
         ):
             je_quelle.setdefault(z["quellwurzel"], {})[z["status"]] = int(z["n"])
         return {"status": status, "kopiert_bytes": kopiert_bytes, "je_quelle": je_quelle}
+
+    # -- Pruefen (SPEC Abschnitt 4 Phase 4) --------------------------------
+
+    ZU_PRUEFEN_SQL = "status IN ('kopiert', 'duplikat', 'verschoben') AND zielpfad != ''"
+
+    def zu_pruefen_summe(self) -> tuple[int, int]:
+        self.stapel_schreiben()
+        z = self.verbindung.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(groesse), 0) FROM dateien WHERE {self.ZU_PRUEFEN_SQL}"
+        ).fetchone()
+        return int(z[0]), int(z[1])
+
+    def zu_pruefen(self, ab_ziel: str = "", ab_pfad: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
+        """Naechste zu pruefende Zeilen, nach Zielpfad sortiert (das Ziel wird
+        so moeglichst in Ordnerreihenfolge gelesen)."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            f"SELECT * FROM dateien WHERE {self.ZU_PRUEFEN_SQL}"
+            " AND (zielpfad, quellpfad) > (?, ?) ORDER BY zielpfad, quellpfad LIMIT ?",
+            (ab_ziel, ab_pfad, int(grenze)),
+        ).fetchall()
+
+    def geprueft_setzen(self, quellpfad) -> None:
+        """Zieldatei frisch gelesen, Hash stimmt mit dem Quell-Hash ueberein."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'geprueft', fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(quellpfad),),
+        )
+        self._vielleicht_schreiben()
+
+    def duplikat_bestaetigt_setzen(self, quellpfad) -> None:
+        """Partnerdatei im Ziel frisch gelesen, Hash stimmt (SPEC Abschnitt 5)."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'duplikat_bestaetigt', fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(quellpfad),),
+        )
+        self._vielleicht_schreiben()
+
+    def verschoben_hash_setzen(self, quellpfad, hash_: str) -> None:
+        """Umbenannte Datei: Hash aus der Zieldatei nachgetragen (Phase 4)."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET hash = ?, fehlergrund = '' WHERE quellpfad = ?",
+            (hash_, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def zeilen_mit_fehlergrund(self, praefix: str) -> list[sqlite3.Row]:
+        """Zeilen im Status fehler, deren Grund mit praefix beginnt."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE status = 'fehler' AND fehlergrund LIKE ? ORDER BY quellpfad",
+            (praefix.replace("%", "").replace("_", "\\_") + "%",),
+        ).fetchall()
+
+    # -- Bericht (SPEC Abschnitt 10) ----------------------------------------
+
+    def bericht_zahlen(self) -> dict[str, dict[str, int]]:
+        """Zahlen je Quelle und gesamt: gefunden (echter Dateityp), kopiert,
+        verschoben, geprueft, duplikate, ohne_datum, fehler, geloescht,
+        uebersprungen, bytes."""
+        self.stapel_schreiben()
+        leer = lambda: {k: 0 for k in (
+            "gefunden", "kopiert", "verschoben", "geprueft", "duplikate", "ohne_datum",
+            "fehler", "geloescht", "uebersprungen", "bytes",
+        )}
+        ergebnis: dict[str, dict[str, int]] = {"gesamt": leer()}
+        for z in self.verbindung.execute(
+            "SELECT quellwurzel, status, datum_sicher, COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b"
+            " FROM dateien WHERE dateityp IN ('foto', 'raw', 'video', 'sidecar')"
+            " GROUP BY quellwurzel, status, datum_sicher"
+        ):
+            for schluessel in (z["quellwurzel"], "gesamt"):
+                e = ergebnis.setdefault(schluessel, leer())
+                n = int(z["n"])
+                e["gefunden"] += n
+                e["bytes"] += int(z["b"])
+                st = z["status"]
+                if st in ("kopiert", "geprueft", "quelle_geloescht"):
+                    e["kopiert"] += n
+                if st == "verschoben":
+                    e["verschoben"] += n
+                if st in ("geprueft", "quelle_geloescht"):
+                    e["geprueft"] += n
+                if st in ("duplikat", "duplikat_bestaetigt"):
+                    e["duplikate"] += n
+                if st == "fehler":
+                    e["fehler"] += n
+                if st == "quelle_geloescht":
+                    e["geloescht"] += n
+                if st == "uebersprungen":
+                    e["uebersprungen"] += n
+                if z["datum_sicher"] == 0 and st not in ("gefunden", "uebersprungen", "fehler"):
+                    e["ohne_datum"] += n
+        return ergebnis
+
+    def dateien_liste(self, bedingung: str = "1", werte: tuple = ()) -> sqlite3.Cursor:
+        """Zeilen als Cursor (nicht alles auf einmal in den Speicher)."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            f"SELECT * FROM dateien WHERE {bedingung} ORDER BY quellwurzel, quellpfad", werte
+        )
+
+    def ereignisse_liste(self, art: str | None = None, lauf: int | None = None) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        sql = "SELECT rowid, * FROM lauf_ereignisse WHERE 1"
+        werte: list = []
+        if art is not None:
+            sql += " AND art = ?"
+            werte.append(art)
+        if lauf is not None:
+            sql += " AND lauf_nummer = ?"
+            werte.append(lauf)
+        return self.verbindung.execute(sql + " ORDER BY lauf_nummer, rowid", werte).fetchall()
+
+    def ereignisse_summen(self) -> dict[str, int]:
+        """Anzahl je Ereignisart ueber alle Laeufe."""
+        self.stapel_schreiben()
+        return {
+            z["art"]: int(z["n"])
+            for z in self.verbindung.execute(
+                "SELECT art, COALESCE(SUM(anzahl), 0) AS n FROM lauf_ereignisse GROUP BY art"
+            )
+        }
 
     # -- Ereignisse -------------------------------------------------------
 

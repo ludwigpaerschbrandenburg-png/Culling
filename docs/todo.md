@@ -83,11 +83,8 @@ Rückfall auf dem berechneten statt dem geschriebenen Namen) ist behoben und mit
 
 ### Aus dem Bau von Phase 3 (später)
 
-- [ ] **Gruppe wird bei Inhalts-Duplikat eines Mitglieds getrennt (Phase 4, Bericht).** Ist nur
-      das JPG eines RAW+JPG-Paars inhaltsgleich mit einer Datei, die schon im Ziel liegt, wird es
-      `duplikat` und zeigt dorthin; das RAW wird kopiert und bekommt bei Namenskonflikt den
-      Anhang. Nichts geht verloren, aber die beiden liegen dann unter verschiedenen Namen. Der
-      Bericht soll solche Fälle unter „Duplikate" mit Partner ausweisen, damit man sie erkennt.
+- [x] **Gruppe wird bei Inhalts-Duplikat eines Mitglieds getrennt.** Der Bericht (Phase 4) weist
+      jedes Duplikat mit Partnerdatei aus.
 - [ ] **Gruppenmitglieder in späteren Status (Phase 4/5).** Wird eine Hauptdatei nach dem Kopieren
       neu analysiert (zweiter Scan, geänderte Quelle), ziehen nur Mitglieder mit Status
       `analysiert` mit; schon kopierte bleiben, wo sie sind. Beim Bericht entscheiden, ob das
@@ -112,7 +109,29 @@ Rückfall auf dem berechneten statt dem geschriebenen Namen) ist behoben und mit
 
 ## Phase 4 — Prüfen und Bericht
 
-- [ ] `fotosort pruefen`, `fotosort bericht`
+Gebaut: `pruefen.py` (Zieldateien vollständig neu lesen, `kopiert` → `geprueft`, `duplikat` →
+`duplikat_bestaetigt`, `verschoben` → Hash nachgetragen, Hash-Worker des Profils, fortsetzbar,
+Strg+C), `bericht.py` (Text und zwei CSV nach SPEC §10, nach jedem Lauf und auf Verlangen),
+`fortschritt.py` (gemeinsame Anzeige), Schema 5 (`laeufe.zusammenfassung`). Nach fehlgeschlagener
+Prüfung gibt `kopieren` die Zeile wieder frei und legt eine frische Kopie an; die fehlerhafte
+Zieldatei bleibt liegen.
+
+- [x] `fotosort pruefen`, `fotosort bericht`
+- [x] Pflichttests: Zieldatei um ein Byte verändert, abgeschnitten, fehlt; Abbruch und Fortsetzen
+- [x] Gruppe bei Inhalts-Duplikat eines Mitglieds getrennt: Der Bericht listet jedes Duplikat mit
+      Partnerdatei und Status, so ist der Fall sichtbar (Punkt aus Phase 3)
+
+### Entscheidungen für den Nutzer
+
+- **CSV mit Semikolon und UTF-8-BOM.** Gewählt, damit Excel unter Windows die Datei per Doppelklick
+  richtig öffnet. Wer die Datei in ein anderes Programm lädt, wählt dort „Semikolon" als Trenner.
+- **`pruefen` bestätigt auch Duplikate** (`duplikat` → `duplikat_bestaetigt`), indem es die
+  Partnerdatei im Ziel frisch liest. Das Aufräumen (Phase 5) liest vor jeder Löschung trotzdem
+  Quelle und Ziel erneut; die Bestätigung aus Phase 4 ersetzt das nicht.
+- **Nach fehlgeschlagener Prüfung** wird die fehlerhafte Zieldatei nicht angerührt. Die frische
+  Kopie bekommt bei belegtem Namen den Anhang `_1`; die alte, fehlerhafte Datei steht im Bericht
+  unter „Prüfung fehlgeschlagen" und muss von Hand entfernt werden, wenn man sie nicht behalten
+  will. Grund: Unter dem endgültigen Zielnamen löscht das Programm nie etwas (SPEC §5).
 
 ---
 

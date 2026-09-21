@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, kopieren, metadaten, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, bericht, kopieren, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -299,11 +299,9 @@ def befehl_scan(args, konsole) -> int:
             konsole.print("")
             konsole.print(meldungen.scan_abgebrochen())
             return ABGEBROCHEN
-        # Nach jeder abgeschlossenen Phase: Sicherungskopie ins Ziel.
-        datenbank.lauf_beenden(lauf)
-        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
-        konsole.print("")
-        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+        _abschliessen(archiv, konsole, lauf, {
+            "dateien": ergebnis.dateien, "bytes": ergebnis.bytes_gesamt, "sekunden": ergebnis.sekunden,
+        })
         # Nicht alles gesehen - nicht lesbarer Ordner, nicht erreichbare
         # oder abgelehnte Quelle - ist ein Fehler, auch wenn der Rest lief.
         unvollstaendig = (
@@ -312,6 +310,18 @@ def befehl_scan(args, konsole) -> int:
         return FEHLER if unvollstaendig else OK
     finally:
         datenbank.schliessen()
+
+def _abschliessen(archiv, konsole, lauf: int, zusammenfassung: dict | None = None) -> None:
+    """Nach jeder abgeschlossenen Phase: Lauf beenden, Sicherungskopie und
+    Bericht ins Ziel (SPEC Abschnitt 6 und 10)."""
+    datenbank = archiv.datenbank
+    datenbank.lauf_beenden(lauf, zusammenfassung)
+    datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
+    konsole.print("")
+    konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+    txt, csv_d, csv_e = bericht.schreiben(archiv.ziel, datenbank, lauf)
+    konsole.print(meldungen.bericht_geschrieben(txt, csv_d, csv_e))
+
 
 def _lauf_sauber_abbrechen(datenbank, lauf: int) -> None:
     """Den Lauf mit Ende und Vermerk schliessen (geordneter Abbruch)."""
@@ -434,10 +444,9 @@ def befehl_analyse(args, konsole) -> int:
             konsole.print(meldungen.analyse_abgebrochen())
             _lauf_sauber_abbrechen(datenbank, lauf)
             return ABGEBROCHEN
-        datenbank.lauf_beenden(lauf)
-        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
-        konsole.print("")
-        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+        _abschliessen(archiv, konsole, lauf, None if ergebnis is None else {
+            "dateien": ergebnis.bearbeitet, "bytes": 0, "sekunden": ergebnis.sekunden,
+        })
         return FEHLER if (ergebnis is not None and ergebnis.fehler) else OK
     finally:
         datenbank.schliessen()
@@ -480,11 +489,58 @@ def befehl_kopieren(args, konsole) -> int:
             konsole.print(meldungen.kopieren_abgebrochen())
             _lauf_sauber_abbrechen(datenbank, lauf)
             return ABGEBROCHEN
-        datenbank.lauf_beenden(lauf)
-        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
-        konsole.print("")
-        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+        _abschliessen(archiv, konsole, lauf, {
+            "dateien": ergebnis.kopiert, "bytes": ergebnis.bytes_kopiert, "sekunden": ergebnis.sekunden,
+        })
         return FEHLER if ergebnis.fehler else OK
+    finally:
+        datenbank.schliessen()
+
+
+def befehl_pruefen(args, konsole) -> int:
+    """Phase 4: Zieldateien vollstaendig neu lesen (SPEC Abschnitt 4 Phase 4)."""
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True)
+    datenbank = archiv.datenbank
+    try:
+        kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        try:
+            ergebnis = pruefen.ausfuehren(
+                archiv.ziel, archiv.konf, datenbank, lauf, konsole,
+                hash_worker=args.hash_worker, profil=args.profil,
+            )
+        except FotosortFehler:
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            raise
+        if ergebnis.geplant == 0:
+            konsole.print(meldungen.pruefen_nichts_zu_tun())
+        else:
+            konsole.print("")
+            konsole.print(meldungen.pruefen_ergebnis(ergebnis))
+        konsole.print("")
+        konsole.print(meldungen.pruefen_zusammenfassung(datenbank.zaehler_je_status()))
+        if ergebnis.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.pruefen_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return ABGEBROCHEN
+        _abschliessen(archiv, konsole, lauf, {
+            "dateien": ergebnis.bearbeitet, "bytes": ergebnis.bytes_gelesen, "sekunden": ergebnis.sekunden,
+        })
+        return FEHLER if ergebnis.fehler else OK
+    finally:
+        datenbank.schliessen()
+
+
+def befehl_bericht(args, konsole) -> int:
+    """Bericht als Text und CSV (SPEC Abschnitt 10). Legt keinen Lauf an."""
+    archiv = archiv_oeffnen(args, konsole, anlegen=False)
+    datenbank = archiv.datenbank
+    try:
+        txt, csv_d, csv_e = bericht.schreiben(archiv.ziel, datenbank)
+        konsole.print(txt.read_text(encoding="utf-8"))
+        konsole.print(meldungen.bericht_geschrieben(txt, csv_d, csv_e))
+        return OK
     finally:
         datenbank.schliessen()
 
@@ -497,8 +553,14 @@ def befehl_spaetere_phase(args, konsole) -> int:
 # ------------------------------------------------------------ argparse ----
 
 
+# Die Argumente des laufenden Aufrufs - aus main(argv), nicht aus sys.argv,
+# damit auch ein Aufruf aus dem Programm heraus (Tests, gefuehrter Modus)
+# im Lauf-Protokoll richtig steht.
+_argumente: list[str] = []
+
+
 def _befehlszeile() -> str:
-    return " ".join(["fotosort", *sys.argv[1:]])
+    return " ".join(["fotosort", *_argumente])
 
 
 def _gemeinsam(unter: argparse.ArgumentParser) -> None:
@@ -546,7 +608,9 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
-    p = unterbefehle.add_parser("pruefen", help="Zieldateien nachrechnen")
+    p = unterbefehle.add_parser("pruefen", help="Zieldateien vollstaendig neu lesen und vergleichen")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("aufraeumen", help="gepruefte Quelldateien entfernen")
@@ -600,7 +664,9 @@ def _konsole(fehlerausgabe: bool = False):
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _argumente
     eltern = parser_bauen()
+    _argumente = list(sys.argv[1:] if argv is None else argv)
     args = eltern.parse_args(argv)
     if not args.befehl:
         eltern.print_help()
@@ -621,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
     # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
     # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren"):
+    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -641,6 +707,10 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_analyse(args, konsole)
         if args.befehl == "kopieren":
             return befehl_kopieren(args, konsole)
+        if args.befehl == "pruefen":
+            return befehl_pruefen(args, konsole)
+        if args.befehl == "bericht":
+            return befehl_bericht(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))
