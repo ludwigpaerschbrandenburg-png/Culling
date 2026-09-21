@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fotosort"
+version = "0.1.0"
+description = "Sortiert Fotos und Videos nach Aufnahmedatum und Kamera"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+# docs/architektur.md Abschnitt 3: bewusst wenige Abhaengigkeiten.
+# tzdata steht ohne jede Bedingung hier, insbesondere nicht mit
+# platform_system == "Windows" -- schlanke Container-Images bringen
+# oft keine Zeitzonendatenbank mit.
+dependencies = [
+    "blake3",
+    "rich",
+    "tomli-w",
+    "tzdata",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+fotosort = "fotosort.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
