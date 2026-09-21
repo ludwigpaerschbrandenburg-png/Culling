@@ -72,7 +72,17 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
+SCHEMA_VERSION = 2
+
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS quellen (
+    wurzel                   TEXT PRIMARY KEY,
+    hinzugefuegt_in_lauf     INTEGER,
+    zuletzt_gescannt_in_lauf INTEGER,
+    erreichbar               INTEGER NOT NULL DEFAULT 1,
+    laufwerk                 TEXT    NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS dateien (
     quellpfad               TEXT PRIMARY KEY,
     quellwurzel             TEXT NOT NULL,
@@ -81,9 +91,11 @@ CREATE TABLE IF NOT EXISTS dateien (
     dateityp                TEXT    NOT NULL DEFAULT '',
     hash                    TEXT    NOT NULL DEFAULT '',
     kamera                  TEXT    NOT NULL DEFAULT '',
+    kamera_modell           TEXT    NOT NULL DEFAULT '',
     aufnahme_zeit           TEXT    NOT NULL DEFAULT '',
     datum_quelle            INTEGER,
     datum_sicher            INTEGER,
+    datum_hinweis           TEXT    NOT NULL DEFAULT '',
     gruppe                  TEXT    NOT NULL DEFAULT '',
     zielpfad                TEXT    NOT NULL DEFAULT '',
     status                  TEXT    NOT NULL DEFAULT 'gefunden',
@@ -96,6 +108,7 @@ CREATE TABLE IF NOT EXISTS dateien (
 CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
 CREATE INDEX IF NOT EXISTS dateien_wurzel  ON dateien (quellwurzel);
 CREATE INDEX IF NOT EXISTS dateien_zielpfad ON dateien (zielpfad);
+CREATE INDEX IF NOT EXISTS dateien_status_typ ON dateien (status, dateityp);
 
 CREATE TABLE IF NOT EXISTS ziel_index (
     zielpfad                TEXT PRIMARY KEY,
@@ -314,6 +327,23 @@ def _jetzt() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _schema_pruefen(verbindung: sqlite3.Connection, pfad: Path) -> None:
+    """Eine Datenbank mit aelterem Schema ablehnen statt still weiterzumachen.
+
+    Eine frische Datei hat user_version 0 und keine Tabellen. Eine Datei mit
+    Tabellen, aber falscher Version, stammt aus einem frueheren Stand des
+    Programms (SPEC Abschnitt 6).
+    """
+    version = int(verbindung.execute("PRAGMA user_version").fetchone()[0])
+    if version == SCHEMA_VERSION:
+        return
+    hat_tabellen = verbindung.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'dateien'"
+    ).fetchone()[0]
+    if hat_tabellen:
+        raise FotosortFehler(meldungen.datenbank_schema_veraltet(pfad, version, SCHEMA_VERSION))
+
+
 class Datenbank:
     """Eine geoeffnete Archiv-Datenbank mit Sammelschreiben."""
 
@@ -361,7 +391,9 @@ class Datenbank:
             verbindung.execute("PRAGMA journal_mode=WAL")
             verbindung.execute("PRAGMA synchronous=NORMAL")
             verbindung.execute("PRAGMA foreign_keys=ON")
+            _schema_pruefen(verbindung, pfad)
             verbindung.executescript(SCHEMA)
+            verbindung.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         except BaseException:
             if sperre is not None:
                 sperre.freigeben()
@@ -548,6 +580,68 @@ class Datenbank:
             (pfad_text(quellwurzel), lauf),
         ).fetchone()
         return int(zeile["n"])
+
+    # -- Quellen (SPEC Abschnitt 4 Phase 1, Abschnitt 6) ------------------
+
+    def quelle_aufnehmen(self, wurzel, laufwerk: str, lauf: int) -> bool:
+        """Eine Quelle in die Liste aufnehmen. True, wenn sie neu war."""
+        wurzel = pfad_text(wurzel)
+        self._beginnen()
+        vorhanden = self.verbindung.execute(
+            "SELECT 1 FROM quellen WHERE wurzel = ?", (wurzel,)
+        ).fetchone()
+        if vorhanden:
+            self.verbindung.execute(
+                "UPDATE quellen SET laufwerk = ? WHERE wurzel = ?", (laufwerk, wurzel)
+            )
+            self._vielleicht_schreiben()
+            return False
+        self.verbindung.execute(
+            "INSERT INTO quellen (wurzel, hinzugefuegt_in_lauf, laufwerk) VALUES (?, ?, ?)",
+            (wurzel, lauf, laufwerk),
+        )
+        self._vielleicht_schreiben()
+        return True
+
+    def quellen_liste(self) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        return self.verbindung.execute("SELECT * FROM quellen ORDER BY wurzel").fetchall()
+
+    def quelle_gescannt(self, wurzel, lauf: int, erreichbar: bool) -> None:
+        self._beginnen()
+        if erreichbar:
+            self.verbindung.execute(
+                "UPDATE quellen SET zuletzt_gescannt_in_lauf = ?, erreichbar = 1 WHERE wurzel = ?",
+                (lauf, pfad_text(wurzel)),
+            )
+        else:
+            self.verbindung.execute(
+                "UPDATE quellen SET erreichbar = 0 WHERE wurzel = ?", (pfad_text(wurzel),)
+            )
+        self._vielleicht_schreiben()
+
+    def zaehler_je_quelle(self) -> dict[str, dict[str, int]]:
+        """Je Quelle: Anzahl gesamt, Bytes und Anzahl je Dateityp."""
+        self.stapel_schreiben()
+        ergebnis: dict[str, dict[str, int]] = {}
+        for z in self.verbindung.execute(
+            "SELECT quellwurzel, dateityp, COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b"
+            " FROM dateien GROUP BY quellwurzel, dateityp"
+        ):
+            eintrag = ergebnis.setdefault(z["quellwurzel"], {"gesamt": 0, "bytes": 0})
+            eintrag[z["dateityp"] or "sonstiges"] = int(z["n"])
+            eintrag["gesamt"] += int(z["n"])
+            eintrag["bytes"] += int(z["b"])
+        return ergebnis
+
+    def zaehler_je_status_und_quelle(self) -> dict[str, dict[str, int]]:
+        self.stapel_schreiben()
+        ergebnis: dict[str, dict[str, int]] = {}
+        for z in self.verbindung.execute(
+            "SELECT quellwurzel, status, COUNT(*) AS n FROM dateien GROUP BY quellwurzel, status"
+        ):
+            ergebnis.setdefault(z["quellwurzel"], {})[z["status"]] = int(z["n"])
+        return ergebnis
 
     # -- Ereignisse -------------------------------------------------------
 

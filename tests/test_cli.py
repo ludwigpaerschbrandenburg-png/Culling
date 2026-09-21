@@ -704,7 +704,7 @@ def test_geordneter_abbruch_schliesst_den_lauf(
     def scheitern(*args, **kwargs):
         raise FotosortFehler("Abbruch: aus Gruenden")
 
-    monkeypatch.setattr(cli.scan, "ausfuehren", scheitern)
+    monkeypatch.setattr(cli.scan, "ausfuehren_mehrere", scheitern)
     rueckgabe, ausgabe = _laufen(
         capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel)
     )

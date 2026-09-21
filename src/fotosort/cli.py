@@ -201,45 +201,67 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False) -> Archi
 
 
 def befehl_scan(args, konsole) -> int:
-    if not args.quelle:
-        konsole.print(meldungen.quelle_fehlt())
-        return FEHLENDE_ANGABE
-    quelle = Path(args.quelle)
-    if not quelle.is_dir():
-        konsole.print(meldungen.quelle_existiert_nicht(quelle))
-        return FEHLER
+    gewuenscht = [Path(q) for q in (args.quelle or [])]
+    ziel = Path(args.ziel)
+    archiv_da = ziel.exists() and db.archiv_id_vorhanden(ziel)
 
-    # Die Lage wird vor dem Anlegen des Archivs geprueft, damit ein Abbruch
-    # kein halbes Archiv hinterlaesst (SPEC Abschnitt 4 Phase 1).
-    lage = pfade.lage_pruefen(quelle, Path(args.ziel))
-    if lage == "gleich":
-        konsole.print(meldungen.quelle_gleich_ziel(pfade.aufloesen(quelle)))
-        return FEHLER
-    if lage == "quelle_in_ziel":
-        konsole.print(meldungen.quelle_in_ziel(pfade.aufloesen(quelle)))
-        return FEHLER
+    if not gewuenscht and not archiv_da:
+        konsole.print(meldungen.keine_quellen_bekannt())
+        return FEHLENDE_ANGABE
+
+    # Vorpruefung ohne Archiv: Kann keine der genannten Quellen durchlaufen
+    # werden, soll kein halbes Archiv entstehen (SPEC Abschnitt 4 Phase 1).
+    # Die Gruende nennt spaeter ausfuehren_mehrere je Quelle; hier faellt
+    # nur die Entscheidung, ob das Archiv ueberhaupt angelegt wird.
+    if gewuenscht and not archiv_da:
+        brauchbar = [
+            q for q in gewuenscht
+            if q.is_dir() and pfade.lage_pruefen(q, ziel) not in ("gleich", "quelle_in_ziel")
+        ]
+        if not brauchbar:
+            for q in gewuenscht:
+                if not q.is_dir():
+                    konsole.print(meldungen.quelle_existiert_nicht(q))
+                elif pfade.lage_pruefen(q, ziel) == "gleich":
+                    konsole.print(meldungen.quelle_gleich_ziel(pfade.aufloesen(q)))
+                else:
+                    konsole.print(meldungen.quelle_in_ziel(pfade.aufloesen(q)))
+            return FEHLER
 
     archiv = archiv_oeffnen(args, konsole, anlegen=True, sperren=True)
     datenbank = archiv.datenbank
     lauf = datenbank.lauf_beginnen(_befehlszeile())
     try:
-        konsole.print(meldungen.scan_beginnt(pfade.aufloesen(quelle), archiv.ziel))
+        quellen, _bekannt = scan.quellen_bestimmen(gewuenscht, datenbank)
+        if not quellen:
+            konsole.print(meldungen.keine_quellen_bekannt())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return FEHLENDE_ANGABE
+
+        konsole.print(meldungen.scan_quellen_beginnt([pfade.aufloesen(q) for q in quellen], archiv.ziel))
         try:
-            ergebnis = scan.ausfuehren(
-                quelle, archiv.ziel, archiv.konf, datenbank, lauf, konsole
+            gesamt = scan.ausfuehren_mehrere(
+                quellen, archiv.ziel, archiv.konf, datenbank, lauf, konsole
             )
         except FotosortFehler:
-            # Ein geordneter Abbruch ist kein Absturz: Der Lauf bekommt ein
-            # Ende und einen Vermerk, damit "fotosort status" hinterher
-            # nicht dauerhaft "abgestuerzt" anzeigt.
             _lauf_sauber_abbrechen(datenbank, lauf)
             raise
+
+        if not gesamt.je_quelle:
+            konsole.print(meldungen.scan_nichts_zu_tun(gesamt.abgelehnt, gesamt.nicht_erreichbar))
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return FEHLER
+
+        ergebnis = gesamt.gesamt
+        text = meldungen.scan_neue_quellen(gesamt.neue_quellen)
+        if text:
+            konsole.print(text)
+        text = meldungen.scan_laufwerke(gesamt.laufwerke, len(gesamt.je_quelle))
+        if text:
+            konsole.print(text)
         konsole.print(
             meldungen.scan_ergebnis(
-                ergebnis.dateien,
-                ergebnis.bytes_gesamt,
-                ergebnis.je_typ,
-                ergebnis.sekunden,
+                ergebnis.dateien, ergebnis.bytes_gesamt, ergebnis.je_typ, gesamt.sekunden
             )
         )
         konsole.print(
@@ -256,6 +278,10 @@ def befehl_scan(args, konsole) -> int:
                 ergebnis.verschwunden_ausgewertet,
             )
         )
+        text = meldungen.scan_je_quelle(gesamt.je_quelle)
+        if text:
+            konsole.print("")
+            konsole.print(text)
         if ergebnis.ordner_nicht_lesbar:
             konsole.print(
                 meldungen.scan_ordner_nicht_lesbar(
@@ -269,7 +295,7 @@ def befehl_scan(args, konsole) -> int:
                     archiv.konf.wert("quelle.ausschlussmuster")
                 )
             )
-        if ergebnis.abgebrochen:
+        if gesamt.abgebrochen:
             konsole.print("")
             konsole.print(meldungen.scan_abgebrochen())
             return ABGEBROCHEN
@@ -278,12 +304,14 @@ def befehl_scan(args, konsole) -> int:
         datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
         konsole.print("")
         konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
-        # Ein nicht lesbarer Ordner ist ein Fehler, auch wenn der Rest
-        # geklappt hat: Der Scan hat nicht alles gesehen.
-        return FEHLER if ergebnis.ordner_nicht_lesbar else OK
+        # Nicht alles gesehen - nicht lesbarer Ordner, nicht erreichbare
+        # oder abgelehnte Quelle - ist ein Fehler, auch wenn der Rest lief.
+        unvollstaendig = (
+            ergebnis.ordner_nicht_lesbar or gesamt.nicht_erreichbar or gesamt.abgelehnt
+        )
+        return FEHLER if unvollstaendig else OK
     finally:
         datenbank.schliessen()
-
 
 def _lauf_sauber_abbrechen(datenbank, lauf: int) -> None:
     """Den Lauf mit Ende und Vermerk schliessen (geordneter Abbruch)."""
@@ -308,6 +336,14 @@ def befehl_status(args, konsole) -> int:
         konsole.print("")
         konsole.print(
             meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
+        )
+        konsole.print("")
+        konsole.print(
+            meldungen.status_je_quelle(
+                datenbank.quellen_liste(),
+                datenbank.zaehler_je_quelle(),
+                datenbank.zaehler_je_status_und_quelle(),
+            )
         )
         zeile = datenbank.letzter_lauf()
         konsole.print("")
@@ -398,7 +434,12 @@ def parser_bauen() -> argparse.ArgumentParser:
     unterbefehle = eltern.add_subparsers(dest="befehl", metavar="BEFEHL")
 
     p = unterbefehle.add_parser("scan", help="Quelle durchlaufen und erfassen")
-    p.add_argument("--quelle", metavar="PFAD", help="Quellordner (nur beim Scan noetig)")
+    p.add_argument(
+        "--quelle",
+        metavar="PFAD",
+        action="append",
+        help="Quellordner; mehrfach angebbar. Ohne Angabe alle bekannten Quellen",
+    )
     p.add_argument(
         "--ziel-anlegen",
         action="store_true",

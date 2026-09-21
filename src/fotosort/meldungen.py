@@ -550,3 +550,111 @@ def abbruch_durch_signal() -> str:
         "Das Programm wurde vom System zum Beenden aufgefordert.\n"
         "Das Bisherige ist gespeichert; ein neuer Lauf macht dort weiter."
     )
+
+
+# ---------------------------------------------------------- Quellen -----
+
+
+def datenbank_schema_veraltet(pfad, gefunden: int, erwartet: int) -> str:
+    return (
+        f"Die Datenbank {pfad} stammt aus einem frueheren Stand des Programms\n"
+        f"(Schema-Version {gefunden}, erwartet {erwartet}). Sie wird nicht\n"
+        "stillschweigend weiterbenutzt. Da es noch keine echten Archive gibt,\n"
+        "hilft: den Archiv-Ordner loeschen und neu scannen."
+    )
+
+
+def quelle_nicht_erreichbar(pfad) -> str:
+    return (
+        f"Quelle nicht erreichbar: {pfad}\n"
+        "  Sie bleibt bekannt und wird uebersprungen. Ihre Dateien gelten\n"
+        "  nicht als verschwunden. Platte eingesteckt, Netzlaufwerk eingebunden?"
+    )
+
+
+def quelle_abgelehnt_ueberschneidung(pfad, andere) -> str:
+    return (
+        f"Quelle abgelehnt: {pfad}\n"
+        f"  Sie ueberschneidet sich mit der Quelle {andere}. Dieselbe Datei\n"
+        "  wuerde sonst zweimal erfasst. Die uebrigen Quellen laufen weiter."
+    )
+
+
+def keine_quellen_bekannt() -> str:
+    return (
+        "Dieses Archiv kennt noch keine Quelle. Beim ersten Scan muss\n"
+        "mindestens eine angegeben werden: fotosort scan --quelle <Ordner> --ziel <Ziel>"
+    )
+
+
+def scan_quellen_beginnt(quellen: list, ziel) -> str:
+    zeilen = ["Scan laeuft."]
+    for q in quellen:
+        zeilen.append(f"  Quelle: {q}")
+    zeilen.append(f"  Ziel:   {ziel}")
+    return "\n".join(zeilen)
+
+
+def scan_neue_quellen(neue: list) -> str:
+    if not neue:
+        return ""
+    zeilen = [f"Neu aufgenommene Quelle{'n' if len(neue) != 1 else ''}:"]
+    zeilen += [f"  {q}" for q in neue]
+    return "\n".join(zeilen)
+
+
+def scan_laufwerke(anzahl_laufwerke: int, anzahl_quellen: int) -> str:
+    if anzahl_quellen <= 1:
+        return ""
+    if anzahl_laufwerke == 1:
+        return f"{anzahl(anzahl_quellen)} Quellen auf einem Laufwerk, nacheinander gelesen."
+    return (
+        f"{anzahl(anzahl_quellen)} Quellen auf {anzahl(anzahl_laufwerke)} Laufwerken,"
+        " je Laufwerk parallel gelesen."
+    )
+
+
+def scan_je_quelle(je_quelle: dict) -> str:
+    """Eine Zeile je Quelle: Dateien, Groesse, neu/unveraendert/veraendert."""
+    if len(je_quelle) <= 1:
+        return ""
+    zeilen = ["Je Quelle"]
+    for wurzel, e in je_quelle.items():
+        zeilen.append(f"  {wurzel}")
+        zeilen.append(
+            f"    {anzahl(e.dateien)} Dateien, {groesse(e.bytes_gesamt)}"
+            f" — neu {anzahl(e.neu)}, unveraendert {anzahl(e.unveraendert)},"
+            f" veraendert {anzahl(e.veraendert)}"
+            + (f", nicht mehr vorhanden {anzahl(e.verschwunden)}" if e.verschwunden_ausgewertet else "")
+            + (f", Fehler {anzahl(e.fehler)}" if e.fehler else "")
+        )
+    return "\n".join(zeilen)
+
+
+def scan_nichts_zu_tun(abgelehnt: list, nicht_erreichbar: list) -> str:
+    return (
+        "Keine Quelle konnte durchlaufen werden"
+        f" ({anzahl(len(abgelehnt))} abgelehnt, {anzahl(len(nicht_erreichbar))} nicht erreichbar)."
+    )
+
+
+def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict) -> str:
+    """Fuer 'fotosort status': eine Zeile je bekannter Quelle."""
+    if not quellen:
+        return "Quellen: noch keine bekannt."
+    zeilen = ["Quellen"]
+    for z in quellen:
+        wurzel = z["wurzel"]
+        zaehler = je_quelle.get(wurzel, {})
+        stati = je_status.get(wurzel, {})
+        stand = "erreichbar" if int(z["erreichbar"] or 0) else "NICHT ERREICHBAR beim letzten Scan"
+        zeilen.append(f"  {wurzel}  ({stand})")
+        zeilen.append(
+            f"    {anzahl(zaehler.get('gesamt', 0))} Dateien, {groesse(zaehler.get('bytes', 0))}"
+            + (
+                "  —  " + ", ".join(f"{s} {anzahl(n)}" for s, n in sorted(stati.items()))
+                if stati
+                else ""
+            )
+        )
+    return "\n".join(zeilen)

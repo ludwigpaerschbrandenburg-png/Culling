@@ -176,9 +176,11 @@ Die Spalten sind dieselben wie in SPEC §6; hier steht zu jeder, wofür sie gebr
 | `gruppe` | Kennung der zusammengehörigen Dateien (RAW+JPG+Sidecars). Alle Dateien einer Gruppe bekommen denselben Zielordner und denselben Namensanhang |
 | `hash` | BLAKE3-Prüfsumme der Quelldatei, wird beim Kopieren nebenbei berechnet; bei umbenannten Dateien erst in der Prüf-Phase aus der Zieldatei. Leer, solange die Datei noch nicht gelesen wurde |
 | `kamera` | fertiger Ordnername nach der Alias-Tabelle, z. B. `A7C2` |
+| `kamera_modell` | roher Modellname aus den Metadaten, für die Liste der gefundenen Modelle |
 | `aufnahme_zeit` | ermitteltes Datum mit Uhrzeit, als Ortszeit; daraus werden die Ordner gebildet |
 | `datum_quelle` | welche der sechs Datumsquellen aus SPEC §3 gewonnen hat, als Zahl 1 bis 6 |
 | `datum_sicher` | 0 oder 1. Unsicher ist ausschließlich das Datum aus Quelle 6; das steuert `_Ohne_Datum/` |
+| `datum_hinweis` | leer, `zeitzone_angenommen` oder `dateiname_ohne_uhrzeit` — die Berichtszählungen aus §10 |
 | `zielpfad` | in Phase 2 berechneter, später tatsächlicher Zielpfad samt Anhang `_1`, `_2` … bei Namenskonflikten; leer, solange nicht berechnet |
 | `status` | siehe unten |
 | `fehlergrund` | Klartext bei `fehler` und `uebersprungen`, landet so im Bericht; sonst leer |
@@ -275,6 +277,18 @@ der Wert, der in `bestaetigt_in_lauf`, `gefunden_in_lauf` und `zuletzt_gesehen_i
 Strg+C beendet, bleibt `ende` leer; daran ist ein abgebrochener Lauf später erkennbar. Aus
 diesen Zeilen entsteht der Verlauf im Bericht, und Geschwindigkeitsmessungen zwischen
 verschiedenen Einstellungen lassen sich vergleichen.
+
+### Tabelle `quellen` — die Liste der Quellordner
+
+`wurzel`, `hinzugefuegt_in_lauf`, `zuletzt_gescannt_in_lauf`, `erreichbar`, `laufwerk` (SPEC §6).
+Ein Archiv hat viele Quellen — verschiedene Platten, Ordner, Netzlaufwerke —, und alle gehen in
+dasselbe Ziel. Die Tabelle merkt sich, welche das sind, damit `scan` ohne Angabe alle kennt und
+eine gerade nicht eingesteckte Platte als nicht erreichbar gemeldet wird, statt dass ihre
+Bilder als verschwunden gelten. `laufwerk` gruppiert die Quellen für den parallelen Durchlauf:
+zwei Quellen auf derselben Platte nacheinander, zwei Platten gleichzeitig. Der Datenbankzugriff
+bleibt dabei einsträngig — die Durchläufe sammeln in eine Warteschlange, verbucht wird im
+Hauptstrang. SQLite-Verbindungen sind nicht dafür gebaut, aus mehreren Strängen beschrieben zu
+werden; so bleibt das Sammelschreiben aus §6 unverändert.
 
 ### Tabelle `lauf_ereignisse` — was zu keiner Datei gehört
 

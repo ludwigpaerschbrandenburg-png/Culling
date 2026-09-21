@@ -210,3 +210,27 @@ def lage_pruefen(quelle: Path, ziel: Path) -> str:
     if liegt_in(q, z):
         return "quelle_in_ziel"
     return "getrennt"
+
+
+def laufwerk_kennung(p: Path) -> str:
+    """Kennung des physischen Laufwerks, nach der Quellen gruppiert werden.
+
+    SPEC Abschnitt 4 Phase 1: Quellen auf verschiedenen Laufwerken werden
+    parallel gelesen, auf demselben nacheinander. Linux: Geraetenummer der
+    Wurzel. Windows: Laufwerksbuchstabe; bei Netzpfaden der Server, nicht die
+    Freigabe, weil mehrere Freigaben meist auf denselben Platten liegen. Dass
+    zwei Laufwerksbuchstaben auf derselben Platte liegen koennen, wird hier
+    nicht erkannt (docs/todo.md, Phase 6).
+    """
+    p = aufloesen(Path(p))
+    if _IST_WINDOWS:  # pragma: no cover - nur Windows
+        text = kurz_text(str(p))
+        if text.startswith("\\\\"):
+            teile = text.lstrip("\\").split("\\")
+            return "server:" + (teile[0].lower() if teile else "?")
+        laufwerk = p.drive.rstrip(":").upper()
+        return "laufwerk:" + (laufwerk or "?")
+    try:
+        return "dev:" + str(os.stat(_vorhandener_teil(p)).st_dev)
+    except OSError:
+        return "dev:?"
