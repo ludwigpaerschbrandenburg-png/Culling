@@ -32,7 +32,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ pfade.py               Pfad-Hilfen: langes Präfix, Netz- und Laufwerkserkennung
 │  │
 │  ├─ scan.py                Phase 1: Quelle durchlaufen, zählen
-│  ├─ metadaten.py           ExifTool-Prozesse verwalten, Felder auslesen
+│  ├─ analyse.py             Phase 2: Gruppen, Metadaten, Datum, Ziel je Datei
+│  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2
 │  ├─ datum.py               Aufnahmedatum bestimmen        ← reine Logik
 │  ├─ kamera.py              Modell → Ordnername, Aliase    ← reine Logik
 │  ├─ dateitypen.py          Dateityp, Sidecar-Zuordnung    ← reine Logik

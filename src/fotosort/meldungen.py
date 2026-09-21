@@ -658,3 +658,77 @@ def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict) -> str:
             )
         )
     return "\n".join(zeilen)
+
+
+# ---------------------------------------------------------- Analyse -----
+
+
+def analyse_beginnt(prozesse: int, offen: int) -> str:
+    return (
+        f"Analyse laeuft: {anzahl(offen)} Dateien zu bearbeiten,"
+        f" {anzahl(prozesse)} ExifTool-Prozess{'e' if prozesse != 1 else ''}."
+    )
+
+
+def analyse_laeuft(bisher: int, gesamt: int) -> str:
+    return f"Analyse: {anzahl(bisher)} von {anzahl(gesamt)} Dateien"
+
+
+def analyse_nichts_zu_tun() -> str:
+    return "Nichts zu analysieren: Es gibt keine Dateien mit Status gefunden."
+
+
+def analyse_abgebrochen() -> str:
+    return "Abgebrochen. Das Bisherige ist gespeichert; der naechste Lauf macht dort weiter."
+
+
+def analyse_ergebnis(e) -> str:
+    """Zaehler dieses Laufs (ein analyse.Ergebnis)."""
+    zeilen = [
+        "Ergebnis der Analyse (dieser Lauf)",
+        f"  bearbeitet:                  {anzahl(e.bearbeitet)}",
+        f"  Gruppen (RAW+JPG, Sidecars): {anzahl(e.gruppen)}",
+        f"  Sidecars ohne Hauptdatei:    {anzahl(e.sidecar_ohne_haupt)}",
+        f"  Fehler (nicht lesbar):       {anzahl(e.fehler)}",
+        f"  Zielordner mit Zusatz wiederverwendet: {anzahl(e.wiederverwendet)}",
+    ]
+    if e.mehrdeutig:
+        zeilen.append(f"  davon mehrdeutig (alphabetisch gewaehlt): {anzahl(e.mehrdeutig)}")
+    zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
+    if e.sekunden > 0:
+        zeilen.append(f"  Durchsatz:       {e.bearbeitet / e.sekunden:,.1f} Dateien/s".replace(",", "."))
+    zeilen.append(f"  ExifTool-Prozesse: {anzahl(e.prozesse)}")
+    return "\n".join(zeilen)
+
+
+def analyse_zusammenfassung(z: dict) -> str:
+    """Der Plan als Ganzes (alle analysierten Dateien, nicht nur dieser Lauf)."""
+    zeilen = ["Zusammenfassung des Plans"]
+    je = z.get("je_jahr_quelle", {})
+    jahre: dict[str, int] = {}
+    for wurzel, nach_jahr in je.items():
+        for jahr, n in nach_jahr.items():
+            jahre[jahr] = jahre.get(jahr, 0) + n
+    zeilen.append("  Dateien pro Jahr (gesamt):")
+    for jahr in sorted(jahre, key=lambda j: (j == "ohne Datum", j)):
+        zeilen.append(f"    {jahr:<12}{anzahl(jahre[jahr]):>8}")
+    if len(je) > 1:
+        zeilen.append("  Dateien pro Jahr je Quelle:")
+        for wurzel in sorted(je):
+            zeilen.append(f"    {wurzel}")
+            for jahr in sorted(je[wurzel], key=lambda j: (j == "ohne Datum", j)):
+                zeilen.append(f"      {jahr:<12}{anzahl(je[wurzel][jahr]):>8}")
+    zeilen.append("  Gefundene Kameramodelle (Modell -> Ordner):")
+    for roh, ordner, n in z.get("modelle", []):
+        zeilen.append(f"    {(roh or '(kein Modell)'):<28} -> {ordner:<20}{anzahl(n):>8}")
+    zeilen.append(
+        "  Aliase fuer unbekannte Modelle traegt man in der config.toml unter"
+        " [kamera.aliase] nach (fotosort config), BEVOR kopiert wird."
+    )
+    zeilen.append(f"  Ohne sicheres Datum (kommt nach _Ohne_Datum): {anzahl(z.get('unsicher', 0))}")
+    zeilen.append(f"  Zeitzone angenommen (Video ohne Offset):     {anzahl(z.get('zeitzone_angenommen', 0))}")
+    zeilen.append(f"  Datum aus Dateiname ohne Uhrzeit:            {anzahl(z.get('ohne_uhrzeit', 0))}")
+    zeilen.append(f"  Sidecars ohne Hauptdatei:                    {anzahl(z.get('sidecar_ohne_haupt', 0))}")
+    zeilen.append(f"  Fehler:                                      {anzahl(z.get('fehler', 0))}")
+    zeilen.append(f"  Noch nicht analysiert:                       {anzahl(z.get('offen', 0))}")
+    return "\n".join(zeilen)

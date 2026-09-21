@@ -40,9 +40,9 @@ def test_zwei_quellen_werden_beide_erfasst(capsys, zwei_quellen, ziel, nachschau
     assert set(quellen) == {str(pfade.aufloesen(a)), str(pfade.aufloesen(b))}
     with nachschauen(ziel) as d:
         je = d.zaehler_je_quelle()
-        assert je[str(pfade.aufloesen(a))]["gesamt"] == 22
-        assert je[str(pfade.aufloesen(b))]["gesamt"] == 22
-        assert d.zaehler_je_status()["gefunden"] == 38  # 2 x 19 echte Typen
+        assert je[str(pfade.aufloesen(a))]["gesamt"] == testbaum.ERWARTET_GESAMT
+        assert je[str(pfade.aufloesen(b))]["gesamt"] == testbaum.ERWARTET_GESAMT
+        assert d.zaehler_je_status()["gefunden"] == 2 * (testbaum.ERWARTET_GESAMT - testbaum.ERWARTET_JE_TYP["sonstiges"])
     assert "Je Quelle" in ausgabe
     assert "2 Quellen" in ausgabe
 
@@ -82,7 +82,7 @@ def test_quelle_in_quelle_wird_abgelehnt(capsys, quelle, ziel, nachschauen):
     quellen = _quellen(nachschauen, ziel)
     assert set(quellen) == {str(pfade.aufloesen(quelle))}
     with nachschauen(ziel) as d:
-        assert d.zaehler_je_dateityp()["foto"] == 13  # nichts doppelt
+        assert d.zaehler_je_dateityp()["foto"] == testbaum.ERWARTET_JE_TYP["foto"]  # nichts doppelt
         assert d.ereignisse_zaehlen(1, scan.ART_QUELLE_ABGELEHNT) == 1
 
 
@@ -99,7 +99,7 @@ def test_dieselbe_quelle_zweimal_genannt_zaehlt_einmal(capsys, quelle, ziel, nac
     rueckgabe, _ = _laufen(capsys, "scan", "--quelle", quelle, "--quelle", quelle, "--ziel", ziel)
     assert rueckgabe == cli.OK
     with nachschauen(ziel) as d:
-        assert d.zaehler_je_dateityp()["foto"] == 13
+        assert d.zaehler_je_dateityp()["foto"] == testbaum.ERWARTET_JE_TYP["foto"]
     assert len(_quellen(nachschauen, ziel)) == 1
 
 
@@ -125,9 +125,9 @@ def test_nicht_erreichbare_quelle_laesst_ihre_dateien_nicht_verschwinden(
         n = d.verbindung.execute(
             "SELECT COUNT(*) FROM dateien WHERE quellwurzel = ?", (b_auf,)
         ).fetchone()[0]
-        assert n == 22
+        assert n == testbaum.ERWARTET_GESAMT
         # und sie gelten nicht als verschwunden
-        assert d.nicht_mehr_gesehen_zaehlen(b_auf, 2) == 22  # das waere die naive Zahl ...
+        assert d.nicht_mehr_gesehen_zaehlen(b_auf, 2) == testbaum.ERWARTET_GESAMT  # das waere die naive Zahl ...
         assert d.ereignisse_zaehlen(2, scan.ART_QUELLE_NICHT_ERREICHBAR) == 1
     # ... aber die Ausgabe darf sie nicht als "nicht mehr vorhanden" zaehlen
     assert "nicht mehr vorhanden:  0" in ausgabe or "Quelle nicht mehr vorhanden:  0" in ausgabe
@@ -170,7 +170,7 @@ def test_scan_ohne_angabe_scannt_alle_bekannten(capsys, zwei_quellen, ziel, nach
     assert rueckgabe == cli.OK
     quellen = _quellen(nachschauen, ziel)
     assert all(z["zuletzt_gescannt_in_lauf"] == 2 for z in quellen.values())
-    assert "unveraendert uebernommen:     44" in ausgabe
+    assert f"unveraendert uebernommen:     {2 * testbaum.ERWARTET_GESAMT}" in ausgabe
 
 
 def test_erster_scan_ohne_quelle_meldet_das(capsys, ziel):
@@ -202,8 +202,8 @@ def test_ausfuehren_mehrere_liefert_ergebnis_je_quelle(zwei_quellen, ziel, archi
         lauf = dbank.lauf_beginnen("test")
         gesamt = scan.ausfuehren_mehrere([a, b], ziel, konf, dbank, lauf)
         assert set(gesamt.je_quelle) == {str(pfade.aufloesen(a)), str(pfade.aufloesen(b))}
-        assert gesamt.gesamt.dateien == 44
-        assert all(e.dateien == 22 for e in gesamt.je_quelle.values())
+        assert gesamt.gesamt.dateien == 2 * testbaum.ERWARTET_GESAMT
+        assert all(e.dateien == testbaum.ERWARTET_GESAMT for e in gesamt.je_quelle.values())
         assert gesamt.laufwerke == 1
         assert gesamt.gesamt.verschwunden_ausgewertet
     finally:

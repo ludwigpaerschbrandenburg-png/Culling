@@ -643,6 +643,124 @@ class Datenbank:
             ergebnis.setdefault(z["quellwurzel"], {})[z["status"]] = int(z["n"])
         return ergebnis
 
+    # -- Analyse (SPEC Abschnitt 4 Phase 2) -------------------------------
+
+    ECHTE_TYPEN_SQL = "('foto', 'raw', 'video', 'sidecar')"
+
+    def zu_analysieren(self, ab: str = "", grenze: int = 5000) -> list[sqlite3.Row]:
+        """Die naechsten Zeilen mit Status gefunden und echtem Dateityp.
+
+        Seitenweise ueber quellpfad, damit nicht alles auf einmal im
+        Speicher liegt. Der Aufrufer traegt den letzten Pfad als "ab" weiter.
+        """
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT quellpfad, quellwurzel, dateityp, groesse, mtime FROM dateien"
+            f" WHERE status = 'gefunden' AND dateityp IN {self.ECHTE_TYPEN_SQL}"
+            " AND quellpfad > ? ORDER BY quellpfad LIMIT ?",
+            (ab, int(grenze)),
+        ).fetchall()
+
+    def anzahl_zu_analysieren(self) -> int:
+        self.stapel_schreiben()
+        return int(
+            self.verbindung.execute(
+                "SELECT COUNT(*) FROM dateien WHERE status = 'gefunden'"
+                f" AND dateityp IN {self.ECHTE_TYPEN_SQL}"
+            ).fetchone()[0]
+        )
+
+    def ordner_inhalt(self, ordner_text: str, trenner: str) -> list[sqlite3.Row]:
+        """Alle Dateien echten Typs direkt in diesem Quellordner, jeder Status.
+
+        Fuer die Gruppenbildung: Auch eine schon analysierte RAW-Datei bleibt
+        die Hauptdatei ihres noch nicht analysierten Sidecars.
+        """
+        anfang = ordner_text.rstrip(trenner) + trenner
+        zeilen = self.verbindung.execute(
+            "SELECT quellpfad, dateityp, status, kamera, kamera_modell, aufnahme_zeit,"
+            " datum_quelle, datum_sicher, datum_hinweis, zielpfad, gruppe, mtime, groesse"
+            " FROM dateien WHERE quellpfad > ? AND quellpfad < ?"
+            f" AND dateityp IN {self.ECHTE_TYPEN_SQL} ORDER BY quellpfad",
+            (anfang, anfang + "\uffff"),
+        ).fetchall()
+        # Nur direkte Kinder: kein weiterer Trenner hinter dem Anfang.
+        return [z for z in zeilen if trenner not in z["quellpfad"][len(anfang):]]
+
+    def analyse_setzen(
+        self,
+        quellpfad,
+        *,
+        kamera: str,
+        kamera_modell: str,
+        aufnahme_zeit: str,
+        datum_quelle: int,
+        datum_sicher: int,
+        datum_hinweis: str,
+        gruppe: str,
+        zielpfad,
+        status: str = "analysiert",
+        fehlergrund: str = "",
+    ) -> None:
+        if status not in STATUS:
+            raise ValueError(f"Unbekannter Status: {status!r}")
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET kamera = ?, kamera_modell = ?, aufnahme_zeit = ?,"
+            " datum_quelle = ?, datum_sicher = ?, datum_hinweis = ?, gruppe = ?,"
+            " zielpfad = ?, status = ?, fehlergrund = ? WHERE quellpfad = ?",
+            (
+                kamera, kamera_modell, aufnahme_zeit, datum_quelle, int(datum_sicher),
+                datum_hinweis, pfad_text(gruppe), pfad_text(zielpfad) if zielpfad else "",
+                status, fehlergrund, pfad_text(quellpfad),
+            ),
+        )
+        self._vielleicht_schreiben()
+
+    def analyse_zusammenfassung(self) -> dict:
+        """Zahlen fuer die Zusammenfassung nach der Analyse (SPEC Abschnitt 4 Phase 2)."""
+        self.stapel_schreiben()
+        v = self.verbindung
+        je_jahr_quelle: dict[str, dict[str, int]] = {}
+        for z in v.execute(
+            "SELECT quellwurzel, CASE WHEN aufnahme_zeit = '' OR datum_sicher = 0"
+            " THEN 'ohne Datum' ELSE substr(aufnahme_zeit, 1, 4) END AS jahr, COUNT(*) AS n"
+            " FROM dateien WHERE status = 'analysiert' GROUP BY quellwurzel, jahr"
+        ):
+            je_jahr_quelle.setdefault(z["quellwurzel"], {})[z["jahr"]] = int(z["n"])
+        modelle = [
+            (z["kamera_modell"], z["kamera"], int(z["n"]))
+            for z in v.execute(
+                "SELECT kamera_modell, kamera, COUNT(*) AS n FROM dateien"
+                " WHERE status = 'analysiert' AND dateityp != 'sidecar'"
+                " GROUP BY kamera_modell, kamera ORDER BY n DESC, kamera_modell"
+            )
+        ]
+        def zaehlen(sql: str) -> int:
+            return int(v.execute(sql).fetchone()[0])
+        return {
+            "je_jahr_quelle": je_jahr_quelle,
+            "modelle": modelle,
+            "analysiert": zaehlen("SELECT COUNT(*) FROM dateien WHERE status = 'analysiert'"),
+            "unsicher": zaehlen(
+                "SELECT COUNT(*) FROM dateien WHERE status = 'analysiert' AND datum_sicher = 0"
+            ),
+            "zeitzone_angenommen": zaehlen(
+                "SELECT COUNT(*) FROM dateien WHERE status = 'analysiert'"
+                " AND datum_hinweis = 'zeitzone_angenommen'"
+            ),
+            "ohne_uhrzeit": zaehlen(
+                "SELECT COUNT(*) FROM dateien WHERE status = 'analysiert'"
+                " AND datum_hinweis = 'dateiname_ohne_uhrzeit'"
+            ),
+            "sidecar_ohne_haupt": zaehlen(
+                "SELECT COUNT(*) FROM dateien WHERE status = 'uebersprungen'"
+                " AND fehlergrund = 'Sidecar ohne Hauptdatei'"
+            ),
+            "fehler": zaehlen("SELECT COUNT(*) FROM dateien WHERE status = 'fehler'"),
+            "offen": self.anzahl_zu_analysieren(),
+        }
+
     # -- Ereignisse -------------------------------------------------------
 
     def ereignis(self, lauf: int, art: str, pfad="", anzahl: int = 1, text: str = "") -> None:

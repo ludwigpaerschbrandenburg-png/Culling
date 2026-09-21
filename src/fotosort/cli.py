@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, metadaten, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -401,6 +401,48 @@ def _editor_oeffnen(pfad: Path) -> bool:
     return True
 
 
+def befehl_analyse(args, konsole) -> int:
+    """Phase 2: Metadaten lesen, Ziel berechnen (SPEC Abschnitt 4 Phase 2)."""
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True)
+    datenbank = archiv.datenbank
+    try:
+        # archiv_oeffnen hat ExifTool bereits geprueft (harter Abbruch fuer
+        # analyse); hier nur noch den Pfad holen.
+        gefunden, _wo = exiftool_finden(archiv.konf)
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        offen = datenbank.anzahl_zu_analysieren()
+        prozesse = metadaten.prozesse_bestimmen(archiv.konf)
+        if offen == 0:
+            konsole.print(meldungen.analyse_nichts_zu_tun())
+        else:
+            konsole.print(meldungen.analyse_beginnt(prozesse, offen))
+        ergebnis = None
+        if offen:
+            try:
+                ergebnis = analyse.ausfuehren(
+                    archiv.ziel, archiv.konf, datenbank, lauf, gefunden, konsole, prozesse
+                )
+            except FotosortFehler:
+                _lauf_sauber_abbrechen(datenbank, lauf)
+                raise
+            konsole.print("")
+            konsole.print(meldungen.analyse_ergebnis(ergebnis))
+        konsole.print("")
+        konsole.print(meldungen.analyse_zusammenfassung(datenbank.analyse_zusammenfassung()))
+        if ergebnis is not None and ergebnis.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.analyse_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return ABGEBROCHEN
+        datenbank.lauf_beenden(lauf)
+        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
+        konsole.print("")
+        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+        return FEHLER if (ergebnis is not None and ergebnis.fehler) else OK
+    finally:
+        datenbank.schliessen()
+
+
 def befehl_spaetere_phase(args, konsole) -> int:
     konsole.print(meldungen.noch_nicht_gebaut(args.befehl, PHASE_JE_BEFEHL[args.befehl]))
     return SPAETERE_PHASE
@@ -544,6 +586,8 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_status(args, konsole)
         if args.befehl == "config":
             return befehl_config(args, konsole)
+        if args.befehl == "analyse":
+            return befehl_analyse(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

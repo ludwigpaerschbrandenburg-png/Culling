@@ -31,15 +31,22 @@ nur verändernde Befehle legen einen Lauf an (§6), Ereignisarten (§6), `--ziel
 
 ## Phase 2 — Analyse
 
-- [ ] Metadaten über ExifTool im Stapelbetrieb (`-stay_open`)
-- [ ] Datumsermittlung mit allen sechs Quellen aus SPEC §3
-- [ ] Kamera-Aliase, Gruppen, Zielpfad-Berechnung
+Gebaut: `metadaten.py` (ExifTool-Pool mit `-stay_open`, Videos ohne `-fast2`, weil das
+eingebettete Sony-XML sonst fehlt), `datum.py`, `kamera.py`, `gruppen.py`, `ziel.py`,
+`analyse.py`, `fotosort analyse`. Testbaum um ein Video ohne jede Offset-Quelle, ein Sony-MP4
+mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 
-### Aus der Prüfung
+- [x] Metadaten über ExifTool im Stapelbetrieb (`-stay_open`)
+- [x] Datumsermittlung mit allen sechs Quellen aus SPEC §3, Sony-Felder mit Offset bevorzugt
+- [x] Kamera-Aliase, Gruppen, Zielpfad-Berechnung, Ordner mit Zusatz
+- [x] Testbaum um den vorbelegten Zielnamen erweitert (`ziel_vorbelegen`)
 
-- [ ] **Testbaum um den vorbelegten Zielnamen erweitern.** Der Fall „im Ziel liegt schon eine
-      Datei unter dem berechneten Zielnamen" braucht die Zielpfad-Berechnung und entsteht
-      deshalb erst hier (SPEC §11). In Phase 1 erzeugt das Skript nur den Quellbaum.
+### Offen, mit echten Dateien zu prüfen
+
+- [ ] **Echte Sony-Dateien (A7C, A7C II).** Das eingebettete XML (`CreationDateValue`) und der
+      Sidecar `C0001M01.XML` sind mit nachgebauten Dateien geprüft; echte Aufnahmen prüft der
+      Nutzer lokal. Wenn ExifTool dort andere Feldnamen liefert, ist `metadaten.FELDER_VIDEO`
+      die eine Stelle zum Nachziehen.
 
 ---
 

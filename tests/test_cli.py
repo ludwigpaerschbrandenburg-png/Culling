@@ -42,7 +42,6 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
 @pytest.mark.parametrize(
     "befehl,phase",
     [
-        ("analyse", 2),
         ("kopieren", 3),
         ("ziel-index", 3),
         ("wiederherstellen", 3),

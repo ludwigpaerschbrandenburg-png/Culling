@@ -77,6 +77,40 @@ def _mp4(marke: bytes = b"isom") -> bytes:
     return ftyp + moov
 
 
+def _sekunden_1904(*teile: int) -> int:
+    import datetime as _dt
+    epoche = _dt.datetime(1904, 1, 1, tzinfo=_dt.timezone.utc)
+    return int((_dt.datetime(*teile, tzinfo=_dt.timezone.utc) - epoche).total_seconds())
+
+
+def _box(art: bytes, inhalt: bytes) -> bytes:
+    return struct.pack(">I", 8 + len(inhalt)) + art + inhalt
+
+
+def _mp4_mit_sony_xml(utc_sekunden_1904: int, creation: str, modell: str) -> bytes:
+    """MP4 mit CreateDate (UTC) und eingebettetem Sony-XML (mit Offset)."""
+    matrix = struct.pack(">9i", 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000)
+    mvhd = (
+        b"\x00\x00\x00\x00"
+        + struct.pack(">IIII", utc_sekunden_1904, utc_sekunden_1904, 1000, 0)
+        + struct.pack(">ihhq", 0x00010000, 0x0100, 0, 0)
+        + matrix
+        + b"\x00" * 24
+        + struct.pack(">I", 2)
+    )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<NonRealTimeMeta xmlns="urn:schemas-professionalDisc:nonRealTimeMeta:ver.2.20">\n'
+        f'  <CreationDate value="{creation}"/>\n'
+        f'  <Device manufacturer="Sony" modelName="{modell}"/>\n'
+        "</NonRealTimeMeta>\n"
+    ).encode("utf-8")
+    hdlr = _box(b"hdlr", b"\x00" * 8 + b"nrtm" + b"\x00" * 13)
+    meta = _box(b"meta", b"\x00\x00\x00\x00" + hdlr + _box(b"xml ", xml))
+    ftyp = struct.pack(">I4s4sI4s4s", 24, b"ftyp", b"XAVC", 0x20130101, b"XAVC", b"mp42")
+    return ftyp + _box(b"moov", _box(b"mvhd", mvhd)) + _box(b"mdat", b"\x00" * 4096) + meta
+
+
 def exiftool_pfad() -> str:
     """ExifTool finden; ohne ExifTool bricht der Erzeuger ab."""
     aus_umgebung = os.environ.get("FOTOSORT_EXIFTOOL", "").strip()
@@ -128,7 +162,7 @@ def _text(pfad: Path, inhalt: str) -> Path:
 ERWARTET_JE_TYP: dict[str, int] = {
     "foto": 13,
     "raw": 1,
-    "video": 2,
+    "video": 4,
     "sidecar": 3,
     "sonstiges": 3,
 }
@@ -222,6 +256,31 @@ def erzeugen(wurzel: Path) -> dict[str, Path]:
             str(mov),
         ]
     )
+
+    # --- Video OHNE jede Offset-Quelle: nur CreateDate in UTC ----------
+    # Pflichtfall aus PROMPTS.md Phase 2: 2026-01-01 23:30 UTC gehoert nach
+    # Europe/Berlin in den Tagesordner 2026-01-02. Kein Sidecar, kein
+    # eingebettetes XML - hier greift allein die UTC-Annahme.
+    gopro = _schreiben(videos / "GOPR0001.MP4", _mp4())
+    wo["video_nur_utc"] = gopro
+    befehle.append(
+        [
+            "-overwrite_original",
+            "-QuickTime:CreateDate=2026:01:01 23:30:00",
+            "-QuickTime:ModifyDate=2026:01:01 23:30:00",
+            str(gopro),
+        ]
+    )
+
+    # --- Sony-MP4 mit EINGEBETTETEM XML (CreationDateValue mit Offset) --
+    # meta/xml-Box hinter einem mdat, so wie Sony es legt. ExifTool liefert
+    # das Feld nur ohne -fast2 (im Container geprueft).
+    sony_xml = _schreiben(paar / "C0002.MP4", _mp4_mit_sony_xml(
+        utc_sekunden_1904=_sekunden_1904(2026, 1, 1, 22, 30),
+        creation="2026-01-01T23:30:00+01:00",
+        modell="ILCE-7CM2",
+    ))
+    wo["video_sony_eingebettet"] = sony_xml
 
     # --- Umlaute, Leerzeichen, Datum aus dem Dateinamen ----------------
     urlaub = quelle / "Urlaub 2026 Ümläute"
@@ -324,6 +383,28 @@ def erzeugen(wurzel: Path) -> dict[str, Path]:
 
     _exiftool(befehle)
     return wo
+
+
+def ziel_vorbelegen(ziel: Path, konf) -> dict[str, Path]:
+    """Einen Zielbaum mit Zusatz-Ordner und belegtem Zielnamen anlegen.
+
+    Ab Phase 2 (SPEC Abschnitt 11): aus derselben Berechnung wie das
+    Programm. Der Tagesordner von DSC01234 bekommt den Zusatz "Geburtstag
+    Oma", und unter dem Kamera-Ordner liegt schon eine andere DSC01234.JPG.
+    """
+    import datetime as _dt
+    from fotosort import datum as _datum
+    from fotosort import ziel as _ziel
+
+    d = _datum.Datum(_dt.datetime(2026, 1, 1, 12, 30), 1, True)
+    teile = _ziel.ordner_teile(d, "A7C2", konf)
+    # Tagesordner (dritte Ebene der Standardvorlage) mit Zusatz versehen.
+    tag_index = next(i for i, s in enumerate(teile) if s == "2026-01-01")
+    teile[tag_index] = teile[tag_index] + " Geburtstag Oma"
+    ordner = Path(ziel).joinpath(*teile)
+    ordner.mkdir(parents=True, exist_ok=True)
+    belegt = _schreiben(ordner / "DSC01234.JPG", _JPEG + b"schon da")
+    return {"zusatz_ordner": ordner, "belegt": belegt}
 
 
 def main(argv: list[str] | None = None) -> int:
