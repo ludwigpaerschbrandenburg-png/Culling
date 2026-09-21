@@ -37,7 +37,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ kamera.py              Modell → Ordnername, Aliase    ← reine Logik
 │  ├─ dateitypen.py          Dateityp, Sidecar-Zuordnung    ← reine Logik
 │  ├─ gruppen.py             RAW+JPG, Sidecars              ← reine Logik
-│  ├─ ziel.py                Zielpfad bauen, Ordner mit Zusatz finden
+│  ├─ ziel.py                Zielpfad, Ordner mit Zusatz    ← reine Logik
 │  ├─ hashes.py              BLAKE3-Prüfsummen, Byte-Vergleich
 │  ├─ kopieren.py            Phase 3: übertragen
 │  ├─ pruefen.py             Phase 4: nachrechnen
@@ -60,6 +60,34 @@ rechtfertigt ein eigenes Modul: Sonst verteilen sich diese Sonderfälle über `k
 `db.py` und `scan.py`, und beim Umzug in den Docker-Container findet man sie nicht wieder.
 Überall sonst gilt die Regel aus `CLAUDE.md` unverändert — nur `pathlib`, keine Windows-Wege.
 
+Drei weitere Regeln der SPEC stehen ebenfalls dort, weil sie alle drei mit Pfaden zu tun
+haben und sonst über `scan.py` und `kopieren.py` verstreut lägen:
+
+- **Aufgelöste Pfade statt Textvergleich.** Quelle und Ziel werden mit `Path.resolve()`
+  aufgelöst, Verknüpfungen also mit aufgelöst, bevor verglichen wird (SPEC §5, §4 Phase 1).
+  Quelle gleich Ziel bricht ab, Quelle innerhalb des Ziels bricht ab, Ziel innerhalb der
+  Quelle wird vom Scan ausgeschlossen. Die Prüfung endet nicht am Anfang: Während des
+  Durchlaufs wird der aufgelöste Pfad jedes Ordners gegen das aufgelöste Ziel gehalten. Ein
+  reiner Textvergleich der Pfade übersähe eine Verknüpfung, die aus der Quelle ins Ziel
+  zeigt — und genau die führt in die Schleife aus 4.4.
+- **Ordner-Verknüpfungen werden nicht verfolgt** (Standard `verknuepfungen_folgen` =
+  `false`, SPEC §9). Sie werden gezählt und im Bericht aufgeführt. Der Grund sind zwei
+  Schäden auf einmal: Ein Ring aus Verknüpfungen ließe den Scan endlos laufen, und dieselbe
+  Datei erschiene unter zwei Pfaden, also zweimal in der Datenbank — mit zwei Zielpfaden und
+  zwei Löschentscheidungen für ein einziges Bild. Versteckte Ordner werden dagegen normal
+  erfasst; sie sind nur unauffällig, nicht gefährlich.
+- **Der Rückfall, wenn nicht überschreibendes Umbenennen fehlt** (SPEC §5). Auf exFAT und
+  FAT32 — dem üblichen Format externer Platten — gibt es keine harten Verknüpfungen,
+  `os.link` schlägt fehl, und `renameat2` mit `RENAME_NOREPLACE` wird dort ebenfalls nicht
+  angenommen. `pfade.py` stellt das einmal je Ziel-Dateisystem fest. Dann entfällt das
+  Verschieben durch Umbenennen und es wird kopiert, geprüft und gelöscht; das Kopieren
+  verzichtet auf die `.part`-Datei und legt die Zieldatei direkt unter ihrem endgültigen
+  Namen exklusiv an (`O_EXCL`), was auch auf diesen Dateisystemen nicht überschreiben kann.
+  Ein einfaches Umbenennen, das eine vorhandene Datei ersetzen könnte, ist nie der Ausweg —
+  auch nicht einmalig und auch nicht nach einer vorherigen Existenzprüfung, denn zwischen
+  Prüfung und Umbenennen liegt immer ein Zeitraum. Dass der Rückfall gegriffen hat, steht
+  mit Anzahl im Bericht.
+
 `dateitypen.py` beantwortet zwei Fragen, ohne die Festplatte anzufassen: zu welchem Typ eine
 Datei gehört (`foto`, `raw`, `video`, `sidecar`, `sonstiges`) und zu welcher Hauptdatei ein
 Sidecar gehört. Für die Sidecar-Zuordnung gelten die drei Formen aus SPEC §3 — Stammname plus
@@ -72,10 +100,11 @@ Einordnung selbst bleibt reine Logik und damit in Sekunden durchtestbar.
 `aufraeumen.py` ist das einzige Modul, das löscht. Bei Quelldateien aus dem Bestand der
 Datenbank fragt es vor jeder Datei den Status ab und arbeitet ausschließlich mit `geprueft`
 und `duplikat_bestaetigt`; jeder andere Status führt dazu, dass die Datei stehen bleibt. Der
-Status allein reicht nicht — dazu kommt die Frischlesung der Zieldatei im aktuellen Lauf
-(SPEC §5). Davon getrennt und eng begrenzt sind die beiden Dateiarten, die nie in der
-Datenbank stehen: die Reste-Dateien aus Phase 6 und liegengebliebene `.part`-Dateien. Gebaut
-wird das Modul trotzdem erst in seiner eigenen Phase.
+Status allein reicht nicht — dazu kommt die Frischlesung **beider** Dateien im aktuellen
+Lauf, der Quelldatei wie der Zieldatei (SPEC §5, Begründung in 4.10). Davon getrennt und eng
+begrenzt sind die beiden Dateiarten, die nie in der Datenbank stehen: die Reste-Dateien aus
+Phase 6 und liegengebliebene `.part`-Dateien. Gebaut wird das Modul trotzdem erst in seiner
+eigenen Phase.
 
 ---
 
@@ -106,58 +135,85 @@ Laufwerk" entscheidet (SPEC §4 Phase 3):
   Laufwerk des Pfades; Ergebnis `DRIVE_REMOTE` heißt Netzlaufwerk. Verbundene
   Laufwerksbuchstaben werden dabei zuerst auf ihr Ziel aufgelöst, damit ein `Z:`, das auf eine
   Freigabe zeigt, nicht als lokale Platte durchgeht.
-- **Linux:** der Dateisystemtyp des Einhängepunkts, zu dem der Pfad gehört. Als Netz gelten
-  `cifs`, `smb3`, `nfs`, `nfs4` und `fuse.sshfs`.
+- **Linux:** der Dateisystemtyp des Einhängepunkts, zu dem der Pfad gehört. Welche Typen als
+  Netz gelten, zählt SPEC §6 vollständig auf. Dazu gehören auch `9p` und `virtiofs`, und zwar
+  aus einem Grund, den man leicht übersieht: Docker Desktop und WSL2 binden Windows-Pfade so
+  ein. Der Pfad sieht dann wie ein gewöhnlicher lokaler Ordner aus, die Dateisperren sind dort
+  aber ebenso unzuverlässig wie über SMB.
 
 Lässt sich der Typ nicht bestimmen, gilt der Pfad als Netzpfad. Die vorsichtige Antwort
 kostet im schlimmsten Fall einen Kopiervorgang statt eines Umbenennens; die unvorsichtige
 kostet im schlimmsten Fall Bilder.
 
-Zusammengehalten werden lokale Datenbank und Zielordner durch die **Archiv-ID**. Sie steht in
-einer Datei im Ziel unter `.fotosortierer/` und im Namen des lokalen Datenbankordners. So
-findet ein Lauf Monate später die richtige Datenbank wieder, auch wenn das Ziel inzwischen
-unter einem anderen Laufwerksbuchstaben hängt.
+Zusammengehalten werden lokale Datenbank und Zielordner durch die **Archiv-ID**. Ihre Form,
+ihr Ort im Ziel und ihr Dateiname stehen in SPEC §6 und werden hier nicht wiederholt. Hier
+steht der Grund: Dieselbe ID liegt im Ziel und bildet zugleich den Namen des lokalen
+Datenbankordners. So findet ein Lauf Monate später die richtige Datenbank wieder, auch wenn
+das Ziel inzwischen unter einem anderen Laufwerksbuchstaben hängt. Aus demselben Grund wird
+eine vorhandene, aber unlesbare ID nie durch eine neue ersetzt, sondern führt zum Abbruch:
+Eine neue ID zeigte auf eine neue, leere Datenbank, das Programm hielte das Ziel für leer und
+kopierte alles noch einmal.
 
 Im Ziel liegen unter `.fotosortierer/` nur drei Dinge: die Archiv-ID, die Berichte und nach
-jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank. Die Sicherung wird über die
-SQLite-Backup-Funktion geschrieben — sie erzeugt eine in sich stimmige Kopie — und danach als
-ganz normale Datei ins Ziel gelegt. Gearbeitet wird nie in dieser Kopie. Geht die lokale
-Datenbank verloren, holt `fotosort wiederherstellen` sie daraus zurück (SPEC §8).
+jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank. Die Dateinamen und das
+Verfahren mit genau zwei aufbewahrten Ständen stehen in SPEC §6. Hier steht, warum es die
+SQLite-Backup-Funktion sein muss und kein einfaches Kopieren der Datei: Nur sie erzeugt von
+einer Datenbank, die gerade benutzt wird, eine in sich stimmige Kopie; ein Dateikopiervorgang
+könnte einen halb geschriebenen Zustand einfangen. Das Ergebnis liegt danach als ganz normale
+Datei im Ziel. Gearbeitet wird nie in dieser Kopie. Geht die lokale Datenbank verloren, holt
+`fotosort wiederherstellen` sie daraus zurück (SPEC §8).
 
 ### Tabelle `dateien` — eine Zeile pro Quelldatei
 
+Die Spalten sind dieselben wie in SPEC §6; hier steht zu jeder, wofür sie gebraucht wird.
+
 | Spalte | Inhalt |
 |---|---|
-| `id` | laufende Nummer |
-| `quellpfad` | voller Pfad, eindeutig |
-| `groesse`, `mtime` | Größe und Änderungsdatum, zum Wiedererkennen |
-| `typ` | `foto`, `raw`, `video`, `sidecar`, `sonstiges` |
-| `gruppe_id` | verweist auf die Hauptdatei der Gruppe (RAW+JPG+Sidecar) |
-| `hash` | BLAKE3-Prüfsumme, wird beim Kopieren nebenbei berechnet; bei umbenannten Dateien erst in der Prüf-Phase aus der Zieldatei |
-| `kamera` | fertiger Ordnername, z. B. `A7C2` |
-| `aufnahme_zeit` | ermitteltes Datum mit Uhrzeit |
-| `datum_quelle` | woher es kam: `exif`, `video_offset`, `video_utc`, `dateiname`, `dateiname_ohne_uhrzeit`, `mtime` |
-| `datum_sicher` | Ja/Nein — steuert `_Ohne_Datum/` |
-| `zielpfad` | in Phase 2 berechnet, noch nicht angelegt |
+| `quellpfad` | absoluter, aufgelöster Pfad der Quelldatei. Er ist eindeutig und damit der Schlüssel der Tabelle |
+| `quellwurzel` | der beim Scan angegebene Quell-Wurzelordner. Daraus ergibt sich der Pfad relativ zur Wurzel für die Ausschlussmuster — und deshalb muss `--quelle` nur beim Scan angegeben werden (SPEC §8) |
+| `groesse`, `mtime` | Größe und Änderungsdatum beim letzten Scan; zusammen die Grundlage der Änderungserkennung beim zweiten Scan |
+| `dateityp` | `foto`, `raw`, `video` oder `sidecar`. Nur diese vier gelten als echter Dateityp; daran hängt, dass keine Datei aus dem Bestand der Datenbank je als Reste-Datei durchgeht (SPEC §5) |
+| `gruppe` | Kennung der zusammengehörigen Dateien (RAW+JPG+Sidecars). Alle Dateien einer Gruppe bekommen denselben Zielordner und denselben Namensanhang |
+| `hash` | BLAKE3-Prüfsumme der Quelldatei, wird beim Kopieren nebenbei berechnet; bei umbenannten Dateien erst in der Prüf-Phase aus der Zieldatei. Leer, solange die Datei noch nicht gelesen wurde |
+| `kamera` | fertiger Ordnername nach der Alias-Tabelle, z. B. `A7C2` |
+| `aufnahme_zeit` | ermitteltes Datum mit Uhrzeit, als Ortszeit; daraus werden die Ordner gebildet |
+| `datum_quelle` | welche der sechs Datumsquellen aus SPEC §3 gewonnen hat, als Zahl 1 bis 6 |
+| `datum_sicher` | 0 oder 1. Unsicher ist ausschließlich das Datum aus Quelle 6; das steuert `_Ohne_Datum/` |
+| `zielpfad` | in Phase 2 berechneter, später tatsächlicher Zielpfad samt Anhang `_1`, `_2` … bei Namenskonflikten; leer, solange nicht berechnet |
 | `status` | siehe unten |
-| `bestaetigt_in_lauf` | Nummer des Laufs, in dem die Zieldatei frisch gelesen und ihr Hash verglichen wurde — gilt für `geprueft` und `duplikat_bestaetigt` gleichermaßen |
-| `fehler_grund` | Klartext, landet so im Bericht |
-| `aktualisiert_am` | Zeitstempel des letzten Statuswechsels |
+| `fehlergrund` | Klartext bei `fehler` und `uebersprungen`, landet so im Bericht; sonst leer |
+| `bestaetigt_in_lauf` | Nummer des Laufs, in dem Quelldatei **und** Zieldatei zuletzt frisch gelesen und ihre Hashes verglichen wurden — gilt für `geprueft` und `duplikat_bestaetigt` gleichermaßen |
+| `gefunden_in_lauf` | Nummer des Laufs, in dem diese Zeile angelegt wurde |
+| `zuletzt_gesehen_in_lauf` | Nummer des letzten Laufs, in dem der Quellpfad beim Scan noch vorhanden war. Daran wird „Quelle nicht mehr vorhanden" erkannt |
 
-Die drei Zusatzlisten des Berichts (SPEC §10) entstehen direkt aus diesen Spalten, ohne
-zweite Buchhaltung: „Zeitzone angenommen" aus `datum_quelle = video_utc`, die Zählung der
-nicht angewendeten Tagesgrenze aus `dateiname_ohne_uhrzeit`, die umbenannten Dateien aus
-`status = verschoben`.
+Die Metadaten bekommen **eigene Spalten** (`kamera`, `aufnahme_zeit`, `datum_quelle`,
+`datum_sicher`) und stehen nicht zusammen in einem JSON-Feld. Der Grund ist schlicht: Nach
+ihnen wird gefiltert und sortiert, und das soll die Datenbank tun. Aus einem JSON-Feld müsste
+das Programm für jede Auswertung jede Zeile einzeln auspacken.
+
+Eine Zeile wird nie gelöscht, auch dann nicht, wenn der Quellpfad verschwunden ist (SPEC §6).
+Die Datenbank ist das Gedächtnis des Archivs; eine gelöschte Zeile wäre eine verlorene Spur.
+Stattdessen bleibt sie stehen, `zuletzt_gesehen_in_lauf` bleibt auf dem alten Wert, und der
+Bericht führt sie unter „Quelle nicht mehr vorhanden".
+
+Zwei Zusatzlisten des Berichts (SPEC §10) entstehen direkt aus diesen Spalten, ohne zweite
+Buchhaltung: „Zeitzone angenommen" aus `datum_quelle` = 3, die umbenannten Dateien aus
+`status` = `verschoben`.
 
 ### Status
 
 ```
-gefunden → analysiert → kopiert → geprueft → quelle_geloescht
+gefunden → analysiert → kopieren_laeuft → kopiert → geprueft → quelle_geloescht
                      ↘ verschoben
                      ↘ duplikat → duplikat_bestaetigt → quelle_geloescht
                      ↘ uebersprungen
                      ↘ fehler
 ```
+
+`kopieren_laeuft` ist ein Anspruch auf den Zielpfad, kein Fortschritt: Er wird gesetzt, **bevor**
+die Zieldatei angelegt wird. Nur so lässt sich eine abgebrochene Kopie später von einem fertigen
+Archivbild unterscheiden, ohne sich auf das Fehlen eines anderen Status zu verlassen — Status
+fallen zurück, ein Archivbild bliebe dabei auf der Strecke (SPEC §5).
 
 Die hier genannten Werte sind genau die, die in der Datenbank stehen — ohne Umlaute, eine
 zweite Schreibweise gibt es nicht (SPEC §6).
@@ -165,21 +221,27 @@ zweite Schreibweise gibt es nicht (SPEC §6).
 Der Status ist die Voraussetzung dafür, dass mit einer Datei überhaupt etwas passieren darf.
 Gelöscht werden darf **nur** aus `geprueft` und `duplikat_bestaetigt`; kein anderer Status
 berechtigt dazu (SPEC §4 Phase 5). Der Status allein genügt aber nicht: Vor jeder Löschung
-kommt die Frischlesung im aktuellen Lauf dazu (SPEC §5).
+kommt die Frischlesung von Quelldatei und Zieldatei im aktuellen Lauf dazu (SPEC §5, 4.10).
 
 `duplikat_bestaetigt` bekommt eine Quelldatei nur dann, wenn die inhaltsgleiche Zieldatei
 **im aktuellen Lauf** vollständig neu gelesen wurde und ihr Hash mit dem der Quelle
 übereinstimmt (SPEC §5). Ein Hash aus einem früheren Lauf oder aus dem Ziel-Index genügt
-nicht — das wäre genau der Fehler aus 4.1. Umgesetzt wird das über die Spalte
-`bestaetigt_in_lauf`: Steht dort nicht die Nummer des laufenden Laufs, gilt die Datei wieder
-als `duplikat` und wird vor dem Löschen erneut verglichen.
+nicht — das wäre genau der Fehler aus 4.1.
 
-Dieselbe Spalte gilt für `geprueft`. Auch eine geprüfte Datei wird vor dem Löschen noch
-einmal frisch gegen ihre Zieldatei verglichen; die Prüfung aus Phase 4 kann Wochen her sein
-und sagt nichts darüber, wie die Zieldatei jetzt aussieht. Steht in `bestaetigt_in_lauf`
-nicht die Nummer des laufenden Laufs, bleibt die Datei stehen und wird im Bericht aufgeführt.
-`bestaetigt_in_lauf` ist damit keine Eigenschaft eines einzelnen Status, sondern die
-Buchführung über die Frischlesung — für beide löschberechtigenden Status.
+Buchgeführt wird das in der Spalte `bestaetigt_in_lauf`. Sie ist keine Eigenschaft eines
+einzelnen Status, sondern die Buchführung über die Frischlesung, und sie gilt für beide
+löschberechtigenden Status **gleichermaßen**: Steht dort nicht die Nummer des laufenden
+Laufs, wird vor dem Löschen erneut frisch gelesen und verglichen — Quelldatei **und**
+Zieldatei (SPEC §6, „Was ein Lauf ist"). Lässt sich dabei nicht beides bestätigen, bleibt die
+Datei stehen und wird im Bericht aufgeführt. Für `geprueft` gilt das aus demselben Grund wie
+für `duplikat_bestaetigt`: Die Prüfung aus Phase 4 kann Wochen her sein und sagt nichts
+darüber, wie Quelle und Ziel jetzt aussehen.
+
+**Ein Lauf ist ein Programmstart** (SPEC §6). Jeder Start legt in der Tabelle `laeufe` eine
+Zeile mit einer Nummer an, und genau diese Nummer steht in `bestaetigt_in_lauf`. Ein
+Neustart, der nur dieselbe Phase fortsetzt, ist deshalb ein neuer Lauf — jede frühere
+Bestätigung verfällt damit von selbst. Das ist gewollt: Zwischen zwei Programmstarts kann
+alles passiert sein, und keine Zeile in der Datenbank weiß davon.
 
 `verschoben` steht für Dateien, die auf demselben Laufwerk durch Umbenennen ins Ziel
 gekommen sind (SPEC §4 Phase 3). Dass die Zieldatei existiert und die Größe stimmt, wird
@@ -190,27 +252,44 @@ nur noch den Hash aus der Zieldatei und trägt ihn in den Ziel-Index nach.
 gibt nichts mehr aufzuräumen.
 
 `uebersprungen` ist kein Fehler, sondern der normale Fall für Dateitypen außerhalb der Liste
-aus SPEC §3. Sie werden gezählt, aber nie angefasst.
+aus SPEC §3. Sie werden gezählt, aber nie angefasst. Denselben Status bekommt ein Sidecar
+ohne Hauptdatei, mit diesem Grund im Klartext. Sidecars sind ein eigener Dateityp und stehen
+in der Liste (SPEC §3); „übersprungen nach Typ" ist ein Sidecar deshalb nie.
 
 ### Tabelle `ziel_index` — was liegt schon im Ziel
 
-`pfad`, `groesse`, `mtime`, `hash`, `gesehen_am`.
+`zielpfad` (eindeutig und damit Schlüssel), `groesse`, `mtime`, `hash` und
+`zuletzt_gelesen_in_lauf` (SPEC §6).
 
-Spart beim zweiten Lauf das erneute Hashen des gesamten Archivs. **Darf nur Kopien
-überspringen, nie eine Löschung rechtfertigen** (SPEC §6). Für eine Löschung liefert er
-höchstens Kandidaten, die anschließend frisch gelesen werden — die Begründung steht in 4.1.
-Bei umbenannten Dateien (`verschoben`) wird der Hash hier in der Prüf-Phase nachgetragen.
+Spart beim zweiten Lauf das erneute Hashen des gesamten Archivs: Größe und Änderungsdatum
+entscheiden, ob überhaupt neu gehasht werden muss. **Darf nur Kopien überspringen, nie eine
+Löschung rechtfertigen** (SPEC §6). Für eine Löschung liefert er höchstens Kandidaten, die
+anschließend frisch gelesen werden — die Begründung steht in 4.1 und 4.10. Bei umbenannten
+Dateien (`verschoben`) wird der Hash hier in der Prüf-Phase nachgetragen.
 
 ### Tabelle `laeufe` — Verlauf
 
-Pro Phase: Start, Ende, Anzahl Dateien, Bytes, Fehler. Daraus entsteht der Bericht, und
-Geschwindigkeitsmessungen zwischen verschiedenen Einstellungen lassen sich vergleichen.
+Eine Zeile je Programmstart: `nummer`, `befehl`, `start`, `ende` (SPEC §6). Die `nummer` ist
+der Wert, der in `bestaetigt_in_lauf`, `gefunden_in_lauf` und `zuletzt_gesehen_in_lauf` steht
+— deshalb braucht ein Lauf überhaupt eine Nummer. Stürzt das Programm ab oder wird es mit
+Strg+C beendet, bleibt `ende` leer; daran ist ein abgebrochener Lauf später erkennbar. Aus
+diesen Zeilen entsteht der Verlauf im Bericht, und Geschwindigkeitsmessungen zwischen
+verschiedenen Einstellungen lassen sich vergleichen.
+
+### Tabelle `lauf_ereignisse` — was zu keiner Datei gehört
+
+`lauf_nummer`, `art`, `pfad`, `anzahl`, `text` (SPEC §6). Mehrere Listen des Berichts gehören zu
+keiner Zeile in `dateien`: ein durch `ausschlussmuster` übersprungener Pfad kommt gar nicht erst
+in die Datenbank, eine nicht verfolgte Ordner-Verknüpfung ebenso wenig, und ein Zähler wie „so
+oft wurde auf Kopieren zurückgefallen" gehört zu gar keiner Datei. Ohne eigene Tabelle müsste der
+Bericht das aus dem Speicher des laufenden Prozesses nehmen — und wäre nach einem Absturz
+unvollständig. Genau das soll die Datenbank verhindern.
 
 ### Geschwindigkeit
 
 - Statuswechsel gesammelt schreiben (alle 500 Dateien oder alle 2 Sekunden, je nachdem was
   zuerst kommt). Einzelne Schreibvorgänge würden den ganzen Lauf ausbremsen.
-- Indizes auf `status`, `hash`, `gruppe_id`, `zielpfad` — das sind die vier Spalten, nach
+- Indizes auf `status`, `hash`, `gruppe`, `zielpfad` — das sind die vier Spalten, nach
   denen tatsächlich gesucht wird.
 - WAL-Modus durchgehend. Der frühere Vorbehalt galt nur Netzlaufwerken; da die Datenbank
   jetzt immer lokal liegt, entfällt er.
@@ -225,7 +304,7 @@ und kaputtgehen kann. Darum bewusst wenige:
 | Paket | Wofür | Warum nicht anders |
 |---|---|---|
 | `blake3` | Prüfsummen | BLAKE3 ist beides zugleich: kryptografisch und schnell. Es ist deutlich schneller als SHA-256 aus der Standardbibliothek und meist schneller, als die Platte liefern kann — der Hash kostet also praktisch keine Extrazeit. Weil derselbe Hash hier über eine Löschung mitentscheidet, darf es keine reine Prüfsumme wie `xxh3` sein (SPEC §7). Die Hashlänge bleibt auf dem Standard der Bibliothek: 256 Bit. Sie wird nirgends gekürzt, und sie wird auch nicht verlängert — 256 Bit sind der Wert, auf den sich die Kollisionsrechnung in 4.6 bezieht. |
-| `tzdata` | Zeitzonendatenbank | Videos ohne Zeitzonen-Offset werden von UTC in die Heimat-Zeitzone umgerechnet (SPEC §3). Python bringt dafür `zoneinfo` mit, holt sich die Zeitzonendaten aber aus dem Betriebssystem. Windows hat keine, dort scheitert `Europe/Berlin` ohne dieses Paket. Aufgenommen wird es trotzdem **unbedingt**, nicht als bedingte Abhängigkeit für Windows: Die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank mitbringt, und schlanke Images bringen sie oft nicht mit. Das Paket ist klein und schadet unter Linux nicht — dort wird es schlicht nicht gebraucht. |
+| `tzdata` | Zeitzonendatenbank | Videos ohne Zeitzonen-Offset werden von UTC in die Heimat-Zeitzone umgerechnet (SPEC §3). Python bringt dafür `zoneinfo` mit, holt sich die Zeitzonendaten aber aus dem Betriebssystem. Windows hat keine, dort scheitert `Europe/Berlin` ohne dieses Paket. Aufgenommen wird es trotzdem **unbedingt**, nicht als bedingte Abhängigkeit für Windows: Die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank mitbringt, und schlanke Images bringen sie oft nicht mit. Das Paket ist klein und schadet unter Linux nicht — dort wird es schlicht nicht gebraucht. In `pyproject.toml` steht es deshalb ohne jede Bedingung, insbesondere **nicht** mit einer Markierung wie `platform_system == "Windows"`. |
 | `rich` | Fortschrittsbalken, Tabellen | Ein Balken mit Restzeit ist bei stundenlangen Läufen kein Luxus. Selbstgebaut wäre das mehr Code als die Bibliothek. |
 | `tomli-w` | `config.toml` schreiben | Python kann TOML seit 3.11 **lesen** (`tomllib`), aber nicht schreiben. Wird nur beim ersten Start gebraucht. |
 | `pytest` | Tests | Standard. Nur zum Entwickeln, nicht im Betrieb. |
@@ -251,9 +330,12 @@ Größe und Änderungsdatum. Wurde die Zieldatei außerhalb des Programms verän
 Quelldatei fälschlich als gesichert und wird gelöscht.
 
 *Absicherung:* Der Ziel-Index findet nur **Kandidaten** für Duplikate, er entscheidet nie
-über eine Löschung. Vor jeder Löschung wird die Zieldatei im aktuellen Lauf frisch gelesen
-und gehasht; erst das ergibt `duplikat_bestaetigt`. Keine Abschaltmöglichkeit, keine Option,
-kein Schnellmodus (SPEC §5 und §6).
+über eine Löschung. Vor jeder Löschung werden Zieldatei **und** Quelldatei im aktuellen Lauf
+frisch gelesen und gehasht — bei `geprueft` genauso wie bei `duplikat_bestaetigt`. Die
+Frischlesung hängt nicht am Status, sondern am Lauf: Sie zählt nur, wenn
+`bestaetigt_in_lauf` die Nummer des laufenden Laufs trägt (SPEC §6). Erst die frisch gelesene
+Zieldatei ergibt `duplikat_bestaetigt`; warum zusätzlich die Quelle gelesen wird, steht in
+4.10. Keine Abschaltmöglichkeit, keine Option, kein Schnellmodus (SPEC §5 und §6).
 
 *Test:* Zieldatei nach dem Kopieren verändern, Größe und Änderungsdatum künstlich gleich
 lassen — die Quelldatei darf nicht gelöscht werden.
@@ -265,8 +347,12 @@ für vollständig gehalten wird.
 
 *Absicherung:* Geschrieben wird in `<name>.part`. Erst wenn die Datei vollständig und
 gehasht ist, wird sie atomar umbenannt — ein Vorgang, der entweder ganz oder gar nicht
-passiert. Eine Datei unter ihrem richtigen Namen ist damit immer vollständig. Liegengebliebene
-`.part`-Dateien werden beim nächsten Start entfernt.
+passiert. Eine Datei unter ihrem richtigen Namen ist damit immer vollständig. Der Name der
+temporären Datei ist der vollständige Zieldateiname plus `.part` (SPEC §5) — nicht der
+Stammname, sonst ergäbe ein RAW+JPG-Paar zweimal denselben `.part`-Namen. Liegengebliebene
+`.part`-Dateien werden beim nächsten Start erkannt und nur dann entfernt, wenn keine Zeile in
+der Datenbank sie beansprucht; eine beanspruchte Datei wird vom zugehörigen Kopiervorgang neu
+geschrieben.
 
 *Test (Pflicht laut SPEC §11):* Prozess mitten im Kopieren hart beenden, neu starten.
 Ergebnis muss identisch zu einem ungestörten Lauf sein.
@@ -319,18 +405,18 @@ möglich. Genau deshalb steht hier BLAKE3 und keine reine Prüfsumme.
 Zusätzlich gibt es die Option `byte_vergleich_vor_loeschen` (Standard: **aus**, SPEC §5). Ist
 sie an, werden Quelle und Ziel vor dem Löschen Byte für Byte verglichen.
 
-*Was sie kostet:* Die Zieldatei wird vor jeder Löschung ohnehin frisch gelesen (SPEC §5), das
-ist nicht der Aufwand. Die Quelldatei dagegen wird vor dem Löschen **nicht** zwingend noch
-einmal gelesen — ihr Hash steht seit dem Kopieren in der Datenbank. Der Byte-Vergleich
-bedeutet also ein zusätzliches vollständiges Lesen der Quelldatei plus den Vergleich selbst,
-und zwar im Aufräum-Schritt. Das ist echter Zeitaufwand, kein Rundungsfehler; bei einem
-Archiv von mehreren Terabyte ist es ein zweiter vollständiger Durchgang durch die Quelle.
+*Was sie kostet:* Quelldatei und Zieldatei werden vor jeder Löschung ohnehin beide
+vollständig frisch gelesen (SPEC §5, Begründung in 4.10). Die Option kostet deshalb **keinen
+zusätzlichen Lesevorgang**, sondern nur den Vergleich selbst: Statt die beiden Hashes
+gegeneinander zu halten, werden die Inhalte blockweise verglichen. Das ist Rechenzeit auf
+Daten, die ohnehin durch den Speicher laufen — spürbar bei mehreren Terabyte, aber kein
+zweiter Durchgang über die Platte.
 
 *Warum „aus" trotzdem vertretbar ist:* Die Option schützt einzig gegen die Kollision eines
 kryptografischen Hashes mit 256 Bit — gegen ein Risiko also, das um Größenordnungen kleiner
 ist als die Fehlerrate der Hardware, auf der verglichen wird. Wäre hier eine reine Prüfsumme
 im Einsatz, müsste der Standard „an" lauten. Weil BLAKE3 kryptografisch ist, kauft die Option
-messbare Zeit gegen keinen messbaren Sicherheitsgewinn. Wer sie trotzdem will, schaltet sie
+Rechenzeit gegen keinen messbaren Sicherheitsgewinn. Wer sie trotzdem will, schaltet sie
 mit einer Zeile in der `config.toml` ein (SPEC §9).
 
 *Test:* Byte-Vergleich eingeschaltet, Ziel künstlich verändert — die Löschung muss verweigert
@@ -407,6 +493,46 @@ nur eine Funktion kennt und niemand versehentlich `Path.rename` benutzt.
 
 *Test (Pflicht laut SPEC §11):* Auf einen bereits belegten Zielnamen umbenennen. Die
 vorhandene Zieldatei muss unverändert bleiben, und die Quelldatei muss danach noch da sein.
+
+### 4.10 Quelle ändert sich nach dem Kopieren
+
+Der Verlustpfad, den ein reiner Ziel-Vergleich offen lässt — und der einzige dieser Liste,
+den keine der übrigen Absicherungen auffängt. 4.1 schützt gegen eine veränderte **Zieldatei**;
+hier ändert sich die **Quelle**.
+
+Wird vor dem Löschen nur die Zieldatei frisch gelesen, wird ihr Hash gegen den beim Kopieren
+gespeicherten Quell-Hash gehalten. Beide Werte beschreiben denselben alten Stand. Ändert sich
+die Quelldatei nach dem Kopieren — jemand bearbeitet sie, ein Synchronisierungsdienst spielt
+eine neue Fassung ein, eine Kamera-Software schreibt sie neu —, stimmen die beiden Werte
+weiterhin überein. Die Prüfung meldet, alles sei in Ordnung, und die geänderte Quelle wird
+gelöscht. Im Ziel liegt dann die alte Fassung, die neue ist weg, und kein Fehler ist
+aufgetreten: Das Programm hat die Frage, die es stellen wollte, nie gestellt.
+
+*Absicherung:* Vor jeder Löschung wird **auch die Quelldatei im aktuellen Lauf** vollständig
+neu gelesen und ihr Hash mit dem gespeicherten Quell-Hash verglichen (SPEC §5, §4 Phase 5).
+Gelöscht wird nur, wenn Quelle und Ziel in diesem Lauf beide frisch gelesen wurden und beide
+denselben Hash tragen wie der gespeicherte Quell-Hash. Bei Abweichungen:
+
+- **Die Quelle weicht ab:** nicht löschen. Der Status fällt auf `analysiert` zurück, denn die
+  Datei muss neu kopiert werden; gespeicherter Hash und `bestaetigt_in_lauf` werden geleert.
+  Der Hash wird beim nächsten Kopieren neu berechnet. Liegt unter dem berechneten Zielnamen
+  schon die alte Fassung, greift „Niemals überschreiben": Die neue Fassung bekommt den Anhang
+  `_1`, `_2` … Damit bleiben beide Fassungen erhalten. Die Datei erscheint im Bericht unter
+  „Quelle seit dem Kopieren geändert" (SPEC §10) — die wichtigste Liste des Berichts, denn
+  jeder Eintrag darin ist ein Bild, das ohne diese Prüfung verloren gewesen wäre.
+- **Das Ziel weicht ab:** ebenfalls nicht löschen. Die Datei bekommt Status `fehler` mit
+  Grund und erscheint im Bericht (4.1).
+
+*Was es kostet:* Beide Dateien zu lesen bedeutet im Aufräum-Schritt einen vollständigen
+Durchgang durch die Quelle zusätzlich zu dem durch das Ziel. Das ist bewusst bezahlt. Die
+Alternative ist eine Löschung, die sich auf eine Annahme über die Quelle stützt statt auf eine
+Messung — und die oberste Regel des Projekts lässt für Annahmen an dieser Stelle keinen Platz.
+
+*Test (Pflicht laut SPEC §11):* Datei kopieren und prüfen lassen, bis der Status `geprueft`
+steht. Dann den Inhalt der Quelldatei ändern. Dann aufräumen lassen. Erwartung: Die
+Quelldatei ist danach noch da und trägt ihren neuen Inhalt, die Zieldatei ist unverändert,
+der Status steht auf `analysiert`, und die Datei erscheint im Bericht unter „Quelle seit dem
+Kopieren geändert". Ohne diesen Test darf nicht gelöscht werden.
 
 ---
 

@@ -9,8 +9,9 @@ Notizen, Ideen, Entscheidungen, Bilder.
 |---|---|
 | [`SPEC.md`](SPEC.md) | **Die verbindliche Projektbeschreibung.** Bei Widersprüchen gilt sie. |
 | [`PROMPTS.md`](PROMPTS.md) | Die Prompts für Claude Code, Phase für Phase, der Reihe nach einzugeben |
-| [`offene_fragen.md`](offene_fragen.md) | Protokoll der elf Punkte aus der SPEC-Prüfung. Alle entschieden, die Ergebnisse stehen in der SPEC. |
+| [`offene_fragen.md`](offene_fragen.md) | Protokoll der elf Punkte aus der SPEC-Prüfung, alle entschieden, dazu die nachträglichen Präzisierungen A bis AF. Der verbindliche Wortlaut steht in der SPEC. |
 | [`architektur.md`](architektur.md) | Vorschlag für Module, Datenbank und Abhängigkeiten |
+| [`todo.md`](todo.md) | Was in welcher Phase gebaut wird, plus die offenen Punkte aus der Prüfung |
 
 Die Dauerregeln für die Arbeit am Projekt stehen in [`../CLAUDE.md`](../CLAUDE.md).
 
@@ -18,11 +19,9 @@ Die Dauerregeln für die Arbeit am Projekt stehen in [`../CLAUDE.md`](../CLAUDE.
 
 | Datei | Wofür |
 |---|---|
-| [`todo.md`](todo.md) | Offene Punkte als Checkliste |
 | [`entscheidungen.md`](entscheidungen.md) | Was wurde entschieden und warum |
 | [`notizen.md`](notizen.md) | Freitext für alles, was noch keinen Platz hat |
 | [`assets/`](assets/) | Bilder, PDFs, Screenshots, Skizzen |
-| `files.zip` | Ursprünglicher Upload, inhaltlich **überholt**. Die Kopien von `SPEC.md` und `PROMPTS.md` darin sind ein alter Parallelstand und gelten nicht; verbindlich ist der gepflegte Stand daneben. |
 
 ## Hinweise
 

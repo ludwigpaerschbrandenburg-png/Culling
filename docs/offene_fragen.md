@@ -22,12 +22,12 @@ Datenbank und sind vor Phase 1 entschieden worden; die übrigen sieben Punkte eb
 - `PROMPTS.md` Prompt 5: löscht „Dateien mit Status *geprüft* (und Duplikate, deren Inhalt
   nachweislich per Hash im Ziel liegt)".
 
-Ein Duplikat wird nie kopiert und bekommt darum nie den Status `geprüft`. Nach §4 wird es
+Ein Duplikat wird nie kopiert und bekommt darum nie den Status `geprueft`. Nach §4 wird es
 also nie gelöscht, nach §5 schon. Drei Textstellen, drei Regeln.
 
 **Vorschlag:** Eigener Status `duplikat_bestaetigt`. Er wird gesetzt, wenn die Zieldatei
 frisch gelesen und ihr Hash mit dem der Quelldatei verglichen wurde — also derselbe Nachweis
-wie bei `geprüft`, nur ohne Kopiervorgang davor. Gelöscht werden darf aus genau diesen beiden
+wie bei `geprueft`, nur ohne Kopiervorgang davor. Gelöscht werden darf aus genau diesen beiden
 Status. Damit steht in §4 und §5 dieselbe Regel.
 
 - [x] Vorschlag übernehmen
@@ -37,8 +37,8 @@ Status. Damit steht in §4 und §5 dieselbe Regel.
 **Entschieden:** Eigener Status `duplikat_bestaetigt`, den eine Quelldatei nur bekommt, wenn
 die inhaltsgleiche Zieldatei im aktuellen Lauf vollständig neu gelesen wurde und ihr Hash mit
 dem Quell-Hash übereinstimmt. Gelöscht werden dürfen ausschließlich Dateien mit Status
-`geprüft` oder `duplikat_bestaetigt`, kein anderer Status berechtigt zum Löschen. Die Sperre
-in `CLAUDE.md` entfällt, sobald diese Regel in der SPEC steht.
+`geprueft` oder `duplikat_bestaetigt`, kein anderer Status berechtigt zum Löschen. Die damals
+in `CLAUDE.md` gesetzte Sperre ist entfallen, weil die Regel inzwischen in der SPEC steht.
 
 ---
 
@@ -75,7 +75,7 @@ sondern ändert nur einen Verzeichniseintrag. Es ist die sicherste Variante übe
 SPEC verspricht eine Prüfung, die es so nicht gibt.
 
 **Vorschlag:** Hash vor dem Umbenennen berechnen und speichern. In der Phase „Prüfen" bekommen
-diese Dateien den Status `geprüft (umbenannt)` mit dem Hinweis, dass hier keine zweite,
+diese Dateien den Status `geprueft (umbenannt)` mit dem Hinweis, dass hier keine zweite,
 unabhängige Prüfung stattfand. Im Bericht getrennt ausweisen.
 
 - [ ] Vorschlag übernehmen
@@ -218,8 +218,9 @@ statt WAL — langsamer, aber netzwerktauglich.
   Ziel nur Archiv-ID, Berichte und eine Sicherungskopie
 
 **Entschieden:** Die Datenbank liegt immer lokal — Windows unter
-`%LOCALAPPDATA%\fotosortierer\<archiv-id>\`, Linux/Docker in einem eigenen lokalen Pfad bzw.
-Volume; erkennt das Programm, dass der Datenbankpfad auf einem Netzlaufwerk liegt, bricht es
+`%LOCALAPPDATA%\fotosortierer\<archiv-id>\`, Linux und Docker unter
+`${XDG_DATA_HOME:-~/.local/share}/fotosortierer/<archiv-id>/` (im Container als Volume
+eingebunden, SPEC §6); erkennt das Programm, dass der Datenbankpfad auf einem Netzlaufwerk liegt, bricht es
 mit verständlicher Meldung ab. Im Ziel liegen unter `.fotosortierer/` nur noch eine Datei mit
 der Archiv-ID, die Berichte und nach jeder abgeschlossenen Phase eine Sicherungskopie der
 Datenbank (über die SQLite-Backup-Funktion geschrieben, als normale Datei); die Archiv-ID
@@ -313,10 +314,10 @@ noch, wenn es trotzdem scheitert.
 
 - Das Repository heißt `Culling`, das Projekt laut SPEC `Foto-Sortierer`. Nur kosmetisch.
   **Entschieden:** Der Repo-Name `Culling` bleibt, das Programm heißt `fotosort`.
-- `docs/files.zip` ist der ursprüngliche Upload und bleibt als solcher liegen. Sein Inhalt ist
-  überholt: Die darin enthaltenen Kopien von `SPEC.md` und `PROMPTS.md` sind ein veralteter
-  Parallelstand und gelten nicht. Verbindlich ist allein der gepflegte Stand daneben in
-  `docs/`.
+- `docs/files.zip` war der ursprüngliche Upload mit Kopien von `SPEC.md` und `PROMPTS.md`.
+  Nach den Überarbeitungen war sein Inhalt ein veralteter Parallelstand. **Entschieden:**
+  gelöscht. Der gepflegte Stand liegt in `docs/`, und die Git-Historie bewahrt den Upload
+  ohnehin auf.
 
 ---
 
@@ -366,10 +367,88 @@ Entscheidungen, sondern Präzisierungen der elf Punkte oben. Der verbindliche Wo
 - **K — `tzdata` ist eine feste Abhängigkeit**, nicht nur unter Windows; das Paket ist klein,
   und die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank
   mitbringt (`docs/architektur.md`).
-- **L — `docs/files.zip` bleibt liegen** als ursprünglicher Upload, ist inhaltlich aber
-  überholt und gilt nicht (siehe „Kleinigkeiten").
+- **L — `docs/files.zip` gelöscht.** Es blieb zunächst als ursprünglicher Upload liegen;
+  nach den SPEC-Änderungen war sein Inhalt ein überholter Parallelstand und damit eine
+  Fehlerquelle. Auf Wunsch des Nutzers entfernt.
 - **M — Umgebungen getrennt.** Entwicklung und Tests laufen im Linux-Container mit dem
   künstlichen Testbaum (ExifTool ist dort installiert), die erste Nutzung mit echten Fotos
   findet auf Windows 11 statt, der spätere Betrieb auf TrueNAS im Container (SPEC §2).
 - **N — Wurzelzeile der Modulliste.** In `docs/architektur.md` heißt die Wurzelzeile
   `Culling/ (Repository-Wurzel)`; der Paketname `src/fotosort/` bleibt.
+
+Die folgenden Punkte stammen aus der **Schlusskontrolle** der überarbeiteten SPEC. Auch sie
+sind keine neuen Entscheidungen, sondern Präzisierungen der elf Punkte oben; der verbindliche
+Wortlaut steht in [`SPEC.md`](SPEC.md).
+
+- **O — Vor dem Löschen wird auch die Quelle frisch gelesen.** Wird nur die Zieldatei frisch
+  gelesen und ihr Hash mit dem beim Kopieren gespeicherten Quell-Hash verglichen, beschreiben
+  beide Werte denselben alten Stand: Eine nach dem Kopieren geänderte Quelldatei stimmt
+  weiterhin überein und würde gelöscht, obwohl ihr aktueller Inhalt nie im Ziel ankam.
+  Deshalb wird vor jeder Löschung auch die Quelldatei im aktuellen Lauf frisch gelesen; weicht
+  ihr Hash ab, wird nicht gelöscht, die Datei fällt auf Status `analysiert` zurück und erscheint
+  im Bericht unter „Quelle seit dem Kopieren geändert" (SPEC §4 Phase 5, §5, §10).
+- **P — Archiv-ID.** Eine beim ersten Scan erzeugte UUID4, kleingeschrieben und ohne
+  Bindestriche (32 Hex-Zeichen), als einzige Zeile in `<Ziel>/.fotosortierer/archiv-id.txt`
+  (UTF-8 ohne BOM); ist die Datei da, aber keine gültige Hex-ID, bricht das Programm ab und
+  erzeugt niemals eine neue (SPEC §6).
+- **Q — Dateinamen der Datenbank.** Die lokale Datenbank heißt `fotosort.db`, die Sicherung im
+  Ziel `fotosort.db.sicherung`; sie wird nach jeder Phase über die SQLite-Backup-Funktion nach
+  `fotosort.db.sicherung.neu` geschrieben und atomar umbenannt, die vorherige Fassung bleibt als
+  `fotosort.db.sicherung.vorher` — genau zwei Stände (SPEC §6).
+- **R — Ort der `config.toml`.** Sie liegt im Archiv-Ordner neben der Datenbank, wird beim
+  ersten Scan mit Kommentaren erzeugt und nie überschrieben; fehlende Werte werden im Speicher
+  ergänzt, unbekannte bleiben stehen und werden einmal gemeldet, `--config <pfad>` gibt eine
+  andere Datei an (SPEC §6, §9).
+- **S — Konfigurationswerte mit Schlüsselnamen.** §9 listet alle Werte vollständig auf
+  (`[ordner]`, `[datum]`, `[kamera]`, `[dateitypen]`, `[quelle]`, `[sicherheit]`, `[datenbank]`,
+  `[aufraeumen]`, `[leistung]`), damit Phase 1 die Datei erzeugen kann; `0` heißt bei den
+  Worker-Zahlen „automatisch", `ausschlussmuster` sind Glob-Muster gegen den Pfad relativ zur
+  Quellwurzel ohne Beachtung der Groß- und Kleinschreibung, und beim Datenbank-Ort gilt
+  `FOTOSORT_DATENBANK` vor `datenbank_ort` vor Standardpfad (SPEC §9).
+- **T — Sidecars sind ein eigener Dateityp.** Ihre Endungen stehen als eigene Gruppe in der
+  Dateitypen-Liste; ein Sidecar ist deshalb nie „übersprungen nach Typ", sondern wandert mit
+  seiner Hauptdatei oder gilt ohne sie als `uebersprungen` (SPEC §3).
+- **U — Was ein Lauf ist.** Ein Lauf ist ein Programmstart mit einer eigenen Zeile in der
+  Tabelle `laeufe` (Nummer, Befehl, Start, Ende); `bestaetigt_in_lauf` speichert diese Nummer,
+  und die Regel gilt für `geprueft` und `duplikat_bestaetigt` gleichermaßen (SPEC §6).
+- **V — Der Scan ist fortsetzbar.** Eine Zeile je Quellpfad: unverändert nach Größe und
+  Änderungsdatum bleibt sie, wie sie ist; verändert fällt der Status auf `gefunden` zurück und
+  Hash und Zielpfad werden geleert; ein verschwundener Quellpfad behält seine Zeile und
+  erscheint im Bericht — gelöscht wird nie eine Zeile (SPEC §6, §10).
+- **W — Ziel in Quelle.** Beide Pfade werden mit `Path.resolve()` aufgelöst: Quelle gleich Ziel
+  bricht ab, Ziel innerhalb der Quelle wird vom Scan ausgeschlossen, Quelle innerhalb des Ziels
+  bricht ab; während des Durchlaufs wird jeder Ordner erneut gegen das aufgelöste Ziel geprüft
+  (SPEC §4 Phase 1, §5).
+- **X — Ordner-Verknüpfungen werden nicht verfolgt.** Standard ist `verknuepfungen_folgen` =
+  `false`, weil ein Ring aus Verknüpfungen den Scan endlos laufen ließe und dieselbe Datei
+  zweimal erschiene; sie werden gezählt und im Bericht aufgeführt, versteckte Ordner dagegen
+  normal erfasst (SPEC §4 Phase 1, §9).
+- **Y — Jeder Befehl braucht `--ziel`.** Einzige Ausnahme ist `--help`; nur `scan` (und `start`)
+  braucht zusätzlich `--quelle`, weil die Quelle in der Datenbank steht, und ersatzweise gilt
+  die Umgebungsvariable `FOTOSORT_ZIEL` (SPEC §8).
+- **Z — Fehlendes ExifTool.** Harter Abbruch bei `analyse`, `start` und dem Erzeuger des
+  Testbaums; `scan`, `status` und `bericht` brauchen es nicht und geben höchstens einen Hinweis,
+  gesucht wird über `PATH`, überschreibbar mit `exiftool_pfad` oder `FOTOSORT_EXIFTOOL`
+  (SPEC §2, §9).
+- **AA — Rückfall ohne nicht überschreibendes Umbenennen.** Auf exFAT und FAT32 gibt es keine
+  harten Verknüpfungen; fehlt ein nicht überschreibendes Verfahren, wird auf Kopieren, Prüfen
+  und Löschen zurückgefallen — ein einfaches, möglicherweise überschreibendes Umbenennen ist nie
+  erlaubt (SPEC §5).
+- **AB — Name der temporären Datei.** Der vollständige Zieldateiname plus `.part`
+  (`DSC01234.ARW.part`), damit ein RAW+JPG-Paar nicht kollidiert; liegengebliebene
+  `.part`-Dateien werden nur entfernt, wenn keine Zeile in der Datenbank sie beansprucht
+  (SPEC §5).
+- **AC — Reste-Dateien werden durchgesetzt, nicht geglaubt.** Eine Datei gilt nur dann als Rest,
+  wenn es für sie keine Zeile in der Datenbank mit einem echten Dateityp gibt; das prüft das
+  Programm selbst, sonst könnte ein Eintrag wie `.jpg` in `reste_dateien` die ganze Löschregel
+  aushebeln (SPEC §4 Phase 6, §5).
+- **AD — Fehlende Befehle ergänzt.** `fotosort ziel-index --neu-aufbauen` und
+  `fotosort wiederherstellen` stehen jetzt in der Befehlsliste, obwohl sie anderswo schon
+  vorausgesetzt wurden (SPEC §8).
+- **AE — Netz-Dateisysteme.** Die Liste ist um `9p` und `virtiofs` ergänzt, weil Docker Desktop
+  und WSL2 Windows-Pfade so einbinden und die Dateisperren dort ebenso unzuverlässig sind wie
+  über SMB (SPEC §6).
+- **AF — Datenbank-Schema vollständig.** §6 zählt alle Spalten der drei Tabellen `dateien`,
+  `ziel_index` und `laeufe` mit je einem Halbsatz auf; die Metadaten bekommen eigene Spalten
+  (`kamera`, `aufnahme_zeit`, `datum_quelle`, `datum_sicher`) statt eines JSON-Felds, weil
+  danach gefiltert und sortiert wird (SPEC §6).

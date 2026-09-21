@@ -22,15 +22,37 @@ Konkret heißt das:
 - Im Zweifel: abbrechen und fragen, nicht weitermachen.
 - Gelöscht werden darf **ausschließlich** aus den Status `geprueft` und `duplikat_bestaetigt`.
   Kein anderer Status berechtigt zum Löschen.
-- Der Status allein genügt nie. Vor **jeder** Löschung wird die Zieldatei **im aktuellen Lauf**
-  vollständig neu gelesen und ihr Hash mit dem der Quelle verglichen — bei `geprueft` genauso
-  wie bei `duplikat_bestaetigt`. Ein Hash aus einem früheren Lauf genügt für keinen von beiden.
+- Diese Statusregel gilt für Quelldateien aus dem Bestand der Datenbank. Ausgenommen sind
+  allein zwei Arten von Dateien, die nie in der Datenbank stehen: die Reste-Dateien aus
+  SPEC §4 Phase 6 (`Thumbs.db`, `.DS_Store`, `desktop.ini`, konfigurierbar) und
+  liegengebliebene `.part`-Dateien. Weitere Ausnahmen gibt es nicht.
+- Die Reste-Ausnahme wird **geprüft, nicht geglaubt.** Eine Datei gilt nur dann als Rest, wenn
+  es für sie keine Zeile in der Datenbank mit einem echten Dateityp (Foto, RAW, Video,
+  Sidecar) gibt. Das stellt das Programm vor jeder einzelnen Löschung selbst fest. Sonst
+  könnte ein Eintrag wie `.jpg` in der Liste die ganze Löschregel aushebeln.
+- Der Status allein genügt nie. Vor **jeder** Löschung werden **Quelldatei und Zieldatei**
+  im aktuellen Lauf vollständig neu gelesen und beide Hashes mit dem gespeicherten Quell-Hash
+  verglichen — bei `geprueft` genauso wie bei `duplikat_bestaetigt`. Ein Hash aus einem
+  früheren Lauf genügt für keinen von beiden.
+- **Auch die Quelle wird frisch gelesen, nicht nur das Ziel.** Würde nur das Ziel gelesen und
+  gegen den beim Kopieren gespeicherten Quell-Hash gehalten, beschrieben beide Werte denselben
+  alten Stand; eine nach dem Kopieren geänderte Quelldatei würde gelöscht, obwohl ihr aktueller
+  Inhalt nie im Ziel ankam. Weicht der frisch gelesene Quell-Hash vom gespeicherten ab, wird
+  **nicht** gelöscht: Die Datei fällt auf Status `analysiert` zurück und muss neu kopiert
+  werden.
 - Die Statuswerte werden **umlautfrei** gespeichert: `gefunden`, `analysiert`, `kopiert`,
   `geprueft`, `verschoben`, `duplikat`, `duplikat_bestaetigt`, `quelle_geloescht`,
   `uebersprungen`, `fehler`. Wer eine Statusprüfung schreibt, vergleicht gegen genau diese
   Zeichenketten. Andere Schreibweisen gibt es nicht.
 - Der Ziel-Index rechtfertigt **nie allein** eine Löschung. Er dient nur dazu, Kandidaten für
   Duplikate schnell zu finden.
+- Vor jeder Löschung werden **Quelle UND Ziel** im aktuellen Lauf frisch gelesen. Nur das Ziel
+  zu prüfen genügt nicht: Der gespeicherte Quell-Hash beschreibt denselben alten Stand wie die
+  Zieldatei, eine nach dem Kopieren geänderte Quelle fiele nicht auf und würde gelöscht.
+- Diese Bedingung gilt für **jeden** Löschvorgang, auch für den im Verschieben-Modus, der schon
+  in Phase 3 stattfindet — nicht nur für Phase 5.
+- Unter dem endgültigen Zielnamen wird **nie** etwas gelöscht, nur weil ein Status fehlt.
+  Status fallen zurück; dort könnte ein fertiges Archivbild liegen.
 - Gehasht wird durchgehend mit **BLAKE3** — im ganzen Projekt dasselbe Verfahren.
 
 ## 2. Testen
@@ -46,7 +68,9 @@ Konkret heißt das:
 
 ## 3. Plattform
 
-- Windows 11 jetzt, Linux im Docker-Container später. Von Anfang an beides im Blick.
+- Entwickelt und getestet wird **jetzt im Linux-Container** (SPEC §11, künstlicher Testbaum).
+  Windows 11 ist die erste Nutzung mit echten Fotos, danach folgt TrueNAS im Container.
+  Alle drei Umgebungen von Anfang an im Blick.
 - Ausschließlich `pathlib`. Keine fest eingebauten Pfade, keine Windows-Sonderwege,
   keine Annahme über Pfadtrenner oder Groß-/Kleinschreibung von Dateinamen.
 - Quelle und Ziel können lokale Platten, externe SSDs oder SMB-Netzlaufwerke sein.
