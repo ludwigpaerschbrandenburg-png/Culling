@@ -2,17 +2,21 @@
 
 ## Vorbereitung (einmalig)
 
-1. Leeren Ordner anlegen, z. B. `C:\Projekte\fotosortierer`.
-2. Die Datei `SPEC.md` in diesen Ordner legen.
-3. ExifTool installieren (exiftool.org) und Python 3.12 oder neuer.
-4. In dem Ordner Claude Code starten.
+1. Das Repository `Culling` klonen und in den Repository-Ordner wechseln. Die verbindliche Beschreibung liegt darin unter `docs/SPEC.md`.
+2. Python 3.12 oder neuer installieren.
+3. ExifTool installieren (Windows: exiftool.org; Linux/Docker: Paket `libimage-exiftool-perl`).
+4. Im Repository-Ordner Claude Code starten.
 5. Die Prompts unten **einzeln und der Reihe nach** eingeben. Erst weitermachen, wenn die Phase läuft und die Tests grün sind. Nach jeder Phase selbst kurz ausprobieren.
+
+Entwicklung und Tests laufen mit dem künstlichen Testbaum (SPEC Abschnitt 11) und sind damit auch im Linux-Container möglich. Echte Fotos werden erst später lokal getestet.
 
 Warum in Phasen: Ein einziger Riesen-Prompt führt zu einem halb fertigen Alles. Phasen liefern jedes Mal etwas, das nachweislich funktioniert.
 
 ---
 
 ## Prompt 0 – Einlesen und Plan (noch kein Code)
+
+Dieser Schritt ist bereits ausgeführt. Die Ergebnisse liegen in `CLAUDE.md`, `docs/architektur.md` und `docs/offene_fragen.md`. Der Prompt bleibt zum Nachlesen stehen.
 
 ```
 Lies SPEC.md vollständig. Das ist die verbindliche Beschreibung des Projekts.
@@ -43,7 +47,7 @@ Phase 1 laut SPEC.md: Grundgerüst.
 Baue:
 - Projektstruktur, pyproject.toml, Kommandozeile "fotosort" mit den Unterbefehlen aus der SPEC (noch leer, außer scan und status).
 - config.toml mit Kommentaren, wird beim ersten Start erzeugt.
-- SQLite-Datenbank (WAL) mit dem Schema für Dateien, Status und Ziel-Index.
+- SQLite-Datenbank (WAL) mit dem Schema für Dateien, Status und Ziel-Index. Die Datenbank liegt laut SPEC Abschnitt 6 immer lokal, nie auf einem Netzlaufwerk; im Ziel liegen unter .fotosortierer/ nur die Archiv-ID, die Berichte und nach jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank.
 - Das Skript, das den künstlichen Testbaum erzeugt (SPEC Abschnitt 11), mit allen dort genannten Sonderfällen.
 - "fotosort scan": Quelle rekursiv mit os.scandir durchlaufen, Dateien nach Typ zählen, Gesamtgröße, in die Datenbank schreiben. Fortschritt anzeigen. Abbrechbar und fortsetzbar.
 - Prüfung beim Start, ob ExifTool vorhanden ist.
@@ -61,9 +65,9 @@ Phase 2 laut SPEC.md: Analyse.
 
 Baue "fotosort analyse":
 - Metadaten über mehrere dauerhaft laufende ExifTool-Prozesse (-stay_open, Stapel, JSON, nur benötigte Felder, -fast2). Anzahl Prozesse einstellbar, Standard = Anzahl Kerne.
-- Datumsermittlung exakt in der Reihenfolge aus SPEC Abschnitt 3, inklusive kaputter Daten, Video-UTC, Datum aus Dateinamen, unsicheres Datum, Tagesgrenze.
+- Datumsermittlung exakt in der Reihenfolge aus SPEC Abschnitt 3, inklusive kaputter Daten, Datum aus Dateinamen, unsicheres Datum, Tagesgrenze. Bei Videos zuerst die Felder mit Zeitzonen-Offset (QuickTime CreationDate, Sony-XML-Sidecar); fehlt ein solches Feld, CreateDate als UTC behandeln und in die eingestellte Heimat-Zeitzone umrechnen (Standard Europe/Berlin) und die Datei im Bericht als "Zeitzone angenommen" kennzeichnen. Die Tagesgrenze bei einem Datum aus dem Dateinamen nur anwenden, wenn der Dateiname auch eine Uhrzeit enthält.
 - Kamera-Ordner über die Alias-Tabelle, inklusive Scanner → Analog und Unbekannte_Kamera.
-- Zusammengehörige Dateien (RAW+JPG, Sidecars) als Gruppe behandeln.
+- Zusammengehörige Dateien (RAW+JPG, Sidecars) als Gruppe behandeln. Ein Sidecar gehört zur Hauptdatei, wenn sein Name entweder Stammname plus Sidecar-Endung (DSC01234.xmp) oder vollständiger Dateiname plus Sidecar-Endung (DSC01234.ARW.xmp) ist; beide Schreibweisen gelten für alle Sidecar-Endungen.
 - Bestehende Zielstruktur erkennen, auch Ordner mit Zusatz wie "2026-01-01 Geburtstag Oma".
 - Zielpfad für jede Datei berechnen und speichern. Noch nichts kopieren.
 - Zusammenfassung ausgeben: Dateien pro Jahr, gefundene Kameramodelle mit Anzahl (damit ich Aliase ergänzen kann), Anzahl ohne sicheres Datum, Durchsatz in Dateien pro Sekunde.
@@ -81,8 +85,9 @@ Phase 3 laut SPEC.md: Übertragen im Kopier-Modus.
 
 Baue "fotosort kopieren" (nur Kopieren, Verschieben kommt in Phase 5):
 - Kopieren in <name>.part, dann atomar umbenennen. Änderungsdatum erhalten.
-- Quell-Hash während des Kopierens mitberechnen (xxh3_128 oder blake3, Blöcke >= 1 MiB).
-- Niemals überschreiben. Gleicher Name + gleicher Hash = Duplikat. Gleicher Name + anderer Inhalt = Anhang _1, _2, für die ganze Dateigruppe gleich.
+- Quell-Hash während des Kopierens mitberechnen (BLAKE3, Blöcke >= 1 MiB).
+- Niemals überschreiben. Gleicher Name + gleicher Hash = Duplikat, Status "duplikat"; die Quelldatei ist damit noch nicht zum Löschen freigegeben. Gleicher Name + anderer Inhalt = Anhang _1, _2, für die ganze Dateigruppe gleich.
+- Status "duplikat_bestaetigt" nur dann, wenn die Zieldatei im aktuellen Lauf vollständig neu gelesen wurde und ihr Hash mit dem Quell-Hash übereinstimmt. Ein Hash aus einem früheren Lauf oder aus dem Ziel-Index genügt dafür nicht.
 - Duplikate innerhalb der Quelle nur einmal kopieren.
 - Ziel-Index nutzen und pflegen, damit spätere Läufe das Ziel nicht neu hashen müssen.
 - Getrennte Worker-Zahlen für Kopieren und Hashing, Profile hdd / ssd / netzwerk.
@@ -122,10 +127,11 @@ Test: Eine Zieldatei nach dem Kopieren absichtlich verändern, die Prüfung muss
 Phase 5 laut SPEC.md: alles, was löscht. Hier besonders vorsichtig arbeiten.
 
 Baue:
-- "fotosort kopieren --verschieben": pro Datei kopieren, prüfen, erst dann Quelle löschen. Auf demselben Laufwerk direkt umbenennen.
-- "fotosort aufraeumen": löscht in der Quelle ausschließlich Dateien mit Status "geprüft" (und Duplikate, deren Inhalt nachweislich per Hash im Ziel liegt). Vorher Anzahl und Größe anzeigen und ausdrücklich bestätigen lassen. --dry-run zeigt die Liste.
+- "fotosort kopieren --verschieben": pro Datei kopieren, prüfen, erst dann Quelle löschen. Liegen Quelle und Ziel nachweislich auf demselben Laufwerk, stattdessen umbenennen; danach prüfen, dass die Zieldatei existiert und die Größe stimmt, Status "verschoben". Lässt sich nicht sicher feststellen, ob es dasselbe Laufwerk ist, wird kopiert statt umbenannt.
+- "fotosort aufraeumen": löscht in der Quelle ausschließlich Dateien mit Status "geprüft" oder "duplikat_bestaetigt". Kein anderer Status berechtigt zum Löschen. Vorher Anzahl und Größe anzeigen und ausdrücklich bestätigen lassen. --dry-run zeigt die Liste.
 - "fotosort aufraeumen --leere-ordner": nur wirklich leere Ordner entfernen, Reste-Dateien laut Konfiguration zählen als leer. Quell-Wurzelordner bleibt stehen.
-- Direkt vor jedem Löschen noch einmal prüfen, dass die Zieldatei existiert und die Größe stimmt.
+- Direkt vor jedem Löschen die Zieldatei im aktuellen Lauf frisch lesen und ihren Hash mit dem Quell-Hash vergleichen. Existenz und Größe allein genügen nicht, der Ziel-Index allein auch nicht.
+- Option byte_vergleich_vor_loeschen (Standard: aus): vergleicht Quelle und Ziel vor dem Löschen zusätzlich Byte für Byte.
 
 Pflicht-Tests:
 - Ungeprüfte Datei wird nie gelöscht, auch nicht mit Gewalt-Optionen.
@@ -175,7 +181,8 @@ Phase 8: Betrieb auf dem TrueNAS-Server.
 
 - Dockerfile und docker-compose.yml (Python, ExifTool, das Programm, Weboberfläche auf einem Port).
 - Quelle, Ziel und der Ordner .fotosortierer als eingebundene Pfade (Volumes). Benutzer- und Gruppen-ID einstellbar, damit die Dateien auf dem Server dem richtigen Benutzer gehören.
-- Prüfe den gesamten Code auf Windows-Annahmen (Pfadtrenner, Groß-/Kleinschreibung von Dateinamen, verbotene Zeichen).
+- Prüfe den gesamten Code auf Windows-Annahmen (Pfadtrenner, Groß-/Kleinschreibung von Dateinamen, verbotene Zeichen). Einzige erlaubte Windows-Sonderbehandlung ist das Pfad-Präfix für lange Pfade (\\?\ bzw. \\?\UNC\, SPEC Abschnitt 5), das die 260-Zeichen-Grenze aktiv umgeht; unter Linux greift es nicht.
+- Die Datenbank liegt laut SPEC Abschnitt 6 lokal, im Container also in einem eigenen Volume und nie auf einem eingebundenen Netzpfad. Beim Start prüfen und mit verständlicher Meldung abbrechen, wenn der Datenbankpfad auf einem Netzlaufwerk liegt.
 - Anleitung in der LIESMICH.md, wie ich das auf TrueNAS als eigene App einrichte, Schritt für Schritt.
 ```
 

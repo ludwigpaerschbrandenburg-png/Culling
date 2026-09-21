@@ -6,8 +6,12 @@ entschieden sein sollten. Zu jedem: wo es steht, was das Problem ist, und ein Vo
 Beantwortet wird direkt in dieser Datei — Haken setzen und die gewählte Option markieren.
 Die entschiedenen Punkte wandern anschließend in die SPEC.
 
-**Dringlichkeit:** Punkte 1, 8, 9 und 10 betreffen den Löschpfad oder die Datenbank und
-sollten vor Phase 1 stehen. Der Rest kann bis Phase 2 warten.
+**Stand:** Alle elf Punkte sind entschieden. Der verbindliche Wortlaut steht in
+[`SPEC.md`](SPEC.md) — diese Datei ist ab jetzt nur noch das Protokoll der Entscheidung.
+Weicht sie von der SPEC ab, gilt die SPEC.
+
+**Dringlichkeit:** erledigt. Die Punkte 1, 8, 9 und 10 betreffen den Löschpfad und die
+Datenbank und sind vor Phase 1 entschieden worden; die übrigen sieben Punkte ebenfalls.
 
 ---
 
@@ -31,9 +35,15 @@ frisch gelesen und ihr Hash mit dem der Quelldatei verglichen wurde — also der
 wie bei `geprüft`, nur ohne Kopiervorgang davor. Gelöscht werden darf aus genau diesen beiden
 Status. Damit steht in §4 und §5 dieselbe Regel.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] Duplikate werden nie gelöscht (§5 streichen)
 - [ ] anders: …
+
+**Entschieden:** Eigener Status `duplikat_bestaetigt`, den eine Quelldatei nur bekommt, wenn
+die inhaltsgleiche Zieldatei im aktuellen Lauf vollständig neu gelesen wurde und ihr Hash mit
+dem Quell-Hash übereinstimmt. Gelöscht werden dürfen ausschließlich Dateien mit Status
+`geprüft` oder `duplikat_bestaetigt`, kein anderer Status berechtigt zum Löschen. Die Sperre
+in `CLAUDE.md` entfällt, sobald diese Regel in der SPEC steht.
 
 ---
 
@@ -48,8 +58,11 @@ Beides zusammen liest sich widersprüchlich, gemeint ist offensichtlich zweierle
 Datum oder Kamera)". Der `_1`-Anhang bleibt als Notausgang bei Namenskonflikten bestehen und
 wird im Bericht aufgelistet, wie §10 es ohnehin vorsieht.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] anders: …
+
+**Entschieden:** §12 meint „kein systematisches Umbenennen" (etwa nach Datum oder Kamera).
+Der Anhang `_1`, `_2` bei Namenskonflikten ist die einzige Ausnahme und bleibt bestehen.
 
 ---
 
@@ -72,7 +85,14 @@ unabhängige Prüfung stattfand. Im Bericht getrennt ausweisen.
 
 - [ ] Vorschlag übernehmen
 - [ ] Direktes Umbenennen weglassen, immer kopieren und prüfen (langsamer, aber einheitlich)
-- [ ] anders: …
+- [x] anders: Umbenennen bleibt erlaubt, aber mit eigenem Status `verschoben`, Prüfung auf
+  Existenz und Größe, und dem Hash aus der Zieldatei
+
+**Entschieden:** Umbenennen auf demselben Laufwerk ist erlaubt, weil dabei keine Daten kopiert
+werden; danach wird geprüft, dass die Zieldatei existiert und die Größe stimmt, Status
+`verschoben`. Der Hash für den Ziel-Index wird in der Phase „Prüfen" aus der Zieldatei
+berechnet. Ob zwei Pfade wirklich auf demselben Laufwerk liegen, muss sicher festgestellt
+werden — im Zweifel wird kopiert statt umbenannt.
 
 ---
 
@@ -84,9 +104,12 @@ SPEC §3 macht die Ordner-Vorlage konfigurierbar
 **Vorschlag:** Auch als Konfigurationswert führen (Standard `_Ohne_Datum/{kamera}`). Kostet
 nichts und ist konsistent.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] bleibt fest
 - [ ] anders: …
+
+**Entschieden:** `_Ohne_Datum` bekommt eine eigene konfigurierbare Vorlage, Standard
+`_Ohne_Datum/{kamera}`.
 
 ---
 
@@ -113,7 +136,13 @@ nachsehen kann.
 - [ ] Vorschlag übernehmen
 - [ ] Offset fest auf die Zeitzone des Rechners
 - [ ] Videos ohne Offset immer als unsicheres Datum behandeln (sicherste, aber unbequemste Variante)
-- [ ] anders: …
+- [x] anders: zuerst Felder **mit** Offset auswerten, erst danach UTC-Annahme mit
+  konfigurierbarer Heimat-Zeitzone
+
+**Entschieden:** Zuerst werden Felder mit Zeitzonen-Offset genutzt (z. B. QuickTime
+`CreationDate`, Sony-XML-Sidecar). Fehlt ein solches Feld, wird `CreateDate` als UTC behandelt
+und in eine konfigurierbare Heimat-Zeitzone umgerechnet (Standard `Europe/Berlin`). Diese
+Dateien werden im Bericht als „Zeitzone angenommen" gekennzeichnet.
 
 ---
 
@@ -129,8 +158,11 @@ Kommt das Datum aus dem Dateinamen (Quelle 3), gibt es oft nur ein Datum ohne Uh
 Im Bericht vermerken, bei wie vielen Dateien das passiert ist. Enthält der Dateiname eine
 Uhrzeit (`IMG_20260101_013000`), wird die Tagesgrenze normal angewendet.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] anders: …
+
+**Entschieden:** Die Tagesgrenze wird bei einem Datum aus dem Dateinamen nur angewendet, wenn
+der Dateiname auch eine Uhrzeit enthält. Steht dort nur ein Datum, bleibt es unverändert.
 
 ---
 
@@ -154,8 +186,12 @@ also nicht — der Sidecar bliebe liegen, und damit alle Bearbeitungen.
 **Vorschlag:** Beide Schreibweisen als zusammengehörig erkennen: gleicher Stammname **oder**
 vollständiger Dateiname plus Sidecar-Endung. Beides mit Tests abdecken.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] anders: …
+
+**Entschieden:** Beide Schreibweisen werden erkannt. Ein Sidecar gehört zur Hauptdatei, wenn
+sein Name entweder Stammname plus Sidecar-Endung (`DSC01234.xmp`) oder vollständiger Dateiname
+plus Sidecar-Endung (`DSC01234.ARW.xmp`) ist. Das gilt für alle Sidecar-Endungen.
 
 ---
 
@@ -185,7 +221,17 @@ statt WAL — langsamer, aber netzwerktauglich.
 
 - [ ] Vorschlag übernehmen
 - [ ] Datenbank immer lokal, Pfad in der Konfiguration (wandert dann nicht mit)
-- [ ] anders: …
+- [x] anders: Datenbank immer lokal und nie auf einem Netzlaufwerk, Abbruch bei Netzpfad, im
+  Ziel nur Archiv-ID, Berichte und eine Sicherungskopie
+
+**Entschieden:** Die Datenbank liegt immer lokal — Windows unter
+`%LOCALAPPDATA%\fotosortierer\<archiv-id>\`, Linux/Docker in einem eigenen lokalen Pfad bzw.
+Volume; erkennt das Programm, dass der Datenbankpfad auf einem Netzlaufwerk liegt, bricht es
+mit verständlicher Meldung ab. Im Ziel liegen unter `.fotosortierer/` nur noch eine Datei mit
+der Archiv-ID, die Berichte und nach jeder abgeschlossenen Phase eine Sicherungskopie der
+Datenbank (über die SQLite-Backup-Funktion geschrieben, als normale Datei); die Archiv-ID
+verbindet lokale Datenbank und Zielordner. Es gibt einen Befehl zum Wiederherstellen aus der
+Sicherung; ein automatisches Ausweichen auf Journal-Modus `TRUNCATE` entfällt.
 
 ---
 
@@ -214,8 +260,12 @@ hält die Quelldatei dann für gesichert und löscht sie. Die einzige gute Kopie
 
 Das kostet Zeit, aber nur in Phase 5, die ohnehin selten und bewusst gestartet wird.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] anders: …
+
+**Entschieden:** Der Ziel-Index darf niemals allein eine Löschung erlauben. Er dient nur dazu,
+Kandidaten für Duplikate schnell zu finden. Vor jeder Löschung gilt Punkt 1: die Zieldatei
+wird im aktuellen Lauf frisch gelesen und verglichen.
 
 ---
 
@@ -236,8 +286,12 @@ byteweise vergleichen. Das liest die Dateien ohnehin schon (siehe Punkt 9) und k
 fast nichts extra.
 
 - [ ] Vorschlag übernehmen
-- [ ] durchgehend `blake3` (kryptografisch, etwas langsamer, dann kein Byte-Vergleich nötig)
+- [x] durchgehend `blake3` (kryptografisch, etwas langsamer, dann kein Byte-Vergleich nötig)
 - [ ] anders: …
+
+**Entschieden:** BLAKE3 gilt durchgehend im ganzen Projekt, `xxh3_128` entfällt. Zusätzlich
+gibt es die Konfigurations-Option `byte_vergleich_vor_loeschen` (Standard: aus), die vor dem
+Löschen Quelle und Ziel zusätzlich Byte für Byte vergleicht.
 
 ---
 
@@ -255,13 +309,18 @@ Netzpfaden) hebt Windows die Grenze auf.
 **Vorschlag:** Pfade unter Windows intern mit diesem Präfix ansprechen. „Pfad zu lang" bleibt
 als Fehlergrund bestehen, sollte dann aber praktisch nie auftreten.
 
-- [ ] Vorschlag übernehmen
+- [x] Vorschlag übernehmen
 - [ ] anders: …
+
+**Entschieden:** Lange Pfade werden unter Windows mit dem Präfix `\\?\` bzw. `\\?\UNC\`
+umgangen statt nur gemeldet. Der Fehlergrund „Pfad zu lang" bleibt bestehen, greift aber nur
+noch, wenn es trotzdem scheitert.
 
 ---
 
 ## Kleinigkeiten, keine Entscheidung nötig
 
 - Das Repository heißt `Culling`, das Projekt laut SPEC `Foto-Sortierer`. Nur kosmetisch.
+  **Entschieden:** Der Repo-Name `Culling` bleibt, das Programm heißt `fotosort`.
 - `docs/files.zip` enthält `SPEC.md` byteidentisch zur Datei im Repo — die Kopie im Zip ist
   überflüssig, schadet aber nicht.
