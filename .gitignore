@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtuelle Umgebung
+.venv/
+venv/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Künstlicher Testbaum und Testziele (werden erzeugt, nie eingecheckt)
+/testbaum/
+/testziel/
+*.part
+
+# Arbeitsdaten des Programms
+.fotosortierer/
+config.toml
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
