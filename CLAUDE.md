@@ -13,15 +13,22 @@ Protokoll der entschiedenen Punkte aus der SPEC-Prüfung: [`docs/offene_fragen.m
 Konkret heißt das:
 
 - Nie eine bestehende Datei überschreiben. Bei Namenskonflikt: neuer Name, nie ersetzen.
+- **Umbenennen darf nie überschreiben** — weder beim Verschieben auf demselben Laufwerk noch
+  beim Umbenennen der `.part`-Datei. Nicht `os.rename` oder `Path.rename`, sondern ein
+  nicht überschreibendes Verfahren.
 - Nie löschen, was nicht durch einen Hash-Vergleich als im Ziel vorhanden nachgewiesen ist.
 - Nie auf Basis von Dateiname oder Größe allein löschen.
 - Kopieren immer über eine `.part`-Datei mit anschließendem atomaren Umbenennen.
 - Im Zweifel: abbrechen und fragen, nicht weitermachen.
-- Gelöscht werden darf **ausschließlich** aus den Status `geprüft` und `duplikat_bestaetigt`.
+- Gelöscht werden darf **ausschließlich** aus den Status `geprueft` und `duplikat_bestaetigt`.
   Kein anderer Status berechtigt zum Löschen.
-- `duplikat_bestaetigt` setzt voraus, dass die Zieldatei **im aktuellen Lauf** vollständig neu
-  gelesen und ihr Hash mit dem der Quelle verglichen wurde. Ein Hash aus einem früheren Lauf
-  genügt nicht.
+- Der Status allein genügt nie. Vor **jeder** Löschung wird die Zieldatei **im aktuellen Lauf**
+  vollständig neu gelesen und ihr Hash mit dem der Quelle verglichen — bei `geprueft` genauso
+  wie bei `duplikat_bestaetigt`. Ein Hash aus einem früheren Lauf genügt für keinen von beiden.
+- Die Statuswerte werden **umlautfrei** gespeichert: `gefunden`, `analysiert`, `kopiert`,
+  `geprueft`, `verschoben`, `duplikat`, `duplikat_bestaetigt`, `quelle_geloescht`,
+  `uebersprungen`, `fehler`. Wer eine Statusprüfung schreibt, vergleicht gegen genau diese
+  Zeichenketten. Andere Schreibweisen gibt es nicht.
 - Der Ziel-Index rechtfertigt **nie allein** eine Löschung. Er dient nur dazu, Kandidaten für
   Duplikate schnell zu finden.
 - Gehasht wird durchgehend mit **BLAKE3** — im ganzen Projekt dasselbe Verfahren.

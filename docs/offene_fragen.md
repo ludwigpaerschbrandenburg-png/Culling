@@ -1,10 +1,7 @@
 # Offene Fragen zur SPEC
 
 Ergebnis der Prüfung von [`SPEC.md`](SPEC.md) (Prompt 0). Elf Punkte, die vor dem Bauen
-entschieden sein sollten. Zu jedem: wo es steht, was das Problem ist, und ein Vorschlag.
-
-Beantwortet wird direkt in dieser Datei — Haken setzen und die gewählte Option markieren.
-Die entschiedenen Punkte wandern anschließend in die SPEC.
+zu entscheiden waren. Zu jedem: wo es stand, was das Problem war, und ein Vorschlag.
 
 **Stand:** Alle elf Punkte sind entschieden. Der verbindliche Wortlaut steht in
 [`SPEC.md`](SPEC.md) — diese Datei ist ab jetzt nur noch das Protokoll der Entscheidung.
@@ -18,8 +15,6 @@ Datenbank und sind vor Phase 1 entschieden worden; die übrigen sieben Punkte eb
 ## Widersprüche
 
 ### 1. Dürfen Duplikate in der Quelle gelöscht werden?
-
-**Dringend** — betrifft den Löschpfad.
 
 - SPEC §4 Phase 5: gelöscht werden „ausschließlich Dateien mit Status *geprüft*".
 - SPEC §5: ein Duplikat „wird nicht erneut kopiert, gilt aber als *im Ziel vorhanden*
@@ -151,7 +146,7 @@ Dateien werden im Bericht als „Zeitzone angenommen" gekennzeichnet.
 SPEC §3: Option „Tagesgrenze" (Standard 00:00, z. B. 04:00), damit Aufnahmen nach Mitternacht
 noch zum Vortag zählen.
 
-Kommt das Datum aus dem Dateinamen (Quelle 3), gibt es oft nur ein Datum ohne Uhrzeit — etwa
+Kommt das Datum aus dem Dateinamen (Quelle 5), gibt es oft nur ein Datum ohne Uhrzeit — etwa
 `2026-01-01 Urlaub.jpg`. Ohne Uhrzeit lässt sich die Tagesgrenze nicht anwenden.
 
 **Vorschlag:** In dem Fall die Tagesgrenze überspringen und das Datum nehmen, wie es dasteht.
@@ -199,8 +194,6 @@ plus Sidecar-Endung (`DSC01234.ARW.xmp`) ist. Das gilt für alle Sidecar-Endunge
 
 ### 8. SQLite mit WAL liegt auf einem Netzlaufwerk
 
-**Dringend** — blockiert Phase 1.
-
 - SPEC §6: „Eine **SQLite-Datenbank** (WAL-Modus) … liegt standardmäßig im Zielordner unter
   `.fotosortierer/`, damit sie mit dem Archiv mitwandert."
 - SPEC §2: „Quelle und Ziel können … SMB-Netzlaufwerke sein (auch UNC-Pfade wie
@@ -236,8 +229,6 @@ Sicherung; ein automatisches Ausweichen auf Journal-Modus `TRUNCATE` entfällt.
 ---
 
 ### 9. Der Ziel-Index darf keine Löschung rechtfertigen
-
-**Dringend** — direkter Weg zum Bildverlust.
 
 SPEC §6: „Bei späteren Läufen wird das Ziel nur auf Änderungen geprüft (Größe +
 Änderungsdatum), nicht komplett neu gehasht."
@@ -322,5 +313,63 @@ noch, wenn es trotzdem scheitert.
 
 - Das Repository heißt `Culling`, das Projekt laut SPEC `Foto-Sortierer`. Nur kosmetisch.
   **Entschieden:** Der Repo-Name `Culling` bleibt, das Programm heißt `fotosort`.
-- `docs/files.zip` enthält `SPEC.md` byteidentisch zur Datei im Repo — die Kopie im Zip ist
-  überflüssig, schadet aber nicht.
+- `docs/files.zip` ist der ursprüngliche Upload und bleibt als solcher liegen. Sein Inhalt ist
+  überholt: Die darin enthaltenen Kopien von `SPEC.md` und `PROMPTS.md` sind ein veralteter
+  Parallelstand und gelten nicht. Verbindlich ist allein der gepflegte Stand daneben in
+  `docs/`.
+
+---
+
+## Nachträgliche Präzisierungen
+
+Diese Punkte stammen aus der Gegenprüfung der eingearbeiteten SPEC. Es sind keine neuen
+Entscheidungen, sondern Präzisierungen der elf Punkte oben. Der verbindliche Wortlaut steht in
+[`SPEC.md`](SPEC.md).
+
+- **A — Statuswerte ohne Umlaute.** Gespeichert werden genau `gefunden`, `analysiert`,
+  `kopiert`, `geprueft`, `verschoben`, `duplikat`, `duplikat_bestaetigt`, `quelle_geloescht`,
+  `uebersprungen` und `fehler`; an diesen Zeichenketten hängt die Löschberechtigung, eine
+  zweite Schreibweise mit Umlaut wäre eine stille Fehlerquelle (SPEC §6).
+- **B — Ort der Datenbank unter Linux.** Standard ist
+  `${XDG_DATA_HOME:-~/.local/share}/fotosortierer/<archiv-id>/`, im Docker-Container als Volume
+  eingebunden und überschreibbar über den Konfigurationswert `datenbank_ort` und die
+  Umgebungsvariable `FOTOSORT_DATENBANK`; unter Windows bleibt es bei
+  `%LOCALAPPDATA%\fotosortierer\<archiv-id>\` (SPEC §6).
+- **C — Umbenennen darf niemals überschreiben.** `os.rename` bzw. `Path.rename` ersetzt unter
+  POSIX eine vorhandene Zieldatei stillschweigend; stattdessen wird ein nicht überschreibendes
+  Verfahren benutzt (Linux `os.link` plus `os.unlink` oder `renameat2` mit `RENAME_NOREPLACE`,
+  Windows `MoveFileEx` ohne `MOVEFILE_REPLACE_EXISTING`) (SPEC §4 Phase 3, §5).
+- **D — Ein Netzlaufwerk gilt nie als „gleiches Laufwerk".** Liegt mindestens einer der beiden
+  Pfade auf einem Netzlaufwerk (UNC, SMB, CIFS, NFS), gilt „gleiches Laufwerk" als nicht
+  nachgewiesen und es wird kopiert statt umbenannt (SPEC §4 Phase 3).
+- **E — Der Status ist notwendig, nicht hinreichend.** Vor jeder Löschung wird die Zieldatei im
+  aktuellen Lauf frisch gelesen und ihr Hash verglichen, bei `geprueft` genauso wie bei
+  `duplikat_bestaetigt`; die Lauf-Kennzeichnung `bestaetigt_in_lauf` gilt deshalb für beide
+  Status (SPEC §5, §6).
+- **F — Phase 6 ist eine eng begrenzte Ausnahme.** Die Statusregel gilt für Quelldateien aus
+  dem Bestand der Datenbank; ausgenommen sind allein die Reste-Dateien aus Phase 6
+  (`Thumbs.db`, `.DS_Store`, `desktop.ini`, konfigurierbar) und liegengebliebene
+  `.part`-Dateien, die nie in der Datenbank stehen (SPEC §4 Phase 6, §5).
+- **G — Die UTC-Annahme gilt nur für Videos.** Bei Fotos werden `CreateDate` und
+  `DateTimeDigitized` als Kamera-Ortszeit gelesen, nie als UTC; die Umrechnung aus Punkt 5
+  greift ausschließlich bei Video-Dateitypen (SPEC §3).
+- **H — „Zeitzone angenommen" macht das Datum nicht unsicher.** Ein umgerechnetes Datum gilt
+  als sicher, die Kennzeichnung dient nur dem Bericht; dasselbe gilt für ein Datum aus dem
+  Dateinamen. Unsicher ist ausschließlich das Datum aus dem Änderungsdatum der Datei (SPEC §3).
+- **I — Sony-Video-Sidecars.** Die Sidecar-Regel aus Punkt 7 deckt `C0001M01.XML` nicht ab;
+  dafür gibt es eine dritte Form „Stammname + konfigurierbares Zusatzmuster + Sidecar-Endung"
+  mit den Standardmustern `M01`, `M02` und so weiter (SPEC §3, §9).
+- **J — Fehlende lokale Datenbank.** Findet das Programm im Ziel eine Archiv-ID, aber keine
+  zugehörige lokale Datenbank, während im Ziel eine Sicherungskopie liegt, bricht es mit einer
+  verständlichen Meldung ab und weist auf `fotosort wiederherstellen` hin; es legt niemals
+  stillschweigend eine leere Datenbank an (SPEC §6, §8).
+- **K — `tzdata` ist eine feste Abhängigkeit**, nicht nur unter Windows; das Paket ist klein,
+  und die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank
+  mitbringt (`docs/architektur.md`).
+- **L — `docs/files.zip` bleibt liegen** als ursprünglicher Upload, ist inhaltlich aber
+  überholt und gilt nicht (siehe „Kleinigkeiten").
+- **M — Umgebungen getrennt.** Entwicklung und Tests laufen im Linux-Container mit dem
+  künstlichen Testbaum (ExifTool ist dort installiert), die erste Nutzung mit echten Fotos
+  findet auf Windows 11 statt, der spätere Betrieb auf TrueNAS im Container (SPEC §2).
+- **N — Wurzelzeile der Modulliste.** In `docs/architektur.md` heißt die Wurzelzeile
+  `Culling/ (Repository-Wurzel)`; der Paketname `src/fotosort/` bleibt.

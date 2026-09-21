@@ -22,7 +22,7 @@ Die Dauerregeln für die Arbeit am Projekt stehen in [`../CLAUDE.md`](../CLAUDE.
 | [`entscheidungen.md`](entscheidungen.md) | Was wurde entschieden und warum |
 | [`notizen.md`](notizen.md) | Freitext für alles, was noch keinen Platz hat |
 | [`assets/`](assets/) | Bilder, PDFs, Screenshots, Skizzen |
-| `files.zip` | Ursprünglicher Upload. Inhalt liegt entpackt daneben. |
+| `files.zip` | Ursprünglicher Upload, inhaltlich **überholt**. Die Kopien von `SPEC.md` und `PROMPTS.md` darin sind ein alter Parallelstand und gelten nicht; verbindlich ist der gepflegte Stand daneben. |
 
 ## Hinweise
 

@@ -13,13 +13,14 @@ Ein Modul ist eine Datei mit einer klar umrissenen Aufgabe. Der Zuschnitt folgt 
 einzigen Überlegung: **alles, was viele Sonderfälle hat, muss sich ohne echte Dateien testen
 lassen.**
 
-Datum, Kamera und Zielpfad sind genau solche Stellen — dort stecken die meisten Regeln der
-SPEC und damit die meisten möglichen Fehler. Diese drei Module bekommen nur Werte herein und
-geben Werte zurück, ohne die Festplatte anzufassen. So lassen sich hundert Sonderfälle in
-Sekunden durchtesten, statt für jeden einen Testordner anzulegen.
+Datum, Kamera, Zielpfad, Dateityp samt Sidecar-Zuordnung und Gruppenbildung sind genau solche
+Stellen — dort stecken die meisten Regeln der SPEC und damit die meisten möglichen Fehler.
+Diese fünf Module bekommen nur Werte herein und geben Werte zurück, ohne die Festplatte
+anzufassen. So lassen sich hundert Sonderfälle in Sekunden durchtesten, statt für jeden einen
+Testordner anzulegen.
 
 ```
-fotosortierer/
+Culling/ (Repository-Wurzel)
 ├─ pyproject.toml            Projektdatei: Name, Abhängigkeiten, Befehl "fotosort"
 ├─ CLAUDE.md                 Projektregeln
 ├─ docs/                     SPEC, Prompts, offene Fragen, diese Datei
@@ -61,14 +62,20 @@ rechtfertigt ein eigenes Modul: Sonst verteilen sich diese Sonderfälle über `k
 
 `dateitypen.py` beantwortet zwei Fragen, ohne die Festplatte anzufassen: zu welchem Typ eine
 Datei gehört (`foto`, `raw`, `video`, `sidecar`, `sonstiges`) und zu welcher Hauptdatei ein
-Sidecar gehört. Für die Sidecar-Zuordnung gelten beide Schreibweisen — Stammname plus Endung
-(`DSC01234.xmp`) und vollständiger Dateiname plus Endung (`DSC01234.ARW.xmp`), für alle
-Sidecar-Endungen. `gruppen.py` benutzt das Ergebnis, um Gruppen zu bilden; die Einordnung
-selbst bleibt reine Logik und damit in Sekunden durchtestbar.
+Sidecar gehört. Für die Sidecar-Zuordnung gelten die drei Formen aus SPEC §3 — Stammname plus
+Endung (`DSC01234.xmp`), vollständiger Dateiname plus Endung (`DSC01234.ARW.xmp`) und
+Stammname plus konfigurierbares Zusatzmuster plus Endung (`C0001M01.XML` zu `C0001.MP4`). Die
+ersten beiden gelten für alle Sidecar-Endungen; die dritte fängt die Sony-Video-Sidecars ab,
+die sonst durchfallen würden. `gruppen.py` benutzt das Ergebnis, um Gruppen zu bilden; die
+Einordnung selbst bleibt reine Logik und damit in Sekunden durchtestbar.
 
-`aufraeumen.py` ist das einzige Modul, das löscht. Es fragt vor jeder Datei den Status ab und
-arbeitet ausschließlich mit `geprueft` und `duplikat_bestaetigt`; jeder andere Status führt
-dazu, dass die Datei stehen bleibt. Gebaut wird es trotzdem erst in seiner eigenen Phase.
+`aufraeumen.py` ist das einzige Modul, das löscht. Bei Quelldateien aus dem Bestand der
+Datenbank fragt es vor jeder Datei den Status ab und arbeitet ausschließlich mit `geprueft`
+und `duplikat_bestaetigt`; jeder andere Status führt dazu, dass die Datei stehen bleibt. Der
+Status allein reicht nicht — dazu kommt die Frischlesung der Zieldatei im aktuellen Lauf
+(SPEC §5). Davon getrennt und eng begrenzt sind die beiden Dateiarten, die nie in der
+Datenbank stehen: die Reste-Dateien aus Phase 6 und liegengebliebene `.part`-Dateien. Gebaut
+wird das Modul trotzdem erst in seiner eigenen Phase.
 
 ---
 
@@ -79,16 +86,32 @@ Schritt, damit ein Lauf nach einem Absturz genau dort weitergeht, wo er war.
 
 ### Wo die Datenbank liegt
 
-Immer auf einer lokalen Platte, nie auf einem Netzlaufwerk (SPEC §6): unter Windows in
-`%LOCALAPPDATA%\fotosortierer\<archiv-id>\`, unter Linux und im Docker-Container in einem
-eigenen lokalen Pfad bzw. Volume. Der Grund ist technisch: SQLite verlässt sich auf
+Immer auf einer lokalen Platte, nie auf einem Netzlaufwerk. Die Pfade je Betriebssystem, der
+Docker-Fall und die beiden Überschreibungen (`datenbank_ort`, `FOTOSORT_DATENBANK`) stehen in
+SPEC §6 und werden hier nicht wiederholt. Hier steht der Grund: SQLite verlässt sich auf
 Dateisperren, die über SMB nicht zuverlässig funktionieren. Eine Datenbank auf dem NAS wäre
 nicht nur langsam, sondern im ungünstigen Fall beschädigt — und sie ist das Gedächtnis
 darüber, was schon sicher im Ziel liegt.
 
 Stellt `pfade.py` fest, dass der eingestellte Datenbankpfad auf einem Netzlaufwerk liegt,
 bricht das Programm mit einer verständlichen Meldung ab. Kein stilles Ausweichen auf einen
-anderen Journal-Modus, kein halb funktionierender Betrieb.
+anderen Journal-Modus, kein halb funktionierender Betrieb: Ein anderer Journal-Modus würde
+das Problem nicht lösen, sondern nur verdecken — die Sperren blieben unzuverlässig, der
+Schaden fiele erst später auf.
+
+Woran `pfade.py` einen Netzpfad erkennt — dasselbe Verfahren, das auch über „gleiches
+Laufwerk" entscheidet (SPEC §4 Phase 3):
+
+- **Windows:** ein UNC-Präfix im Pfad (`\\server\freigabe`), sonst `GetDriveType` für das
+  Laufwerk des Pfades; Ergebnis `DRIVE_REMOTE` heißt Netzlaufwerk. Verbundene
+  Laufwerksbuchstaben werden dabei zuerst auf ihr Ziel aufgelöst, damit ein `Z:`, das auf eine
+  Freigabe zeigt, nicht als lokale Platte durchgeht.
+- **Linux:** der Dateisystemtyp des Einhängepunkts, zu dem der Pfad gehört. Als Netz gelten
+  `cifs`, `smb3`, `nfs`, `nfs4` und `fuse.sshfs`.
+
+Lässt sich der Typ nicht bestimmen, gilt der Pfad als Netzpfad. Die vorsichtige Antwort
+kostet im schlimmsten Fall einen Kopiervorgang statt eines Umbenennens; die unvorsichtige
+kostet im schlimmsten Fall Bilder.
 
 Zusammengehalten werden lokale Datenbank und Zielordner durch die **Archiv-ID**. Sie steht in
 einer Datei im Ziel unter `.fotosortierer/` und im Namen des lokalen Datenbankordners. So
@@ -117,7 +140,7 @@ Datenbank verloren, holt `fotosort wiederherstellen` sie daraus zurück (SPEC §
 | `datum_sicher` | Ja/Nein — steuert `_Ohne_Datum/` |
 | `zielpfad` | in Phase 2 berechnet, noch nicht angelegt |
 | `status` | siehe unten |
-| `bestaetigt_in_lauf` | Nummer des Laufs, in dem die Zieldatei frisch gelesen und verglichen wurde — nur bei `duplikat_bestaetigt` gefüllt |
+| `bestaetigt_in_lauf` | Nummer des Laufs, in dem die Zieldatei frisch gelesen und ihr Hash verglichen wurde — gilt für `geprueft` und `duplikat_bestaetigt` gleichermaßen |
 | `fehler_grund` | Klartext, landet so im Bericht |
 | `aktualisiert_am` | Zeitstempel des letzten Statuswechsels |
 
@@ -136,9 +159,13 @@ gefunden → analysiert → kopiert → geprueft → quelle_geloescht
                      ↘ fehler
 ```
 
-Der Status ist die einzige Wahrheit darüber, was mit einer Datei passieren darf.
+Die hier genannten Werte sind genau die, die in der Datenbank stehen — ohne Umlaute, eine
+zweite Schreibweise gibt es nicht (SPEC §6).
+
+Der Status ist die Voraussetzung dafür, dass mit einer Datei überhaupt etwas passieren darf.
 Gelöscht werden darf **nur** aus `geprueft` und `duplikat_bestaetigt`; kein anderer Status
-berechtigt dazu (SPEC §4 Phase 5).
+berechtigt dazu (SPEC §4 Phase 5). Der Status allein genügt aber nicht: Vor jeder Löschung
+kommt die Frischlesung im aktuellen Lauf dazu (SPEC §5).
 
 `duplikat_bestaetigt` bekommt eine Quelldatei nur dann, wenn die inhaltsgleiche Zieldatei
 **im aktuellen Lauf** vollständig neu gelesen wurde und ihr Hash mit dem der Quelle
@@ -147,11 +174,20 @@ nicht — das wäre genau der Fehler aus 4.1. Umgesetzt wird das über die Spalt
 `bestaetigt_in_lauf`: Steht dort nicht die Nummer des laufenden Laufs, gilt die Datei wieder
 als `duplikat` und wird vor dem Löschen erneut verglichen.
 
+Dieselbe Spalte gilt für `geprueft`. Auch eine geprüfte Datei wird vor dem Löschen noch
+einmal frisch gegen ihre Zieldatei verglichen; die Prüfung aus Phase 4 kann Wochen her sein
+und sagt nichts darüber, wie die Zieldatei jetzt aussieht. Steht in `bestaetigt_in_lauf`
+nicht die Nummer des laufenden Laufs, bleibt die Datei stehen und wird im Bericht aufgeführt.
+`bestaetigt_in_lauf` ist damit keine Eigenschaft eines einzelnen Status, sondern die
+Buchführung über die Frischlesung — für beide löschberechtigenden Status.
+
 `verschoben` steht für Dateien, die auf demselben Laufwerk durch Umbenennen ins Ziel
-gekommen sind (SPEC §4 Phase 3). Für sie gibt es keine Quelle mehr, gegen die geprüft werden
-könnte: Die Prüf-Phase stellt fest, dass die Zieldatei existiert und die Größe stimmt, und
-trägt ihren Hash in den Ziel-Index nach. `quelle_geloescht` folgt darauf nicht — die Quelle
-ist mit dem Umbenennen verschwunden, es gibt nichts mehr aufzuräumen.
+gekommen sind (SPEC §4 Phase 3). Dass die Zieldatei existiert und die Größe stimmt, wird
+direkt nach dem Umbenennen in Phase 3 geprüft; erst danach wird der Status gesetzt. Für sie
+gibt es keine Quelle mehr, gegen die gehasht werden könnte: Die Prüf-Phase berechnet deshalb
+nur noch den Hash aus der Zieldatei und trägt ihn in den Ziel-Index nach.
+`quelle_geloescht` folgt darauf nicht — die Quelle ist mit dem Umbenennen verschwunden, es
+gibt nichts mehr aufzuräumen.
 
 `uebersprungen` ist kein Fehler, sondern der normale Fall für Dateitypen außerhalb der Liste
 aus SPEC §3. Sie werden gezählt, aber nie angefasst.
@@ -188,8 +224,8 @@ und kaputtgehen kann. Darum bewusst wenige:
 
 | Paket | Wofür | Warum nicht anders |
 |---|---|---|
-| `blake3` | Prüfsummen | BLAKE3 ist beides zugleich: kryptografisch und schnell. Es ist deutlich schneller als SHA-256 aus der Standardbibliothek und meist schneller, als die Platte liefern kann — der Hash kostet also praktisch keine Extrazeit. Weil derselbe Hash hier über eine Löschung mitentscheidet, darf es keine reine Prüfsumme wie `xxh3` sein (SPEC §7). |
-| `tzdata` | Zeitzonendatenbank, **nur unter Windows** | Videos ohne Zeitzonen-Offset werden von UTC in die Heimat-Zeitzone umgerechnet (SPEC §3). Python bringt dafür `zoneinfo` mit, holt sich die Zeitzonendaten aber aus dem Betriebssystem. Linux und der Docker-Container haben sie, Windows hat sie nicht — dort scheitert `Europe/Berlin` ohne dieses Paket. In der `pyproject.toml` deshalb als bedingte Abhängigkeit (`platform_system == "Windows"`). |
+| `blake3` | Prüfsummen | BLAKE3 ist beides zugleich: kryptografisch und schnell. Es ist deutlich schneller als SHA-256 aus der Standardbibliothek und meist schneller, als die Platte liefern kann — der Hash kostet also praktisch keine Extrazeit. Weil derselbe Hash hier über eine Löschung mitentscheidet, darf es keine reine Prüfsumme wie `xxh3` sein (SPEC §7). Die Hashlänge bleibt auf dem Standard der Bibliothek: 256 Bit. Sie wird nirgends gekürzt, und sie wird auch nicht verlängert — 256 Bit sind der Wert, auf den sich die Kollisionsrechnung in 4.6 bezieht. |
+| `tzdata` | Zeitzonendatenbank | Videos ohne Zeitzonen-Offset werden von UTC in die Heimat-Zeitzone umgerechnet (SPEC §3). Python bringt dafür `zoneinfo` mit, holt sich die Zeitzonendaten aber aus dem Betriebssystem. Windows hat keine, dort scheitert `Europe/Berlin` ohne dieses Paket. Aufgenommen wird es trotzdem **unbedingt**, nicht als bedingte Abhängigkeit für Windows: Die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank mitbringt, und schlanke Images bringen sie oft nicht mit. Das Paket ist klein und schadet unter Linux nicht — dort wird es schlicht nicht gebraucht. |
 | `rich` | Fortschrittsbalken, Tabellen | Ein Balken mit Restzeit ist bei stundenlangen Läufen kein Luxus. Selbstgebaut wäre das mehr Code als die Bibliothek. |
 | `tomli-w` | `config.toml` schreiben | Python kann TOML seit 3.11 **lesen** (`tomllib`), aber nicht schreiben. Wird nur beim ersten Start gebraucht. |
 | `pytest` | Tests | Standard. Nur zum Entwickeln, nicht im Betrieb. |
@@ -252,8 +288,9 @@ müssen im Ziel ankommen.
 Sortiert man `D:\Fotos` nach `D:\Fotos\Sortiert`, liest der Scan die eigenen Ergebnisse wieder
 ein — eine Endlosschleife, die sich selbst füttert.
 
-*Absicherung:* Beim Start werden beide Pfade aufgelöst und verglichen. Liegt eines im anderen,
-wird das Ziel vom Scan ausgeschlossen oder mit klarer Meldung abgebrochen.
+*Absicherung:* Beim Start werden beide Pfade in `pfade.py` aufgelöst und verglichen — dort
+liegt auch diese Prüfung, zusammen mit der Netz- und Laufwerkserkennung. Liegt eines im
+anderen, wird das Ziel vom Scan ausgeschlossen oder mit klarer Meldung abgebrochen.
 
 *Test:* Ziel als Unterordner der Quelle setzen.
 
@@ -282,12 +319,19 @@ möglich. Genau deshalb steht hier BLAKE3 und keine reine Prüfsumme.
 Zusätzlich gibt es die Option `byte_vergleich_vor_loeschen` (Standard: **aus**, SPEC §5). Ist
 sie an, werden Quelle und Ziel vor dem Löschen Byte für Byte verglichen.
 
-*Warum „aus" vertretbar ist:* Die Option schützt gegen die Kollision eines kryptografischen
-Hashes — gegen ein Risiko also, das kleiner ist als die Fehlerrate der Hardware, auf der
-verglichen wird. Bezahlt wird sie mit einem zusätzlichen vollständigen Lesen beider Dateien,
-und zwar im Aufräum-Schritt, der ohnehin der langsamste ist. Der ehrliche Satz dazu: Sie
-erhöht die Sicherheit nicht messbar, sie kostet aber messbar Zeit. Wer sie trotzdem will,
-schaltet sie mit einer Zeile in der `config.toml` ein (SPEC §9).
+*Was sie kostet:* Die Zieldatei wird vor jeder Löschung ohnehin frisch gelesen (SPEC §5), das
+ist nicht der Aufwand. Die Quelldatei dagegen wird vor dem Löschen **nicht** zwingend noch
+einmal gelesen — ihr Hash steht seit dem Kopieren in der Datenbank. Der Byte-Vergleich
+bedeutet also ein zusätzliches vollständiges Lesen der Quelldatei plus den Vergleich selbst,
+und zwar im Aufräum-Schritt. Das ist echter Zeitaufwand, kein Rundungsfehler; bei einem
+Archiv von mehreren Terabyte ist es ein zweiter vollständiger Durchgang durch die Quelle.
+
+*Warum „aus" trotzdem vertretbar ist:* Die Option schützt einzig gegen die Kollision eines
+kryptografischen Hashes mit 256 Bit — gegen ein Risiko also, das um Größenordnungen kleiner
+ist als die Fehlerrate der Hardware, auf der verglichen wird. Wäre hier eine reine Prüfsumme
+im Einsatz, müsste der Standard „an" lauten. Weil BLAKE3 kryptografisch ist, kauft die Option
+messbare Zeit gegen keinen messbaren Sicherheitsgewinn. Wer sie trotzdem will, schaltet sie
+mit einer Zeile in der `config.toml` ein (SPEC §9).
 
 *Test:* Byte-Vergleich eingeschaltet, Ziel künstlich verändert — die Löschung muss verweigert
 werden.
@@ -326,9 +370,43 @@ langsamere, aber nachweisbare Variante. Nach dem Umbenennen werden Existenz und 
 Zieldatei geprüft; schlägt das fehl, bekommt die Datei Status `fehler` und wird im Bericht
 aufgeführt.
 
+Dazu kommt eine zweite, härtere Absicherung: **Ein Netzlaufwerk gilt nie als „gleiches
+Laufwerk"** (SPEC §4 Phase 3). Liegt auch nur einer der beiden Pfade auf einem Netzlaufwerk,
+gilt die Frage als nicht nachgewiesen, und es wird kopiert. Erkannt wird das mit dem
+Verfahren aus §2 (UNC-Präfix und `DRIVE_REMOTE` unter Windows, Dateisystemtyp des
+Einhängepunkts unter Linux). Der Grund: Gerade bei Freigaben sieht der Pfadtext nach einem
+gemeinsamen Laufwerk aus, während auf der Serverseite zwei verschiedene Datenträger liegen
+können, und die Kennung des Dateisystems ist über SMB nicht verlässlich.
+
 *Test:* Zwei Pfade auf verschiedenen Dateisystemen — das Programm muss kopieren statt
 umbenennen. Dazu ein Test, in dem `pfade.py` künstlich „gleiches Laufwerk" meldet, obwohl es
-nicht stimmt: Das Umbenennen scheitert, die Quelle muss unangetastet bleiben.
+nicht stimmt: Das Umbenennen scheitert, die Quelle muss unangetastet bleiben. Dazu der
+Pflicht-Test aus SPEC §11: Bei einem Netzpfad auf einer der beiden Seiten wird kopiert, nicht
+umbenannt.
+
+### 4.9 Umbenennen überschreibt stillschweigend
+
+`os.rename` und `Path.rename` ersetzen unter POSIX eine vorhandene Zieldatei ohne Fehler und
+ohne Rückfrage. Das ist kein theoretischer Fall: Umbenannt wird an zwei Stellen — beim
+Verschieben auf demselben Laufwerk (SPEC §4 Phase 3) und beim abschließenden Umbenennen der
+`.part`-Datei auf ihren endgültigen Namen (4.2). Ist der Zielname bereits belegt, weil dort
+schon ein Bild liegt, verschwindet dieses Bild, und zwar spurlos: Das Programm bekommt keinen
+Fehler zu sehen, die Datei erscheint in keinem Bericht, und die Datenbank hält den Vorgang
+für gelungen. Alle Vorkehrungen aus 4.3 nützen nichts, wenn zwischen Prüfung und Umbenennen
+etwas dazwischenkommt oder der Zielname aus einem früheren Lauf stammt.
+
+*Absicherung:* Überall, wo umbenannt wird, wird ein nicht überschreibendes Verfahren benutzt
+(SPEC §5). Unter Linux `os.link` auf den Zielnamen und danach `os.unlink` der Quelle — `link`
+scheitert, wenn der Name belegt ist —, alternativ `renameat2` mit `RENAME_NOREPLACE`. Unter
+Windows `MoveFileEx` **ohne** `MOVEFILE_REPLACE_EXISTING`. Damit wird aus dem stillen
+Überschreiben ein Fehler, und auf einen Fehler greift die Regel „Niemals überschreiben" aus
+SPEC §5: gleicher Hash ergibt ein Duplikat, anderer Inhalt einen neuen Namen mit Anhang `_1`,
+`_2` … Der Umweg über `link` und `unlink` kostet nichts — auch er ändert nur
+Verzeichniseinträge und kopiert keine Daten. `pfade.py` kapselt beide Wege, damit `kopieren.py`
+nur eine Funktion kennt und niemand versehentlich `Path.rename` benutzt.
+
+*Test (Pflicht laut SPEC §11):* Auf einen bereits belegten Zielnamen umbenennen. Die
+vorhandene Zieldatei muss unverändert bleiben, und die Quelldatei muss danach noch da sein.
 
 ---
 

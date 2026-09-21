@@ -8,7 +8,7 @@
 4. Im Repository-Ordner Claude Code starten.
 5. Die Prompts unten **einzeln und der Reihe nach** eingeben. Erst weitermachen, wenn die Phase läuft und die Tests grün sind. Nach jeder Phase selbst kurz ausprobieren.
 
-Entwicklung und Tests laufen mit dem künstlichen Testbaum (SPEC Abschnitt 11) und sind damit auch im Linux-Container möglich. Echte Fotos werden erst später lokal getestet.
+Entwicklung und Tests laufen im Linux-Container, ausschließlich mit dem künstlichen Testbaum (SPEC Abschnitt 11); ExifTool ist dort installiert. Die erste Nutzung mit echten Fotos findet danach auf Windows 11 statt. Der spätere Betrieb läuft auf dem TrueNAS-Server im Container.
 
 Warum in Phasen: Ein einziger Riesen-Prompt führt zu einem halb fertigen Alles. Phasen liefern jedes Mal etwas, das nachweislich funktioniert.
 
@@ -48,6 +48,10 @@ Baue:
 - Projektstruktur, pyproject.toml, Kommandozeile "fotosort" mit den Unterbefehlen aus der SPEC (noch leer, außer scan und status).
 - config.toml mit Kommentaren, wird beim ersten Start erzeugt.
 - SQLite-Datenbank (WAL) mit dem Schema für Dateien, Status und Ziel-Index. Die Datenbank liegt laut SPEC Abschnitt 6 immer lokal, nie auf einem Netzlaufwerk; im Ziel liegen unter .fotosortierer/ nur die Archiv-ID, die Berichte und nach jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank.
+- Archiv-ID: im Ziel unter .fotosortierer/ anlegen, falls sie fehlt, sonst lesen. Über sie wird die zugehörige lokale Datenbank wiedergefunden.
+- Nach jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank über die SQLite-Backup-Funktion ins Ziel schreiben. Nie direkt in einer Datenbank auf dem Netzlaufwerk arbeiten.
+- Prüfung, ob der Datenbankpfad auf einem Netzlaufwerk liegt. Wenn ja, mit verständlicher Meldung abbrechen.
+- Findet das Programm im Ziel eine Archiv-ID, aber keine zugehörige lokale Datenbank, während im Ziel eine Sicherungskopie liegt: mit verständlicher Meldung abbrechen und auf "fotosort wiederherstellen" hinweisen. Niemals stillschweigend eine leere Datenbank anlegen, sonst gilt das Ziel als leer und alles wird erneut kopiert.
 - Das Skript, das den künstlichen Testbaum erzeugt (SPEC Abschnitt 11), mit allen dort genannten Sonderfällen.
 - "fotosort scan": Quelle rekursiv mit os.scandir durchlaufen, Dateien nach Typ zählen, Gesamtgröße, in die Datenbank schreiben. Fortschritt anzeigen. Abbrechbar und fortsetzbar.
 - Prüfung beim Start, ob ExifTool vorhanden ist.
@@ -65,9 +69,9 @@ Phase 2 laut SPEC.md: Analyse.
 
 Baue "fotosort analyse":
 - Metadaten über mehrere dauerhaft laufende ExifTool-Prozesse (-stay_open, Stapel, JSON, nur benötigte Felder, -fast2). Anzahl Prozesse einstellbar, Standard = Anzahl Kerne.
-- Datumsermittlung exakt in der Reihenfolge aus SPEC Abschnitt 3, inklusive kaputter Daten, Datum aus Dateinamen, unsicheres Datum, Tagesgrenze. Bei Videos zuerst die Felder mit Zeitzonen-Offset (QuickTime CreationDate, Sony-XML-Sidecar); fehlt ein solches Feld, CreateDate als UTC behandeln und in die eingestellte Heimat-Zeitzone umrechnen (Standard Europe/Berlin) und die Datei im Bericht als "Zeitzone angenommen" kennzeichnen. Die Tagesgrenze bei einem Datum aus dem Dateinamen nur anwenden, wenn der Dateiname auch eine Uhrzeit enthält.
+- Datumsermittlung exakt in der Reihenfolge aus SPEC Abschnitt 3, inklusive kaputter Daten, Datum aus Dateinamen, unsicheres Datum, Tagesgrenze. Bei Videos zuerst die Felder mit Zeitzonen-Offset (QuickTime CreationDate, Sony-XML-Sidecar); fehlt ein solches Feld, CreateDate als UTC behandeln und in die eingestellte Heimat-Zeitzone umrechnen (Standard Europe/Berlin) und die Datei im Bericht als "Zeitzone angenommen" kennzeichnen. Die UTC-Annahme gilt ausschließlich für Video-Dateitypen. Bei Fotos werden CreateDate und DateTimeDigitized als Kamera-Ortszeit gelesen, nie als UTC; dort wird nicht umgerechnet und nichts als "Zeitzone angenommen" gekennzeichnet. Ein umgerechnetes Datum gilt als sicher, die Kennzeichnung dient nur dem Bericht; ebenso gilt ein Datum aus dem Dateinamen als sicher. Unsicher ist ausschließlich das Datum aus dem Änderungsdatum der Datei. Die Tagesgrenze bei einem Datum aus dem Dateinamen nur anwenden, wenn der Dateiname auch eine Uhrzeit enthält.
 - Kamera-Ordner über die Alias-Tabelle, inklusive Scanner → Analog und Unbekannte_Kamera.
-- Zusammengehörige Dateien (RAW+JPG, Sidecars) als Gruppe behandeln. Ein Sidecar gehört zur Hauptdatei, wenn sein Name entweder Stammname plus Sidecar-Endung (DSC01234.xmp) oder vollständiger Dateiname plus Sidecar-Endung (DSC01234.ARW.xmp) ist; beide Schreibweisen gelten für alle Sidecar-Endungen.
+- Zusammengehörige Dateien (RAW+JPG, Sidecars) als Gruppe behandeln. Ein Sidecar gehört zur Hauptdatei, wenn sein Name eine von drei Formen hat: Stammname plus Sidecar-Endung (DSC01234.xmp), vollständiger Dateiname plus Sidecar-Endung (DSC01234.ARW.xmp) oder Stammname plus konfigurierbares Zusatzmuster plus Sidecar-Endung (C0001M01.XML gehört zu C0001.MP4). Die ersten beiden Formen gelten für alle Sidecar-Endungen. Die dritte Form deckt die Sony-Video-Sidecars ab, die die ersten beiden nicht erfassen; die Zusatzmuster stehen in der Konfiguration (sidecar_zusatzmuster, Standard M01, M02 und so weiter).
 - Bestehende Zielstruktur erkennen, auch Ordner mit Zusatz wie "2026-01-01 Geburtstag Oma".
 - Zielpfad für jede Datei berechnen und speichern. Noch nichts kopieren.
 - Zusammenfassung ausgeben: Dateien pro Jahr, gefundene Kameramodelle mit Anzahl (damit ich Aliase ergänzen kann), Anzahl ohne sicheres Datum, Durchsatz in Dateien pro Sekunde.
@@ -112,7 +116,8 @@ Pflicht-Tests:
 Phase 4 laut SPEC.md: Prüfen und Bericht.
 
 Baue:
-- "fotosort pruefen": jede Zieldatei vollständig neu lesen, Hash mit Quell-Hash vergleichen, Status "geprüft" oder "fehler" setzen. Parallel, fortsetzbar.
+- "fotosort pruefen": jede Zieldatei vollständig neu lesen, Hash mit Quell-Hash vergleichen, Status "geprueft" oder "fehler" setzen. Parallel, fortsetzbar.
+- Sonderfall Status "verschoben" (durch Umbenennen ins Ziel gebracht): Dort gibt es keine Quelle mehr, gegen die verglichen werden könnte. Existenz und Größe wurden schon in Phase 3 geprüft. In dieser Phase wird der Hash aus der Zieldatei berechnet und in den Ziel-Index geschrieben. Im Bericht werden diese Dateien getrennt ausgewiesen.
 - "fotosort bericht": Text- und CSV-Bericht nach SPEC Abschnitt 10.
 - "fotosort status": jederzeit aufrufbar, zeigt Zähler je Status und die aktuelle Phase.
 
@@ -128,15 +133,20 @@ Phase 5 laut SPEC.md: alles, was löscht. Hier besonders vorsichtig arbeiten.
 
 Baue:
 - "fotosort kopieren --verschieben": pro Datei kopieren, prüfen, erst dann Quelle löschen. Liegen Quelle und Ziel nachweislich auf demselben Laufwerk, stattdessen umbenennen; danach prüfen, dass die Zieldatei existiert und die Größe stimmt, Status "verschoben". Lässt sich nicht sicher feststellen, ob es dasselbe Laufwerk ist, wird kopiert statt umbenannt.
-- "fotosort aufraeumen": löscht in der Quelle ausschließlich Dateien mit Status "geprüft" oder "duplikat_bestaetigt". Kein anderer Status berechtigt zum Löschen. Vorher Anzahl und Größe anzeigen und ausdrücklich bestätigen lassen. --dry-run zeigt die Liste.
+- Das Umbenennen darf niemals eine vorhandene Zieldatei überschreiben. os.rename und Path.rename ersetzen unter POSIX eine vorhandene Zieldatei stillschweigend; das ist ein Verlustpfad. Benutze ein nicht überschreibendes Verfahren: unter Linux os.link auf den Zielnamen und danach os.unlink der Quelle (oder renameat2 mit RENAME_NOREPLACE), unter Windows MoveFileEx ohne MOVEFILE_REPLACE_EXISTING. Ist der Zielname belegt, schlägt der Vorgang fehl und es greift die Regel "Niemals überschreiben" (Duplikat oder Anhang _1, _2). Das gilt auch für das abschließende Umbenennen der .part-Datei.
+- Ein Netzlaufwerk gilt nie als "gleiches Laufwerk". Liegt mindestens einer der beiden Pfade auf einem Netzlaufwerk (UNC, SMB, CIFS, NFS), gilt "gleiches Laufwerk" als nicht nachgewiesen und es wird kopiert statt umbenannt. Erkennung: unter Windows über das UNC-Präfix bzw. GetDriveType gleich DRIVE_REMOTE, auch für verbundene Laufwerksbuchstaben aufgelöst; unter Linux über den Dateisystemtyp des Einhängepunkts (cifs, smb3, nfs, nfs4, fuse.sshfs).
+- "fotosort aufraeumen": löscht in der Quelle ausschließlich Dateien mit Status "geprueft" oder "duplikat_bestaetigt". Kein anderer Status berechtigt zum Löschen. Vorher Anzahl und Größe anzeigen und ausdrücklich bestätigen lassen. --dry-run zeigt die Liste.
 - "fotosort aufraeumen --leere-ordner": nur wirklich leere Ordner entfernen, Reste-Dateien laut Konfiguration zählen als leer. Quell-Wurzelordner bleibt stehen.
+- Die Statusregel gilt für Quelldateien aus dem Bestand der Datenbank. Eng begrenzte, ausdrücklich benannte Ausnahmen sind die Reste-Dateien aus Phase 6 (Thumbs.db, .DS_Store, desktop.ini, Liste konfigurierbar) und liegengebliebene .part-Dateien. Beide stehen nie in der Datenbank. Weitere Ausnahmen gibt es nicht.
 - Direkt vor jedem Löschen die Zieldatei im aktuellen Lauf frisch lesen und ihren Hash mit dem Quell-Hash vergleichen. Existenz und Größe allein genügen nicht, der Ziel-Index allein auch nicht.
+- Der Status ist notwendig, nicht hinreichend. Diese Frischlesung gilt für beide löschberechtigenden Status, also auch bei "geprueft" und nicht nur bei "duplikat_bestaetigt". Die Lauf-Kennzeichnung (Spalte bestaetigt_in_lauf) wird deshalb für beide Status geführt. Gehört der Eintrag nicht zum aktuellen Lauf, wird nicht gelöscht, sondern im Bericht aufgeführt.
 - Option byte_vergleich_vor_loeschen (Standard: aus): vergleicht Quelle und Ziel vor dem Löschen zusätzlich Byte für Byte.
 
 Pflicht-Tests:
 - Ungeprüfte Datei wird nie gelöscht, auch nicht mit Gewalt-Optionen.
 - Datei, deren Zielkopie fehlt oder verändert wurde, wird nicht gelöscht.
 - Ordner mit einer einzigen nicht erfassten Datei (z. B. .txt) bleibt stehen.
+- Umbenennen auf einen bereits belegten Zielnamen überschreibt nichts: Die vorhandene Zieldatei bleibt unverändert, und die Quelldatei ist danach noch da.
 
 Geh danach den gesamten Lösch-Code noch einmal Zeile für Zeile durch und such aktiv nach Wegen, wie ein Bild verloren gehen könnte. Berichte mir, was du gefunden und geändert hast.
 ```
@@ -180,9 +190,11 @@ Test: Oberfläche mit der Datenbank des 50.000-Dateien-Testbaums öffnen und nac
 Phase 8: Betrieb auf dem TrueNAS-Server.
 
 - Dockerfile und docker-compose.yml (Python, ExifTool, das Programm, Weboberfläche auf einem Port).
-- Quelle, Ziel und der Ordner .fotosortierer als eingebundene Pfade (Volumes). Benutzer- und Gruppen-ID einstellbar, damit die Dateien auf dem Server dem richtigen Benutzer gehören.
+- Quelle, Ziel und der Ordner der lokalen Datenbank als eingebundene Pfade (Volumes). Der Ordner .fotosortierer liegt im Ziel und braucht kein eigenes Volume; ein eigenes Volume braucht die Datenbank, weil sie lokal liegt. Benutzer- und Gruppen-ID einstellbar, damit die Dateien auf dem Server dem richtigen Benutzer gehören.
 - Prüfe den gesamten Code auf Windows-Annahmen (Pfadtrenner, Groß-/Kleinschreibung von Dateinamen, verbotene Zeichen). Einzige erlaubte Windows-Sonderbehandlung ist das Pfad-Präfix für lange Pfade (\\?\ bzw. \\?\UNC\, SPEC Abschnitt 5), das die 260-Zeichen-Grenze aktiv umgeht; unter Linux greift es nicht.
 - Die Datenbank liegt laut SPEC Abschnitt 6 lokal, im Container also in einem eigenen Volume und nie auf einem eingebundenen Netzpfad. Beim Start prüfen und mit verständlicher Meldung abbrechen, wenn der Datenbankpfad auf einem Netzlaufwerk liegt.
+- Standardpfad der Datenbank unter Linux: ${XDG_DATA_HOME:-~/.local/share}/fotosortierer/<archiv-id>/. Genau dieser Pfad wird im Container als Volume eingebunden, damit die Datenbank einen Neustart des Containers übersteht. Überschreibbar über den Konfigurationswert datenbank_ort und die Umgebungsvariable FOTOSORT_DATENBANK.
+- tzdata als Abhängigkeit aufnehmen und im Image mitliefern, nicht nur für Windows. Sonst hängt die Umrechnung der Video-Zeitstempel davon ab, ob das Container-Image zufällig eine Zeitzonendatenbank mitbringt.
 - Anleitung in der LIESMICH.md, wie ich das auf TrueNAS als eigene App einrichte, Schritt für Schritt.
 ```
 
