@@ -382,8 +382,11 @@ def test_exiftool_pfad_aus_der_konfiguration_wirkt_beim_aufruf(
     mittlere Stufe fehlte damit vollstaendig. Unter Windows, wo ExifTool
     selten im PATH liegt, ist sie die wahrscheinlichste Einstellung.
     """
+    programm = testbaum.exiftool_pfad()   # der echte Pfad dieses Rechners, mit TOML-Maskierung
     monkeypatch.setenv("PATH", str(tmp_path / "leer"))
-    eigene = _config_mit(tmp_path, '[leistung]\nexiftool_pfad = "/usr/bin/exiftool"\n')
+    eigene = _config_mit(
+        tmp_path, '[leistung]\nexiftool_pfad = "' + str(programm).replace("\\", "\\\\") + '"\n'
+    )
 
     rueckgabe, ausgabe = _laufen(
         capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel),
@@ -414,9 +417,12 @@ def test_falscher_exiftool_pfad_aus_der_konfiguration_wird_gemeldet(
 def test_umgebungsvariable_hat_vorrang_vor_dem_konfigurationswert(
     capsys, quelle, ziel, tmp_path, monkeypatch
 ):
+    programm = testbaum.exiftool_pfad()   # vor dem Umbiegen der Umgebung ermitteln
     monkeypatch.setenv("PATH", str(tmp_path / "leer"))
     monkeypatch.setenv("FOTOSORT_EXIFTOOL", "/auch/nicht/da/exiftool")
-    eigene = _config_mit(tmp_path, '[leistung]\nexiftool_pfad = "/usr/bin/exiftool"\n')
+    eigene = _config_mit(
+        tmp_path, '[leistung]\nexiftool_pfad = "' + str(programm).replace("\\", "\\\\") + '"\n'
+    )
     rueckgabe, ausgabe = _laufen(
         capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel),
         "--config", str(eigene),
