@@ -381,6 +381,17 @@ Zwei Kameras vergeben denselben Dateinamen (`DSC01234.ARW` gibt es mehrfach, sob
 Duplikat, nicht kopieren. Anderer Inhalt → Anhang `_1`. Überschrieben wird nie, unter keinen
 Umständen.
 
+*Gebaut (Phase 3):* `kopieren.py` kopiert in `<Zielname>.part` und rechnet dabei den Hash. Erst
+danach fällt die Entscheidung: Liegt unter dem Zielnamen (oder laut Ziel-Index unter einem
+anderen Namen) dieselbe Datei, wird die eigene `.part`-Datei entfernt und die Zeile `duplikat`.
+Sonst bekommt die ganze Gruppe den kleinsten freien Anhang, eingefügt hinter dem Stammnamen der
+Hauptdatei, und `pfade.umbenennen_ohne_ueberschreiben` bringt die Datei an ihren Namen. Die
+Kopier-Worker fassen nur das Dateisystem an; entscheiden, umbenennen und in die Datenbank
+schreiben tut allein der Hauptstrang. Zwei Quellen mit demselben Zielnamen gleichzeitig kann es
+nicht geben: Wessen Zielname gerade „in Arbeit" ist, wartet. Der Anspruch (`kopieren_laeuft`,
+`kopiert_in_lauf`) wird vor dem ersten Schreiben festgeschrieben, nicht gesammelt — sonst wüsste
+der nächste Start nach einem Absturz nicht, wem eine liegengebliebene Datei gehört.
+
 *Test:* Zwei verschiedene Bilder mit identischem Namen und identischem Aufnahmedatum — beide
 müssen im Ziel ankommen.
 

@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, metadaten, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, kopieren, metadaten, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -443,6 +443,52 @@ def befehl_analyse(args, konsole) -> int:
         datenbank.schliessen()
 
 
+def befehl_kopieren(args, konsole) -> int:
+    """Phase 3: Uebertragen im Kopier-Modus (SPEC Abschnitt 4 Phase 3)."""
+    if getattr(args, "verschieben", False):
+        konsole.print(meldungen.verschieben_spaeter())
+        return SPAETERE_PHASE
+    probelauf = bool(getattr(args, "dry_run", False))
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=not probelauf)
+    datenbank = archiv.datenbank
+    try:
+        # Ungueltige Worker-Angaben sollen scheitern, bevor ein Lauf entsteht.
+        kopieren.worker_zahlen(archiv.konf, args.profil, args.kopier_worker, args.hash_worker)
+        if probelauf:
+            konsole.print(meldungen.kopieren_plan(kopieren.planen(archiv.ziel, datenbank)))
+            return OK
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        try:
+            ergebnis = kopieren.ausfuehren(
+                archiv.ziel, archiv.konf, datenbank, lauf, konsole,
+                kopier_worker=args.kopier_worker, hash_worker=args.hash_worker, profil=args.profil,
+            )
+        except FotosortFehler:
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            raise
+        if ergebnis.quellen_nicht_erreichbar:
+            konsole.print(meldungen.quellen_uebersprungen(ergebnis.quellen_nicht_erreichbar))
+        if ergebnis.geplant == 0 and not ergebnis.abgebrochen:
+            konsole.print(meldungen.kopieren_nichts_zu_tun())
+        else:
+            konsole.print("")
+            konsole.print(meldungen.kopieren_ergebnis(ergebnis))
+        konsole.print("")
+        konsole.print(meldungen.kopieren_zusammenfassung(datenbank.kopier_zusammenfassung()))
+        if ergebnis.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.kopieren_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return ABGEBROCHEN
+        datenbank.lauf_beenden(lauf)
+        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
+        konsole.print("")
+        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+        return FEHLER if ergebnis.fehler else OK
+    finally:
+        datenbank.schliessen()
+
+
 def befehl_spaetere_phase(args, konsole) -> int:
     konsole.print(meldungen.noch_nicht_gebaut(args.befehl, PHASE_JE_BEFEHL[args.befehl]))
     return SPAETERE_PHASE
@@ -493,8 +539,11 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("kopieren", help="Dateien ins Ziel uebertragen")
-    p.add_argument("--verschieben", action="store_true", help="statt kopieren verschieben")
+    p.add_argument("--verschieben", action="store_true", help="statt kopieren verschieben (erst Phase 5)")
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--kopier-worker", type=int, metavar="N", help="gleichzeitige Kopiervorgaenge")
+    p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("pruefen", help="Zieldateien nachrechnen")
@@ -572,7 +621,7 @@ def main(argv: list[str] | None = None) -> int:
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
     # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
     # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse"):
+    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -590,6 +639,8 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_config(args, konsole)
         if args.befehl == "analyse":
             return befehl_analyse(args, konsole)
+        if args.befehl == "kopieren":
+            return befehl_kopieren(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

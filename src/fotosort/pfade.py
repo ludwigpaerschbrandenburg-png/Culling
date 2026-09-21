@@ -234,3 +234,73 @@ def laufwerk_kennung(p: Path) -> str:
         return "dev:" + str(os.stat(_vorhandener_teil(p)).st_dev)
     except OSError:
         return "dev:?"
+
+
+# ---------------------------------------- nicht ueberschreibendes Umbenennen ----
+
+
+class KeinNoReplace(OSError):
+    """Das Dateisystem kann kein nicht ueberschreibendes Umbenennen (exFAT, FAT32)."""
+
+
+def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
+    """von -> nach, ohne je eine vorhandene Datei zu ersetzen (SPEC §5).
+
+    Linux: os.link auf den Zielnamen (schlaegt bei belegtem Namen mit
+    FileExistsError fehl), danach os.unlink der Quelle. Windows: MoveFileExW
+    OHNE MOVEFILE_REPLACE_EXISTING. Nie os.rename - das ersetzt still.
+    Wirft FileExistsError, wenn der Zielname belegt ist, und KeinNoReplace,
+    wenn das Dateisystem das Verfahren nicht kann.
+    """
+    von = Path(von)
+    nach = Path(nach)
+    if _IST_WINDOWS:  # pragma: no cover - nur Windows
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        ok = kernel32.MoveFileExW(str(lang(von)), str(lang(nach)), 0)
+        if ok:
+            return
+        fehler = ctypes.get_last_error() or kernel32.GetLastError()
+        if fehler in (80, 183):  # ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS
+            raise FileExistsError(str(nach))
+        raise OSError(fehler, f"MoveFileEx fehlgeschlagen ({fehler})", str(von))
+    import errno
+
+    try:
+        os.link(lang(von), lang(nach))
+    except FileExistsError:
+        raise
+    except OSError as fehler:
+        if fehler.errno in (errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EMLINK, errno.EXDEV):
+            raise KeinNoReplace(str(fehler)) from fehler
+        raise
+    os.unlink(lang(von))
+
+
+def kann_ohne_ueberschreiben(ordner: Path) -> bool:
+    """Einmalige Probe je Ziel-Dateisystem mit einer Wegwerfdatei (SPEC §5)."""
+    if _IST_WINDOWS:  # pragma: no cover - MoveFileEx geht ueberall
+        return True
+    import uuid
+
+    a = Path(ordner) / f".fotosort_probe_{uuid.uuid4().hex}"
+    b = Path(str(a) + ".b")
+    try:
+        a.write_bytes(b"probe")
+        umbenennen_ohne_ueberschreiben(a, b)
+        return True
+    except KeinNoReplace:
+        return False
+    finally:
+        for p in (a, b):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def freier_platz(pfad: Path) -> int:
+    import shutil
+
+    return shutil.disk_usage(_vorhandener_teil(Path(pfad))).free

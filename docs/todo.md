@@ -43,17 +43,9 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 
 ### Aus der Abnahme von Phase 2 (nicht in Phase 2 gebaut)
 
-- [ ] **Entscheidung: „Duplikate erkennen" in SPEC §4 Phase 2.** Die SPEC nennt für die
-      Analyse „Duplikate und Namenskonflikte erkennen … Anzahl Duplikate". Duplikate brauchen
-      den Hash, und der entsteht laut §7 beim Kopieren („Quelle nur einmal lesen") — also in
-      Phase 3. Gebaut ist in Phase 2 die Zählung der **Namenskonflikte** (gleicher Zielpfad) in
-      der Zusammenfassung; die Duplikate kommen mit dem Hash in Phase 3. Wenn das so bleiben
-      soll, §4 Phase 2 entsprechend umformulieren; sonst wäre ein zweites Lesen aller Dateien
-      in Phase 2 nötig.
-- [ ] **Gruppenmitglieder in späteren Status (Phase 3).** Wird eine Hauptdatei nach der Analyse
-      geändert, ziehen Mitglieder mit Status `analysiert` mit (gebaut). Mitglieder, die schon
-      `kopiert` oder `geprueft` sind, bleiben stehen — dort muss Phase 3 entscheiden, ob sie
-      im Ziel umziehen oder als Ereignis gemeldet werden.
+- [x] **Entscheidung: „Duplikate erkennen" in SPEC §4 Phase 2.** Entschieden: Duplikate erkennt
+      Phase 3 über den Hash. §4 Phase 2 ist umformuliert; die Analyse zeigt nur die Schätzung
+      „mögliche Duplikate" (gleiche Größe und Aufnahmezeit), die nichts entscheidet.
 - [ ] **Zeitlimit beim Lesen eines ExifTool-Stapels (Phase 6).** Bleibt ExifTool an einer
       Datei hängen, steht der Lauf. Ein Zeitlimit je Stapel mit Neustart des Prozesses
       gehört in die Robustheits-Runde.
@@ -73,23 +65,41 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 
 ## Phase 3 — Kopieren
 
-- [ ] Kopieren über `.part`, nicht überschreibendes Umbenennen, BLAKE3 nebenbei
-- [ ] Duplikate, Ziel-Index, Worker-Zahlen, Absturzsicherheit
+Gebaut: `hashes.py` (BLAKE3 beim Kopieren mitgerechnet, exklusives Anlegen), `kopieren.py`,
+`fotosort kopieren` mit `--dry-run`, `--profil`, `--kopier-worker`, `--hash-worker`;
+`pfade.umbenennen_ohne_ueberschreiben`, `kann_ohne_ueberschreiben` (Probe), `freier_platz`.
+Schema-Version 3 (`kopiert_in_lauf`, Indizes auf Hash und Gruppe).
 
-### Aus der Prüfung
+- [x] Kopieren über `.part`, nicht überschreibendes Umbenennen, BLAKE3 nebenbei
+- [x] Duplikate (gleicher Name und über den Ziel-Index), Ziel-Index, Worker-Zahlen nach Profil
+- [x] Absturzsicherheit: Anspruch vor dem Schreiben festgeschrieben, Reste beim nächsten Start
+      (Pflichttest mit SIGKILL mitten im Kopieren und Neustart)
+- [x] Rückfall ohne `.part` für exFAT/FAT32, in beiden Zweigen getestet
+- [x] Zielpfad eines quellinternen Duplikats: zeigt auf die tatsächlich kopierte Partnerdatei,
+      gesetzt erst, nachdem diese im Ziel steht und ihr Hash in diesem Lauf bekannt ist (SPEC §5)
+- [x] Einmalige Probe je Ziel-Dateisystem mit einer Wegwerfdatei im Zielordner (SPEC §5)
 
-- [ ] **Zielpfad eines quellinternen Duplikats festlegen.** Zwei inhaltsgleiche Quelldateien
-      haben meist verschiedene Namen und damit verschiedene berechnete Zielpfade; kopiert wird
-      nur eine. Für die andere ist offen, worauf ihr `zielpfad` zeigt und welche Datei vor dem
-      Löschen als „die Zieldatei" frisch gelesen wird. Vorschlag: Sie bekommt den tatsächlichen
-      Zielpfad der bereits kopierten Partnerdatei, und zwar erst, nachdem diese dort
-      nachweislich existiert und geprüft ist. Solange der `zielpfad` leer ist, darf sie nicht
-      gelöscht werden. Betrifft SPEC §5 und §6.
-- [ ] **Einmalige Probe je Ziel-Dateisystem.** Die SPEC verlangt, dass das Programm feststellt,
-      ob ein Dateisystem nicht überschreibendes Umbenennen kann (exFAT/FAT32 können es nicht).
-      *Wie* es das feststellt, ist Umsetzungssache und wird hier entschieden — naheliegend ist
-      ein einmaliger Versuch mit einer Wegwerfdatei je Ziel-Dateisystem, dessen Ergebnis für
-      den Lauf gemerkt wird.
+### Aus dem Bau von Phase 3 (später)
+
+- [ ] **Gruppe wird bei Inhalts-Duplikat eines Mitglieds getrennt (Phase 4, Bericht).** Ist nur
+      das JPG eines RAW+JPG-Paars inhaltsgleich mit einer Datei, die schon im Ziel liegt, wird es
+      `duplikat` und zeigt dorthin; das RAW wird kopiert und bekommt bei Namenskonflikt den
+      Anhang. Nichts geht verloren, aber die beiden liegen dann unter verschiedenen Namen. Der
+      Bericht soll solche Fälle unter „Duplikate" mit Partner ausweisen, damit man sie erkennt.
+- [ ] **Gruppenmitglieder in späteren Status (Phase 4/5).** Wird eine Hauptdatei nach dem Kopieren
+      neu analysiert (zweiter Scan, geänderte Quelle), ziehen nur Mitglieder mit Status
+      `analysiert` mit; schon kopierte bleiben, wo sie sind. Beim Bericht entscheiden, ob das
+      als Ereignis gemeldet wird.
+- [ ] **Windows-Zweig des nicht überschreibenden Umbenennens (`MoveFileExW`) ist im Container
+      nicht prüfbar** und muss beim ersten Lauf unter Windows mit dem künstlichen Testbaum
+      nachgezogen werden (`tests/test_pfade.py`, `tests/test_kopieren.py`).
+- [ ] **Verschieben (`--verschieben`) kommt in Phase 5.** Der Schalter ist vorhanden und
+      verweist dorthin; Umbenennen auf demselben Laufwerk und die Löschbedingung aus SPEC §5
+      werden dort gebaut.
+- [ ] **Durchsatz auf echten Platten messen (Phase 6).** Die Zahlen aus `tests/tempo_kopieren.py`
+      stammen aus dem Container mit Dateisystem-Cache und sagen nichts über HDD, SSD oder SMB.
+      Die Profil-Werte (hdd 2, netzwerk 4, ssd 8) sind Startwerte, die auf dem Ryzen und gegen
+      TrueNAS nachgemessen werden müssen.
 
 ---
 

@@ -727,6 +727,10 @@ def analyse_zusammenfassung(z: dict) -> str:
     )
     zeilen.append(f"  Ohne sicheres Datum (nur Aenderungsdatum):    {anzahl(z.get('unsicher', 0))}")
     zeilen.append(f"  Namenskonflikte (gleicher Zielname, Phase 3): {anzahl(z.get('namenskonflikte', 0))}")
+    zeilen.append(
+        f"  Moegliche Duplikate (SCHAETZUNG: gleiche Groesse und Aufnahmezeit;"
+        f" sicher weiss es erst Phase 3 ueber den Hash): {anzahl(z.get('moegliche_duplikate', 0))}"
+    )
     zeilen.append(f"  Zeitzone angenommen (Video ohne Offset):     {anzahl(z.get('zeitzone_angenommen', 0))}")
     zeilen.append(f"  Datum aus Dateiname ohne Uhrzeit:            {anzahl(z.get('ohne_uhrzeit', 0))}")
     zeilen.append(f"  Sidecars ohne Hauptdatei:                    {anzahl(z.get('sidecar_ohne_haupt', 0))}")
@@ -745,3 +749,145 @@ def zeitzone_ungueltig(name) -> str:
         "Erwartet wird ein Name wie \"Europe/Berlin\". Ohne gueltige Zeitzone wuerden alle\n"
         "Videos ohne Offset falsch einsortiert; deshalb wird abgebrochen."
     )
+
+
+# --------------------------------------------------------- Kopieren -----
+
+
+def verschieben_spaeter() -> str:
+    return (
+        "Verschieben (--verschieben) gibt es noch nicht: Es loescht in der Quelle und"
+        " kommt erst in Phase 5. Bitte ohne --verschieben aufrufen - dann wird nur kopiert."
+    )
+
+
+def profil_ungueltig(profil, erlaubt: list) -> str:
+    return (
+        f"Unbekanntes Profil {profil!r}. Erlaubt sind: {', '.join(erlaubt)}"
+        " (Befehlszeile --profil oder config.toml unter [leistung])."
+    )
+
+
+def zu_wenig_platz(ziel, benoetigt: int, frei: int) -> str:
+    return (
+        f"Zu wenig Platz im Ziel {ziel}: benoetigt werden bis zu {groesse(benoetigt)},"
+        f" frei sind {groesse(frei)}. Es wurde nichts kopiert."
+    )
+
+
+def kopieren_beginnt(dateien: int, bytes_: int, kopier_worker: int, hash_worker: int,
+                     profil: str, direkt: bool) -> str:
+    zeilen = [
+        f"Kopieren laeuft: {anzahl(dateien)} Dateien, {groesse(bytes_)}."
+        f" Profil {profil}: {anzahl(kopier_worker)} Kopier-Worker, {anzahl(hash_worker)} Hash-Worker."
+    ]
+    if direkt:
+        zeilen.append(
+            "Hinweis: Das Ziel kann kein nicht ueberschreibendes Umbenennen (z. B. exFAT/FAT32)."
+            " Es wird ohne .part-Datei direkt und exklusiv unter dem endgueltigen Namen angelegt."
+        )
+    return "\n".join(zeilen)
+
+
+def kopieren_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
+    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    return (
+        f"Kopieren: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
+        f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
+    )
+
+
+def restzeit(sekunden: float) -> str:
+    return f"noch etwa {dauer(sekunden)}"
+
+
+def kopieren_nichts_zu_tun() -> str:
+    return "Nichts zu kopieren: Es gibt keine Dateien mit Status analysiert."
+
+
+def kopieren_abgebrochen() -> str:
+    return (
+        "Abgebrochen. Angefangene Kopien wurden entfernt, fertige bleiben;"
+        " der naechste Lauf macht dort weiter."
+    )
+
+
+def quellen_uebersprungen(quellen: list) -> str:
+    zeilen = ["Nicht erreichbare Quellen (uebersprungen, ihre Dateien bleiben offen):"]
+    zeilen.extend(f"  {q}" for q in quellen)
+    return "\n".join(zeilen)
+
+
+def kopieren_plan(plan) -> str:
+    """--dry-run: was passieren wuerde."""
+    zeilen = [
+        "Probelauf (--dry-run): Es wird nichts kopiert und kein Lauf angelegt.",
+        f"  zu kopieren:                         {anzahl(plan.dateien)} Dateien, {groesse(plan.bytes)}",
+    ]
+    if len(plan.je_quelle) > 1:
+        for wurzel, (n, b) in sorted(plan.je_quelle.items()):
+            zeilen.append(f"    {wurzel}: {anzahl(n)} Dateien, {groesse(b)}")
+    zeilen.append(
+        f"  Zielname schon belegt (wird Duplikat oder bekommt _1): {anzahl(plan.zielname_belegt)}"
+    )
+    if plan.liegengeblieben:
+        zeilen.append(
+            f"  Reste eines abgebrochenen Laufs (werden zuerst aufgeraeumt): {anzahl(plan.liegengeblieben)}"
+        )
+    if plan.quellen_nicht_erreichbar:
+        zeilen.append("")
+        zeilen.append(quellen_uebersprungen(plan.quellen_nicht_erreichbar))
+    return "\n".join(zeilen)
+
+
+def kopieren_ergebnis(e) -> str:
+    """Zaehler dieses Laufs (ein kopieren.Ergebnis)."""
+    zeilen = [
+        "Ergebnis des Kopierens (dieser Lauf)",
+        f"  angestanden:                 {anzahl(e.geplant)} Dateien, {groesse(e.geplant_bytes)}",
+        f"  kopiert:                     {anzahl(e.kopiert)} Dateien, {groesse(e.bytes_kopiert)}",
+        f"  Duplikate (Inhalt war schon im Ziel, nicht kopiert): {anzahl(e.duplikate)}",
+        f"  Namenskonflikte (mit Anhang _1, _2 ... abgelegt):    {anzahl(e.namenskonflikte)}",
+        f"  Quelle seit der Analyse veraendert (neu einordnen):  {anzahl(e.quelle_veraendert)}",
+        f"  Fehler:                      {anzahl(e.fehler)}",
+    ]
+    if e.part_aufgeraeumt or e.angefangene_entfernt or e.nachtraeglich_bestaetigt:
+        zeilen.append("  Reste eines abgebrochenen Laufs:")
+        if e.part_aufgeraeumt:
+            zeilen.append(f"    .part-Dateien entfernt:                 {anzahl(e.part_aufgeraeumt)}")
+        if e.angefangene_entfernt:
+            zeilen.append(f"    angefangene Zieldateien entfernt:       {anzahl(e.angefangene_entfernt)}")
+        if e.nachtraeglich_bestaetigt:
+            zeilen.append(f"    fertige Kopien nachtraeglich bestaetigt: {anzahl(e.nachtraeglich_bestaetigt)}")
+    if e.exfat_rueckfall:
+        zeilen.append("  Rueckfall ohne .part (Ziel kann kein nicht ueberschreibendes Umbenennen): ja")
+    zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
+    if e.sekunden > 0:
+        zeilen.append(f"  Durchsatz:       {durchsatz(e.kopiert, e.bytes_kopiert, e.sekunden)}")
+    zeilen.append(
+        f"  Worker:          {anzahl(e.kopier_worker)} Kopier-Worker, {anzahl(e.hash_worker)} Hash-Worker"
+        f" (Profil {e.profil})"
+    )
+    return "\n".join(zeilen)
+
+
+def kopieren_zusammenfassung(z: dict) -> str:
+    """Stand des ganzen Archivs nach dem Lauf."""
+    status = z.get("status", {})
+    zeilen = [
+        "Stand des Archivs",
+        f"  kopiert (Pruefen offen):     {anzahl(status.get('kopiert', 0))} Dateien, {groesse(z.get('kopiert_bytes', 0))}",
+        f"  Duplikate:                   {anzahl(status.get('duplikat', 0))}",
+        f"  noch zu kopieren:            {anzahl(status.get('analysiert', 0))}",
+        f"  Fehler:                      {anzahl(status.get('fehler', 0))}",
+    ]
+    je = z.get("je_quelle", {})
+    if len(je) > 1:
+        zeilen.append("  je Quelle (kopiert / Duplikate / offen / Fehler):")
+        for wurzel in sorted(je):
+            s = je[wurzel]
+            zeilen.append(
+                f"    {wurzel}: {anzahl(s.get('kopiert', 0))} / {anzahl(s.get('duplikat', 0))}"
+                f" / {anzahl(s.get('analysiert', 0))} / {anzahl(s.get('fehler', 0))}"
+            )
+    return "\n".join(zeilen)

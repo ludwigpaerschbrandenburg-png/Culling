@@ -158,3 +158,36 @@ def test_praefix_wuerde_die_vergleiche_zerstoeren():
     # Nach kurz_text passt wieder alles zusammen.
     ohne = PureWindowsPath(pfade.kurz_text(str(mit)))
     assert ohne.is_relative_to(PureWindowsPath(r"C:\Chaos")) is True
+
+
+# ------------------------------- nicht ueberschreibendes Umbenennen (SPEC §5) ----
+
+
+def test_umbenennen_ohne_ueberschreiben_bewegt_die_datei(tmp_path):
+    a = tmp_path / "a.part"
+    b = tmp_path / "a.jpg"
+    a.write_bytes(b"inhalt")
+    pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert not a.exists() and b.read_bytes() == b"inhalt"
+
+
+def test_umbenennen_ohne_ueberschreiben_ersetzt_nie(tmp_path):
+    """Pflichttest aus SPEC Abschnitt 11: belegter Zielname, nichts geht verloren."""
+    a = tmp_path / "a.part"
+    b = tmp_path / "a.jpg"
+    a.write_bytes(b"neu")
+    b.write_bytes(b"schon da")
+    with pytest.raises(FileExistsError):
+        pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert b.read_bytes() == b"schon da"
+    assert a.read_bytes() == b"neu"
+
+
+def test_kann_ohne_ueberschreiben_laesst_keine_probe_liegen(tmp_path):
+    assert pfade.kann_ohne_ueberschreiben(tmp_path) is True
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_freier_platz_ist_positiv(tmp_path):
+    assert pfade.freier_platz(tmp_path) > 0
+    assert pfade.freier_platz(tmp_path / "gibt" / "es" / "nicht") > 0

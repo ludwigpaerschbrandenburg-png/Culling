@@ -133,7 +133,8 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
    **Ordner-Verknüpfungen** (Symlinks unter Linux, Junctions und Verzeichnis-Symlinks unter Windows) werden standardmäßig **nicht verfolgt** (`verknuepfungen_folgen` = `false`, §9). Sie werden gezählt und im Bericht aufgeführt (§10). Grund: Ein Ring aus Verknüpfungen ließe den Scan endlos laufen, und dieselbe Datei erschiene unter zwei Pfaden, also zweimal in der Datenbank. **Versteckte Ordner** werden dagegen normal erfasst.
    **Ausschlussmuster** aus der Konfiguration (`ausschlussmuster`, §9) werden in dieser Phase angewendet; ausgeschlossene Pfade werden gezählt und im Bericht aufgeführt.
    Beim ersten Scan eines Ziels werden die Archiv-ID, die lokale Datenbank und die `config.toml` angelegt (§6). Der Scan ist fortsetzbar; wie ein zweiter Scan eine bereits bekannte Zeile behandelt, steht in §6 („Zweiter Scan").
-2. **Analyse** – Metadaten lesen, Ziel für jede Datei berechnen, Duplikate und Namenskonflikte erkennen. Ergebnis: Plan plus Zusammenfassung (wie viele Dateien in welche Jahre, gefundene Kameras, Anzahl Duplikate, Anzahl ohne Datum). **Noch keine Datei wird angefasst.**
+2. **Analyse** – Metadaten lesen, Ziel für jede Datei berechnen, Namenskonflikte erkennen (mehrere Dateien mit demselben berechneten Zielpfad). Ergebnis: Plan plus Zusammenfassung (wie viele Dateien in welche Jahre, je Quelle und gesamt; gefundene Kameras mit Anzahl; Anzahl Namenskonflikte; Anzahl ohne sicheres Datum; Anzahl „Zeitzone angenommen"). **Noch keine Datei wird angefasst.**
+   **Duplikate werden hier nicht erkannt.** Dafür braucht es den Hash, und der entsteht laut §7 erst beim Kopieren, damit die Quelle nur einmal gelesen wird — Duplikate erkennt Phase 3. Die Analyse gibt lediglich eine **Schätzung „mögliche Duplikate"** aus: Dateien, die in Größe **und** Aufnahmezeit mit einer anderen übereinstimmen (ohne Sidecars). Sie ist ausdrücklich als Schätzung gekennzeichnet, entscheidet nichts und dient nur der Orientierung.
 3. **Übertragen** – wahlweise
    - **Kopieren** (Standard): Quelle bleibt unberührt.
    - **Verschieben**: jede Datei wird einzeln kopiert, geprüft und erst dann in der Quelle gelöscht.
@@ -170,6 +171,9 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
 - **Niemals überschreiben.** Existiert der Zielname schon:
   - gleicher Hash → Duplikat, wird nicht erneut kopiert. Gelöscht werden darf die Quelldatei deswegen noch nicht; dafür braucht sie den Status `duplikat_bestaetigt` (siehe unten).
   - anderer Inhalt → neuer Name mit Anhang `_1`, `_2` …; zusammengehörige Dateien bekommen denselben Anhang.
+  - **Wo der Anhang steht:** hinter dem Stammnamen der **Hauptdatei** der Gruppe, damit die Sidecars weiter zu ihr passen (§3, drei Formen): `DSC01234.ARW` → `DSC01234_1.ARW`, `DSC01234.xmp` → `DSC01234_1.xmp`, `DSC01234.ARW.xmp` → `DSC01234_1.ARW.xmp`, `C0001M01.XML` → `C0001_1M01.XML` (Hauptdatei `C0001.MP4`).
+  - Der Anhang wird **nach** der Duplikat-Entscheidung bestimmt: Ist ein Mitglied der Gruppe inhaltsgleich mit der Datei unter seinem Zielnamen, wird es zum Duplikat und zählt nicht mehr; der Anhang gilt dann für die übrigen Mitglieder. So bekommt ein RAW+JPG-Paar, das schon im Ziel liegt und nur um ein neues Sidecar ergänzt wird, keinen unnötigen Anhang.
+- **Gleicher Inhalt unter anderem Namen** (über den Ziel-Index gefunden, quellintern oder über mehrere Quellen): ebenfalls Duplikat, nur eine Kopie. Das gilt für Fotos, RAW und Videos. **Sidecars sind davon ausgenommen:** Leere oder gleichlautende XMP-Dateien gleichen sich oft, und jedes Sidecar gehört zu seiner eigenen Hauptdatei — es wird kopiert, sofern nicht unter seinem eigenen Zielnamen dieselbe Datei liegt.
 - **Umbenennen darf niemals überschreiben.** `os.rename` bzw. `Path.rename` ersetzt unter POSIX eine vorhandene Zieldatei stillschweigend; genau das ist ein Verlustpfad und muss ausgeschlossen werden. Überall, wo umbenannt wird — beim Verschieben auf demselben Laufwerk (§4 Phase 3) und beim abschließenden Umbenennen der `.part`-Datei auf den endgültigen Namen — wird ein nicht überschreibendes Verfahren benutzt: unter Linux `os.link` plus `os.unlink` (oder `renameat2` mit `RENAME_NOREPLACE`), unter Windows `MoveFileEx` **ohne** `MOVEFILE_REPLACE_EXISTING`. Ist der Zielname belegt, schlägt der Vorgang fehl und die Regel „Niemals überschreiben" greift.
 - **Wenn das Dateisystem kein nicht überschreibendes Umbenennen kann.** Auf exFAT und FAT32 — dem üblichen Format externer Platten — gibt es keine harten Verknüpfungen, `os.link` schlägt fehl, und `renameat2` mit `RENAME_NOREPLACE` wird dort ebenfalls nicht angenommen. Das Programm stellt das einmal je Ziel-Dateisystem fest und verhält sich dann so:
   - **Das Verschieben auf demselben Laufwerk entfällt** (§4 Phase 3). Es wird auf **Kopieren, Prüfen und Löschen** zurückgefallen: kopieren, Zieldatei frisch lesen und den Hash vergleichen, und erst danach die Quelle nach den Regeln dieses Abschnitts löschen. Das ist langsamer, aber sicher.
@@ -179,7 +183,9 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
 
     Stattdessen wird der **Anspruch vor dem Schreiben festgehalten**: Bevor die Zieldatei mit `O_EXCL` angelegt wird, bekommt die Zeile ihren `zielpfad`, die Nummer des laufenden Laufs und den Status `kopieren_laeuft`. Eine vorhandene Datei unter dem endgültigen Zielnamen wird **nur dann** entfernt, wenn alle drei Bedingungen zugleich gelten: Es gibt eine Zeile mit genau diesem `zielpfad`, ihr Status ist `kopieren_laeuft`, und der zugehörige Lauf ist nicht der laufende (er wurde also abgebrochen). In jedem anderen Fall bleibt die Datei unangetastet und es greift „Niemals überschreiben" mit dem Anhang `_1`, `_2` …
 
-    Im `.part`-Zweig gibt es dieses Problem nicht: Dort wird nur eine `.part`-Datei entfernt, und auch nur, wenn keine Zeile sie beansprucht (siehe oben).
+    Im `.part`-Zweig gibt es dieses Problem nicht: Dort wird nur eine `.part`-Datei entfernt, und auch nur, wenn keine Zeile sie beansprucht (siehe oben). Als zusätzliche Sicherung gilt im Rückfall: Entfernt wird nur, wenn die Datei **kleiner als die Quelle** ist. Ist sie genauso groß, werden Ziel- und Quelldatei frisch gelesen; stimmen die Hashes überein, war die Kopie fertig und wird als `kopiert` übernommen (Ereignis `kopie_nachtraeglich_bestaetigt`), sonst greift „Niemals überschreiben" mit Anhang. Im `.part`-Zweig gilt dasselbe für eine fertige Datei unter dem Zielnamen; eine unvollständige kann dort nicht vom Programm stammen und bleibt unangetastet.
+
+    **Wie liegengebliebene Dateien gefunden werden.** Das Programm durchsucht nicht das ganze Ziel. Beim Start nimmt es sich die Zeilen mit Status `kopieren_laeuft` aus einem anderen Lauf vor (§6, `kopiert_in_lauf`) und sieht unter deren `zielpfad` nach. Eine `.part`-Datei, die **keine** Zeile beansprucht, fällt erst auf, wenn ein Kopiervorgang denselben `.part`-Namen anlegen will; sie wird dann nach derselben Regel entfernt und die Kopie wiederholt.
   - **Ein einfaches Umbenennen, das eine vorhandene Datei überschreiben könnte, ist nie erlaubt** — auch nicht als letzter Ausweg, auch nicht „nur dieses eine Mal", auch nicht nach einer vorherigen Existenzprüfung.
 
   Dass der Rückfall gegriffen hat, steht mit Anzahl im Bericht (§10).
@@ -258,6 +264,7 @@ Fünf Tabellen: `quellen`, `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`.
 - `fehlergrund` — Klartext bei Status `fehler` oder `uebersprungen`; sonst leer.
 - `bestaetigt_in_lauf` — Nummer des Laufs, in dem Quelle und Ziel zuletzt frisch gelesen und verglichen wurden; leer, wenn das nie geschah.
 - `gefunden_in_lauf` — Nummer des Laufs, in dem diese Zeile angelegt wurde.
+- `kopiert_in_lauf` — Nummer des Laufs, der den Zielpfad beansprucht hat (Status `kopieren_laeuft`) bzw. die Datei kopiert hat. Daran erkennt der nächste Start, ob eine liegengebliebene `.part`-Datei oder eine angefangene Zieldatei aus einem **abgebrochenen** Lauf stammt (§5): Ihr Lauf ist nicht der laufende.
 - `zuletzt_gesehen_in_lauf` — Nummer des letzten Laufs, in dem der Quellpfad beim Scan noch vorhanden war. Daran wird „Quelle nicht mehr vorhanden" erkannt.
 
 Die Metadaten stehen in **eigenen Spalten** (`kamera`, `aufnahme_zeit`, `datum_quelle`, `datum_sicher`), nicht in einem JSON-Feld: Nach ihnen wird gefiltert und sortiert, und das soll die Datenbank tun.
@@ -280,7 +287,7 @@ Die Metadaten stehen in **eigenen Spalten** (`kamera`, `aufnahme_zeit`, `datum_q
 **`lauf_ereignisse`** — eine Zeile je Ereignis, das zu **keiner** Datei in `dateien` gehört und trotzdem in den Bericht muss:
 
 - `lauf_nummer` — zu welchem Lauf das Ereignis gehört.
-- `art` — Kurzkennung. Bisher vergeben: `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `ordner_nicht_lesbar`, `quelle_veraendert` (§6 zweiter Scan), `quelle_nicht_erreichbar` (§4 Phase 1), `quelle_abgelehnt` (Überschneidung, §4 Phase 1), `abgebrochen` (geordneter Abbruch), `zielordner_mehrdeutig` (§3), `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen). Neue Arten werden hier ergänzt.
+- `art` — Kurzkennung. Bisher vergeben: `ausgeschlossen` (durch `ausschlussmuster` übersprungener Pfad), `verknuepfung_nicht_verfolgt`, `zeigt_ins_ziel`, `ordner_nicht_lesbar`, `quelle_veraendert` (§6 zweiter Scan), `quelle_nicht_erreichbar` (§4 Phase 1), `quelle_abgelehnt` (Überschneidung, §4 Phase 1), `abgebrochen` (geordneter Abbruch), `zielordner_mehrdeutig` (§3), `rueckfall_kopieren` (Dateisystem kann kein nicht überschreibendes Umbenennen), `duplikat` (nicht kopiert; `text` nennt die Partnerdatei im Ziel), `namenskonflikt` (mit Anhang abgelegt; `text` nennt den endgültigen Zielpfad), `part_aufgeraeumt`, `angefangene_zieldatei_entfernt` (nur im Rückfall, §5), `kopie_nachtraeglich_bestaetigt` (fertige Kopie aus einem abgebrochenen Lauf, §5). Neue Arten werden hier ergänzt.
 - `pfad` — betroffener Pfad, falls es einen gibt; sonst leer.
 - `anzahl` — für reine Zähler; sonst 1.
 - `text` — Klartext für den Bericht; sonst leer.
@@ -377,6 +384,7 @@ fotosort scan               --quelle D:\Chaos --quelle E:\Karte --ziel <Ziel> [-
 fotosort scan               --ziel <Ziel>                       (alle bekannten Quellen)
 fotosort analyse            --ziel <Ziel>
 fotosort kopieren           --ziel <Ziel> [--verschieben] [--dry-run]
+                            [--profil hdd|ssd|netzwerk] [--kopier-worker N] [--hash-worker N]
 fotosort pruefen            --ziel <Ziel>
 fotosort aufraeumen         --ziel <Ziel> [--quelle A] [--leere-ordner] [--dry-run]
 fotosort status             --ziel <Ziel>
@@ -390,6 +398,8 @@ fotosort start              --quelle D:\Chaos --ziel <Ziel>
 `fotosort ziel-index --neu-aufbauen` liest alle Dateien im Zielordner neu, berechnet ihre Hashes und baut die Tabelle `ziel_index` vollständig neu auf (§6). Er wird gebraucht, wenn die lokale Datenbank und die Sicherungskopie beide fehlen, oder wenn im Ziel von Hand etwas verändert wurde. Er löscht nichts und verschiebt nichts. Er ist zugleich der einzige Befehl, der eine fehlende lokale Datenbank neu anlegen darf — nicht stillschweigend, sondern weil er ausdrücklich dafür aufgerufen wurde; er füllt sie mit dem, was tatsächlich im Ziel liegt (§6).
 
 `fotosort wiederherstellen` holt die lokale Datenbank aus der Sicherungskopie `fotosort.db.sicherung` im Zielordner zurück (§6).
+
+`fotosort kopieren` prüft vor dem ersten Schreiben: Reste eines abgebrochenen Laufs (§5), freier Platz im Ziel gegen die Summe der anstehenden Dateien (zu wenig → Abbruch, nichts kopiert), erreichbare Quellen (eine nicht erreichbare wird gemeldet und übersprungen, ihre Dateien bleiben `analysiert`). `--dry-run` zählt nur, schreibt nichts und legt keinen Lauf an. `--profil`, `--kopier-worker` und `--hash-worker` überstimmen die Werte aus `config.toml` (§9) für diesen Lauf. Die Anzeige während des Laufs zeigt Dateien und Datenmenge (erledigt/gesamt), MB/s und die geschätzte Restzeit, höchstens zweimal je Sekunde; am Ende steht der Durchsatz (§7).
 
 `fotosort config` zeigt den vollständigen Pfad der geltenden `config.toml` an und öffnet sie anschließend im Standard-Editor des Systems (Windows: `os.startfile`; Linux: `xdg-open`; ist kein Editor erreichbar, bleibt es bei der Pfadausgabe mit einem Hinweis). Mit `--nur-pfad` wird nur der Pfad ausgegeben und nichts geöffnet — so lässt er sich in eigenen Skripten weiterverwenden. Der Befehl ändert nichts.
 

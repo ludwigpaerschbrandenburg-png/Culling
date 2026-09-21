@@ -72,7 +72,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quellen (
@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS dateien (
     status                  TEXT    NOT NULL DEFAULT 'gefunden',
     fehlergrund             TEXT    NOT NULL DEFAULT '',
     bestaetigt_in_lauf      INTEGER,
+    kopiert_in_lauf         INTEGER,
     gefunden_in_lauf        INTEGER,
     zuletzt_gesehen_in_lauf INTEGER
 );
@@ -109,7 +110,8 @@ CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
 CREATE INDEX IF NOT EXISTS dateien_wurzel  ON dateien (quellwurzel);
 CREATE INDEX IF NOT EXISTS dateien_zielpfad ON dateien (zielpfad);
 CREATE INDEX IF NOT EXISTS dateien_status_typ ON dateien (status, dateityp);
-
+CREATE INDEX IF NOT EXISTS dateien_hash ON dateien (hash);
+CREATE INDEX IF NOT EXISTS dateien_gruppe ON dateien (quellwurzel, gruppe, quellpfad);
 CREATE TABLE IF NOT EXISTS ziel_index (
     zielpfad                TEXT PRIMARY KEY,
     groesse                 INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +119,8 @@ CREATE TABLE IF NOT EXISTS ziel_index (
     hash                    TEXT    NOT NULL DEFAULT '',
     zuletzt_gelesen_in_lauf INTEGER
 );
+
+CREATE INDEX IF NOT EXISTS ziel_index_hash ON ziel_index (hash);
 
 CREATE TABLE IF NOT EXISTS laeufe (
     nummer  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -774,7 +778,146 @@ class Datenbank:
                 "SELECT COUNT(*) FROM (SELECT zielpfad FROM dateien WHERE status = 'analysiert'"
                 " AND zielpfad != '' GROUP BY zielpfad HAVING COUNT(*) > 1)"
             ),
+            # Schaetzung ohne Hash (SPEC §4 Phase 2): Dateien, die Groesse UND
+            # Aufnahmezeit mit einer anderen teilen. Entscheidet nichts.
+            "moegliche_duplikate": zaehlen(
+                "SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) AS n FROM dateien"
+                " WHERE status = 'analysiert' AND dateityp != 'sidecar' AND aufnahme_zeit != ''"
+                " GROUP BY groesse, aufnahme_zeit HAVING COUNT(*) > 1)"
+            ),
         }
+
+    # -- Kopieren (SPEC Abschnitt 4 Phase 3, Abschnitt 5) -----------------
+
+    def zu_kopieren_summe(self) -> tuple[int, int]:
+        self.stapel_schreiben()
+        z = self.verbindung.execute(
+            "SELECT COUNT(*), COALESCE(SUM(groesse), 0) FROM dateien"
+            " WHERE status = 'analysiert' AND zielpfad != ''"
+        ).fetchone()
+        return int(z[0]), int(z[1])
+
+    def zu_kopieren(self, quellwurzel, ab_gruppe: str = "", ab_pfad: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
+        """Naechste Zeilen einer Quelle in Kopierreihenfolge (Gruppe, Pfad).
+
+        Gruppen bleiben zusammen, weil nach gruppe sortiert wird; der
+        Aufrufer traegt (gruppe, quellpfad) der letzten Zeile als Anker weiter.
+        """
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE quellwurzel = ? AND status = 'analysiert'"
+            " AND zielpfad != '' AND (gruppe, quellpfad) > (?, ?)"
+            " ORDER BY gruppe, quellpfad LIMIT ?",
+            (pfad_text(quellwurzel), ab_gruppe, ab_pfad, int(grenze)),
+        ).fetchall()
+
+    def gruppe_zeilen(self, quellwurzel, gruppe: str) -> list[sqlite3.Row]:
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE quellwurzel = ? AND gruppe = ? ORDER BY quellpfad",
+            (pfad_text(quellwurzel), gruppe),
+        ).fetchall()
+
+    def kopieren_beanspruchen(self, quellpfad, zielpfad, lauf: int) -> None:
+        """Zielpfad beanspruchen, BEVOR geschrieben wird (SPEC §5)."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'kopieren_laeuft', zielpfad = ?, kopiert_in_lauf = ?"
+            " WHERE quellpfad = ?",
+            (pfad_text(zielpfad), lauf, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def kopiert_setzen(self, quellpfad, zielpfad, hash_: str, lauf: int) -> None:
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'kopiert', zielpfad = ?, hash = ?, kopiert_in_lauf = ?,"
+            " fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(zielpfad), hash_, lauf, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def duplikat_setzen(self, quellpfad, partner_zielpfad, hash_: str, lauf: int) -> None:
+        """Inhaltsgleiche Datei liegt schon im Ziel: nicht kopiert, zielpfad = Partner."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'duplikat', zielpfad = ?, hash = ?, kopiert_in_lauf = ?,"
+            " fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(partner_zielpfad), hash_, lauf, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def zurueck_auf_analysiert(self, quellpfad, zielpfad) -> None:
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'analysiert', zielpfad = ?, kopiert_in_lauf = NULL"
+            " WHERE quellpfad = ?",
+            (pfad_text(zielpfad), pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def zurueck_auf_gefunden(self, quellpfad, groesse: int, mtime: float) -> None:
+        """Quelle hat sich veraendert: neu einordnen (SPEC §6)."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'gefunden', groesse = ?, mtime = ?, hash = '',"
+            " zielpfad = '', bestaetigt_in_lauf = NULL, kopiert_in_lauf = NULL, fehlergrund = ''"
+            " WHERE quellpfad = ?",
+            (int(groesse), float(mtime), pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def liegengebliebene(self, lauf: int) -> list[sqlite3.Row]:
+        """Zeilen mit kopieren_laeuft aus einem anderen (abgebrochenen) Lauf."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE status = 'kopieren_laeuft'"
+            " AND (kopiert_in_lauf IS NULL OR kopiert_in_lauf != ?)",
+            (lauf,),
+        ).fetchall()
+
+    # -- Ziel-Index (SPEC Abschnitt 6) ------------------------------------
+
+    def ziel_index_setzen(self, zielpfad, groesse: int, mtime: float, hash_: str, lauf: int) -> None:
+        self._beginnen()
+        self.verbindung.execute(
+            "INSERT INTO ziel_index (zielpfad, groesse, mtime, hash, zuletzt_gelesen_in_lauf)"
+            " VALUES (?, ?, ?, ?, ?) ON CONFLICT(zielpfad) DO UPDATE SET groesse = excluded.groesse,"
+            " mtime = excluded.mtime, hash = excluded.hash,"
+            " zuletzt_gelesen_in_lauf = excluded.zuletzt_gelesen_in_lauf",
+            (pfad_text(zielpfad), int(groesse), float(mtime), hash_, lauf),
+        )
+        self._vielleicht_schreiben()
+
+    def ziel_index_nach_hash(self, hash_: str) -> list[sqlite3.Row]:
+        # Kein Sammelschreiben noetig: Dieselbe Verbindung sieht ihre eigenen,
+        # noch nicht festgeschriebenen Zeilen.
+        return self.verbindung.execute(
+            "SELECT * FROM ziel_index WHERE hash = ? ORDER BY zielpfad", (hash_,)
+        ).fetchall()
+
+    def ziel_index_nach_pfad(self, zielpfad) -> sqlite3.Row | None:
+        return self.verbindung.execute(
+            "SELECT * FROM ziel_index WHERE zielpfad = ?", (pfad_text(zielpfad),)
+        ).fetchone()
+
+    def ziel_index_entfernen(self, zielpfad) -> None:
+        self._beginnen()
+        self.verbindung.execute("DELETE FROM ziel_index WHERE zielpfad = ?", (pfad_text(zielpfad),))
+        self._vielleicht_schreiben()
+
+    def kopier_zusammenfassung(self) -> dict:
+        self.stapel_schreiben()
+        v = self.verbindung
+        status = {z[0]: int(z[1]) for z in v.execute("SELECT status, COUNT(*) FROM dateien GROUP BY status")}
+        kopiert_bytes = int(v.execute(
+            "SELECT COALESCE(SUM(groesse), 0) FROM dateien WHERE status IN ('kopiert', 'geprueft')"
+        ).fetchone()[0])
+        je_quelle: dict[str, dict[str, int]] = {}
+        for z in v.execute(
+            "SELECT quellwurzel, status, COUNT(*) AS n FROM dateien GROUP BY quellwurzel, status"
+        ):
+            je_quelle.setdefault(z["quellwurzel"], {})[z["status"]] = int(z["n"])
+        return {"status": status, "kopiert_bytes": kopiert_bytes, "je_quelle": je_quelle}
 
     # -- Ereignisse -------------------------------------------------------
 
