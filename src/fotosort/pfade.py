@@ -256,15 +256,23 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
     nach = Path(nach)
     if _IST_WINDOWS:  # pragma: no cover - nur Windows
         import ctypes
+        from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        ok = kernel32.MoveFileExW(str(lang(von)), str(lang(nach)), 0)
-        if ok:
+        # use_last_error=True: Nur so liefert ctypes.get_last_error() die
+        # Fehlernummer GENAU dieses Aufrufs, nicht die eines spaeteren
+        # Python-internen Aufrufs.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        bewegen = kernel32.MoveFileExW
+        bewegen.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+        bewegen.restype = wintypes.BOOL
+        if bewegen(str(lang(von)), str(lang(nach)), 0):
             return
-        fehler = ctypes.get_last_error() or kernel32.GetLastError()
+        fehler = ctypes.get_last_error()
         if fehler in (80, 183):  # ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS
             raise FileExistsError(str(nach))
-        raise OSError(fehler, f"MoveFileEx fehlgeschlagen ({fehler})", str(von))
+        if fehler in (2, 3):  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+            raise FileNotFoundError(str(von))
+        raise OSError(fehler, f"MoveFileEx fehlgeschlagen (Fehler {fehler})", str(von))
     import errno
 
     try:

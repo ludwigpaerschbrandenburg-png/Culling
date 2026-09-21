@@ -459,6 +459,7 @@ def test_verknuepfung_auf_eine_datei_in_der_quelle_faellt_nicht_zusammen(
 # ---------------------------------------------- Kaputte Dateinamen ----
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_dateiname_mit_ungueltigen_bytes_bricht_den_scan_nicht_ab(
     quelle, ziel, datenbank, konf
 ):

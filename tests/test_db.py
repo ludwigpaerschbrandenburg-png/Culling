@@ -8,6 +8,8 @@ import sys
 
 import pytest
 
+import testbaum
+
 from fotosort import FotosortFehler, config, db, pfade
 
 
@@ -357,6 +359,7 @@ def test_sichern_nimmt_die_konfiguration_mit(tmp_path, datenbank):
 # ----------------------------------------- Pfade mit kaputten Bytes ----
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_pfad_mit_ungueltigen_bytes_laesst_sich_speichern(datenbank):
     """Ein einziger solcher Name darf nicht den ganzen Scan abbrechen.
 
@@ -376,6 +379,7 @@ def test_pfad_mit_ungueltigen_bytes_laesst_sich_speichern(datenbank):
     assert datenbank.datei_gesehen(pfad, "/q", 10, 1.0, "foto", lauf) == "unveraendert"
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_pfad_mit_ungueltigen_bytes_kommt_verlustfrei_zurueck(datenbank):
     roh = b"/q/kaputt_\xff\xfe_bild.jpg"
     pfad = os.fsdecode(roh)
@@ -392,6 +396,7 @@ def test_pfad_text_laesst_gewoehnliche_pfade_in_ruhe():
     assert db.text_pfad("/q/a.jpg") == "/q/a.jpg"
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_ereignis_mit_kaputtem_pfad(datenbank):
     pfad = os.fsdecode(b"/q/ordner_\xff")
     lauf = datenbank.lauf_beginnen("scan")

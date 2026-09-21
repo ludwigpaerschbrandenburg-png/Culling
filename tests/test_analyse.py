@@ -304,6 +304,7 @@ def test_cli_analyse_ohne_exiftool_bricht_hart_ab(capsys, quelle, ziel, monkeypa
 # ------------------------------------------ Befunde der Abnahme (Phase 2) --
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_zeilenumbruch_im_dateinamen_wird_nie_an_exiftool_gegeben(vorbereitet, ziel, konf, quelle, baum):
     """Ein Name mit Zeilenumbruch koennte ExifTool Schreibbefehle unterschieben."""
     dbank, lauf, _ = vorbereitet
@@ -331,6 +332,7 @@ def test_emoji_im_dateinamen_wird_analysiert(vorbereitet, ziel, konf, quelle):
         assert _zeile(dbank, quelle / "2026" / name)["status"] == "analysiert"
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_nicht_utf8_dateiname_bekommt_sichtbaren_fehler(vorbereitet, ziel, konf, quelle):
     import os
 

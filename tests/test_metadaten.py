@@ -104,6 +104,7 @@ def test_schluessel_normiert_windows_pfade():
     assert metadaten.schluessel("/a/b.jpg") == "/a/b.jpg"
 
 
+@testbaum.NUR_POSIX_NAMEN
 def test_zeilenumbruch_im_namen_geht_nie_an_exiftool(pool, tmp_path, baum):
     boese = tmp_path / "harmlos\n-Model=GEAENDERT\n-overwrite_original\nrest.jpg"
     boese.write_bytes(testbaum._JPEG)

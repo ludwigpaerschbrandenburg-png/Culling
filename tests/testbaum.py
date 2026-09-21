@@ -22,6 +22,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    import pytest
+except ImportError:  # pragma: no cover - als Skript ohne pytest aufgerufen
+    pytest = None
+
+# Dateinamen mit Zeilenumbruch oder ungueltigen Bytes gibt es unter Windows
+# nicht (NTFS speichert Unicode, Steuerzeichen sind verboten). Diese Tests
+# pruefen Linux-Faelle und werden dort ausgefuehrt, nicht unter Windows.
+NUR_POSIX_NAMEN = (
+    pytest.mark.skipif(
+        sys.platform.startswith("win"),
+        reason="Dateinamen mit Zeilenumbruch oder ungueltigen Bytes gibt es unter Windows nicht",
+    )
+    if pytest is not None
+    else (lambda f: f)
+)
+
 # Gueltiges 1x1-Pixel-JPEG, rund 160 Byte.
 _JPEG = base64.b64decode(
     "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof"
