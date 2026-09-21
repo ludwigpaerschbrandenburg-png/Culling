@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
@@ -536,7 +535,7 @@ _KIND = textwrap.dedent(
     def langsam(quelle, ziel, stop=None, fd=None):
         h = blake3.blake3(); n = 0
         if fd is None:
-            fd = os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            fd = os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
         with open(quelle, "rb") as ein, os.fdopen(fd, "wb") as aus:
             while True:
                 block = ein.read(65536)
@@ -594,7 +593,7 @@ def test_absturz_mitten_im_kopieren_und_neustart(tmp_path, archiv_basis):
             time.sleep(0.01)
         else:
             pytest.fail("Kindprozess kam nicht in den erwarteten Zustand")
-        kind.send_signal(signal.SIGKILL)
+        kind.kill()   # SIGKILL unter Linux, TerminateProcess unter Windows
     finally:
         kind.wait(timeout=30)
     assert _cli("kopieren", "--ziel", ziel_a) == cli.OK

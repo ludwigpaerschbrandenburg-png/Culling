@@ -145,14 +145,20 @@ def _exiftool(befehle: list[list[str]]) -> None:
 
 
 def _schreiben(pfad: Path, inhalt: bytes) -> Path:
-    pfad.parent.mkdir(parents=True, exist_ok=True)
-    pfad.write_bytes(inhalt)
+    # Ueber pfade.lang: Der Testbaum enthaelt absichtlich einen Pfad, der
+    # unter Windows laenger als 260 Zeichen ist (SPEC Abschnitt 11).
+    from fotosort import pfade
+
+    pfade.lang(pfad.parent).mkdir(parents=True, exist_ok=True)
+    pfade.lang(pfad).write_bytes(inhalt)
     return pfad
 
 
 def _text(pfad: Path, inhalt: str) -> Path:
-    pfad.parent.mkdir(parents=True, exist_ok=True)
-    pfad.write_text(inhalt, encoding="utf-8")
+    from fotosort import pfade
+
+    pfade.lang(pfad.parent).mkdir(parents=True, exist_ok=True)
+    pfade.lang(pfad).write_text(inhalt, encoding="utf-8")
     return pfad
 
 

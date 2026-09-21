@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 
 import pytest
 
@@ -287,10 +288,15 @@ def test_archiv_ordner_dann_konfigurationswert(monkeypatch, tmp_path):
 
 
 def test_archiv_ordner_zuletzt_standardpfad(monkeypatch, tmp_path):
+    """Linux: XDG_DATA_HOME; Windows: %LOCALAPPDATA% (SPEC Abschnitt 6)."""
     monkeypatch.delenv("FOTOSORT_DATENBANK", raising=False)
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    ordner = db.archiv_ordner("c" * 32, None)
-    assert ordner == tmp_path / "xdg" / "fotosortierer" / ("c" * 32)
+    if sys.platform.startswith("win"):
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "lokal"))
+        erwartet = tmp_path / "lokal" / "fotosortierer" / ("c" * 32)
+    else:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+        erwartet = tmp_path / "xdg" / "fotosortierer" / ("c" * 32)
+    assert db.archiv_ordner("c" * 32, None) == erwartet
 
 
 def test_datenbank_auf_netzlaufwerk_bricht_ab(tmp_path, monkeypatch):
