@@ -182,7 +182,7 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
             kam, roh = kamera.ordnername(felder, konf)
             _, ort = ziel_modul.zielpfad(struktur, d, kam, g.haupt, konf)
             werte = dict(
-                kamera=kam, kamera_modell=roh, aufnahme_zeit=ziel_modul.zeit_text(d.zeit),
+                kamera=kam, kamera_modell=roh, aufnahme_zeit=ziel_modul.zeit_text(d.zeit, d.uhrzeit_bekannt),
                 datum_quelle=d.quelle, datum_sicher=1 if d.sicher else 0, datum_hinweis=d.hinweis,
             )
             if ort.mehrdeutig:
@@ -238,13 +238,9 @@ def zielpfad_aus_zeile(struktur, zeile, konf) -> Path:
     die Partnerdatei eines Duplikats, nicht mehr auf den berechneten Namen.
     Braucht kein ExifTool - die Metadaten stehen in der Zeile.
     """
-    zeit = None
-    if zeile["aufnahme_zeit"]:
-        from datetime import datetime
-
-        zeit = datetime.strptime(zeile["aufnahme_zeit"], "%Y-%m-%dT%H:%M:%S")
+    zeit, uhrzeit_bekannt = ziel_modul.zeit_aus_text(zeile["aufnahme_zeit"])
     d = datum_modul.Datum(zeit, int(zeile["datum_quelle"] or 0), bool(zeile["datum_sicher"]),
-                          zeile["datum_hinweis"] or "")
+                          zeile["datum_hinweis"] or "", uhrzeit_bekannt=uhrzeit_bekannt)
     name = Path(db.text_pfad(zeile["quellpfad"])).name
     pfad, _ort = ziel_modul.zielpfad(struktur, d, zeile["kamera"] or konf.wert("kamera.unbekannt"), name, konf)
     return pfad

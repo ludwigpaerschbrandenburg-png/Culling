@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import testbaum
-from fotosort import FotosortFehler, config, db, scan
+from fotosort import pfade, FotosortFehler, config, db, scan
 
 
 @pytest.fixture
@@ -356,7 +356,9 @@ def _ordner_sperren(monkeypatch, gesperrt: Path):
     echt = os.scandir
 
     def gestoert(pfad="."):
-        if Path(pfad) == gesperrt:
+        # Der Scan ruft scandir mit dem langen Windows-Praefix auf (pfade.lang);
+        # zum Vergleich wird es wieder abgenommen.
+        if pfade.kurz(Path(pfad)) == gesperrt:
             raise PermissionError(13, "Permission denied")
         return echt(pfad)
 

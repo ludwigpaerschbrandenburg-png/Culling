@@ -118,6 +118,9 @@ Zieldatei bleibt liegen.
 
 - [x] `fotosort pruefen`, `fotosort bericht`
 - [x] Pflichttests: Zieldatei um ein Byte verändert, abgeschnitten, fehlt; Abbruch und Fortsetzen
+- [x] Prüf-Agent: kein Verlustpfad; behoben: Lesung je Zielpfad prüft Größe je Zeile, CSV mit
+      Roh-Pfaden, `verschoben` nur bis zum Hash, Uhrzeit-Kenntnis in `aufnahme_zeit` gespeichert
+      (Tagesgrenze bei Neuberechnung), Zähler und Listen des Berichts ergänzt
 - [x] Gruppe bei Inhalts-Duplikat eines Mitglieds getrennt: Der Bericht listet jedes Duplikat mit
       Partnerdatei und Status, so ist der Fall sichtbar (Punkt aus Phase 3)
 
@@ -128,6 +131,9 @@ Zieldatei bleibt liegen.
 - **`pruefen` bestätigt auch Duplikate** (`duplikat` → `duplikat_bestaetigt`), indem es die
   Partnerdatei im Ziel frisch liest. Das Aufräumen (Phase 5) liest vor jeder Löschung trotzdem
   Quelle und Ziel erneut; die Bestätigung aus Phase 4 ersetzt das nicht.
+- **Überschriften des Berichts stehen in `bericht.py`,** nicht in `meldungen.py`: Der Bericht ist
+  selbst ein Dokument, seine Gliederung gehört zu ihm. Alle Meldungen an der Konsole bleiben in
+  `meldungen.py`.
 - **Nach fehlgeschlagener Prüfung** wird die fehlerhafte Zieldatei nicht angerührt. Die frische
   Kopie bekommt bei belegtem Namen den Anhang `_1`; die alte, fehlerhafte Datei steht im Bericht
   unter „Prüfung fehlgeschlagen" und muss von Hand entfernt werden, wenn man sie nicht behalten

@@ -167,5 +167,21 @@ def zielpfad(struktur: Zielstruktur, d: datum_modul.Datum, kamera: str, name: st
     return ort.ordner / name, ort
 
 
-def zeit_text(zeit: datetime | None) -> str:
-    return "" if zeit is None else zeit.strftime("%Y-%m-%dT%H:%M:%S")
+def zeit_text(zeit: datetime | None, uhrzeit_bekannt: bool = True) -> str:
+    """Aufnahmezeit fuer die Datenbank. Ohne bekannte Uhrzeit nur das Datum
+    ("2026-01-02"), damit sich spaeter erkennen laesst, dass die Tagesgrenze
+    nicht anzuwenden ist (SPEC Abschnitt 3)."""
+    if zeit is None:
+        return ""
+    if not uhrzeit_bekannt:
+        return zeit.strftime("%Y-%m-%d")
+    return zeit.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def zeit_aus_text(text: str) -> tuple[datetime | None, bool]:
+    """Umkehrung von zeit_text: (Zeit, Uhrzeit bekannt)."""
+    if not text:
+        return None, True
+    if "T" in text:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S"), True
+    return datetime.strptime(text, "%Y-%m-%d"), False

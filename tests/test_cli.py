@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+from pathlib import Path
+
 import pytest
 
 import testbaum
@@ -580,7 +582,9 @@ def test_nicht_lesbarer_ordner_ergibt_einen_fehler_rueckgabewert(
     echt = _os.scandir
 
     def gestoert(pfad="."):
-        if str(pfad) == str(gesperrt):
+        from fotosort import pfade as _pfade
+
+        if _pfade.kurz(Path(pfad)) == gesperrt:
             raise PermissionError(13, "Permission denied")
         return echt(pfad)
 

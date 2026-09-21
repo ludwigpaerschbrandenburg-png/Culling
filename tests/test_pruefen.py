@@ -283,3 +283,58 @@ def test_bericht_legt_keinen_lauf_an(baum, quelle, ziel, nachschauen):
     assert _cli("bericht", "--ziel", ziel) == cli.OK
     with nachschauen(ziel) as d:
         assert len(d.laeufe_liste()) == vorher
+
+
+# ------------------------------------------- Befunde des Pruef-Agenten -----
+
+
+def test_geteilte_lesung_prueft_groesse_je_zeile(baum, quelle, ziel, nachschauen, capsys):
+    """Duplikat- und verschobene Zeile zeigen auf dieselbe abgeschnittene Zieldatei:
+    beide muessen als Fehler enden, keine darf die Groessenpruefung der anderen erben."""
+    _bis_kopiert(ziel, quelle)
+    zeilen = _zeilen(nachschauen, ziel)
+    dup = next(z for z in zeilen.values() if z["status"] == "duplikat"
+               and z["quellpfad"] in (str(baum["duplikat_a"]), str(baum["duplikat_b"])))
+    partner = Path(dup["zielpfad"])
+    besitzer = next(z for z in zeilen.values() if z["zielpfad"] == dup["zielpfad"] and z["status"] == "kopiert")
+    with nachschauen(ziel) as d:
+        d.verbindung.execute("UPDATE dateien SET status = 'verschoben', hash = '' WHERE quellpfad = ?",
+                             (besitzer["quellpfad"],))
+        d.verbindung.commit()
+    partner.write_bytes(partner.read_bytes()[:10])
+    assert _cli("pruefen", "--ziel", ziel) == cli.FEHLER
+    nachher = _zeilen(nachschauen, ziel)
+    assert nachher[dup["quellpfad"]]["status"] == "fehler"
+    assert nachher[besitzer["quellpfad"]]["status"] == "fehler"
+    assert nachher[besitzer["quellpfad"]]["hash"] == ""   # kein Hash einer kaputten Datei
+    assert "Groesse weicht ab:         2" in capsys.readouterr().out
+
+
+def test_verschobene_zeile_ist_nach_dem_hash_fertig(baum, quelle, ziel, nachschauen, capsys):
+    _bis_kopiert(ziel, quelle)
+    z = next(z for z in _kopierte(nachschauen, ziel) if z["quellpfad"] == str(baum["analog"]))
+    with nachschauen(ziel) as d:
+        d.verbindung.execute("UPDATE dateien SET status = 'verschoben', hash = '' WHERE quellpfad = ?", (z["quellpfad"],))
+        d.verbindung.commit()
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
+    capsys.readouterr()
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
+    assert "Nichts zu pruefen" in capsys.readouterr().out
+
+
+@testbaum.NUR_POSIX_NAMEN
+def test_bericht_csv_mit_nicht_utf8_pfad(baum, quelle, ziel, nachschauen, capsys):
+    import os
+
+    roh = os.path.join(os.fsencode(quelle / "2026"), b"latin1_\xe9.jpg")
+    with open(roh, "wb") as f:
+        f.write(testbaum._JPEG)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.OK
+    # Die Analyse meldet den Namen als Fehler (bitte umbenennen) - Rueckgabe FEHLER ist hier richtig.
+    assert _cli("analyse", "--ziel", ziel) == cli.FEHLER
+    capsys.readouterr()
+    assert _cli("bericht", "--ziel", ziel) == cli.OK
+    neueste = sorted(bericht.berichte_ordner(ziel).glob("*_dateien.csv"))[-1]
+    with open(neueste, encoding="utf-8-sig", newline="") as f:
+        zeilen = list(csv.reader(f, delimiter=";"))
+    assert any("latin1_" in r[1] for r in zeilen[1:])

@@ -28,7 +28,7 @@ import os
 import threading
 import time
 from collections import deque
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +52,7 @@ class Ergebnis:
     fehler_fehlt: int = 0
     fehler_groesse: int = 0
     fehler_inhalt: int = 0
+    fehler_lesen: int = 0
     bytes_gelesen: int = 0
     sekunden: float = 0.0
     abgebrochen: bool = False
@@ -68,16 +69,19 @@ class _Lesung:
     grund: str = ""
 
 
-def _lesen(pfad: Path, erwartet: int, stop: threading.Event) -> _Lesung:
-    """Laeuft im Hash-Worker. Nur lesen, nie schreiben."""
+def _lesen(pfad: Path, stop: threading.Event) -> _Lesung:
+    """Laeuft im Hash-Worker. Nur lesen, nie schreiben.
+
+    Liefert immer Groesse UND Hash der Datei, die da liegt. Ob das zur Zeile
+    passt, entscheidet der Hauptstrang je Zeile - eine Lesung kann mehreren
+    Zeilen dienen (Duplikate zeigen auf dieselbe Partnerdatei).
+    """
     try:
         st = os.stat(pfade.lang(pfad))
     except FileNotFoundError:
         return _Lesung("fehlt")
     except OSError as fehler:
         return _Lesung("fehler", grund=f"{meldungen.GRUND_PRUEFUNG_LESEN}: {fehler.strerror or fehler}")
-    if erwartet >= 0 and st.st_size != erwartet:
-        return _Lesung("groesse", groesse=st.st_size, mtime=st.st_mtime)
     try:
         h = hashes.blake3_datei(pfade.lang(pfad), stop)
     except hashes.Abgebrochen:
@@ -100,7 +104,9 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     anzeige = fortschritt.Fortschritt(konsole, e.geplant, e.geplant_bytes, meldungen.pruefen_laeuft)
     stop = threading.Event()
     pool = ThreadPoolExecutor(max_workers=hw, thread_name_prefix="pruefen")
-    # Mehrere Duplikate zeigen auf dieselbe Partnerdatei: je Lauf nur einmal lesen.
+    # Mehrere Duplikate zeigen auf dieselbe Partnerdatei: je Lauf nur einmal
+    # lesen. Die Zeilen kommen nach Zielpfad sortiert, gleiche Zielpfade
+    # liegen also nebeneinander - der Merkspeicher braucht nur den letzten.
     lesungen: dict[str, Future] = {}
     offen: deque[tuple[object, Future]] = deque()
     max_offen = max(4, hw * 4)
@@ -117,17 +123,20 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
                 for z in seite:
                     zp = z["zielpfad"]
                     zukunft = lesungen.get(zp)
-                    if zukunft is None:
-                        erwartet = int(z["groesse"]) if z["status"] != "duplikat" else -1
-                        zukunft = pool.submit(_lesen, Path(db.text_pfad(zp)), erwartet, stop)
+                    neu = zukunft is None
+                    if neu:
+                        lesungen.clear()
+                        zukunft = pool.submit(_lesen, Path(db.text_pfad(zp)), stop)
                         lesungen[zp] = zukunft
-                    offen.append((z, zukunft))
+                    offen.append((z, zukunft, neu))
             if not offen:
                 break
-            wait([f for _, f in offen], timeout=1.0, return_when=FIRST_COMPLETED)
+            # Verbucht wird streng der Reihe nach: Es genuegt, auf die vorderste
+            # Lesung zu warten (mit Zeitgrenze, damit Strg+C jederzeit ankommt).
+            wait([offen[0][1]], timeout=1.0)
             while offen and offen[0][1].done():
-                z, zukunft = offen.popleft()
-                _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige)
+                z, zukunft, gelesen = offen.popleft()
+                _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige, gelesen)
     except KeyboardInterrupt:
         e.abgebrochen = True
         stop.set()
@@ -140,15 +149,23 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     return e
 
 
-def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzeige) -> None:
+def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzeige, gelesen: bool) -> None:
+    """gelesen: diese Zeile hat die Datei selbst lesen lassen (zaehlt Bytes);
+    Duplikate teilen sich die Lesung ihrer Partnerdatei."""
     quellpfad = z["quellpfad"]
     zielpfad = Path(db.text_pfad(z["zielpfad"]))
     if L.art == "abgebrochen":
         return  # bleibt im alten Status, naechster Lauf macht weiter
     e.bearbeitet += 1
-    anzeige.weiter(1, int(z["groesse"]) if L.art == "ok" else 0)
+    anzeige.weiter(1, L.groesse if (L.art == "ok" and gelesen) else 0)
+    if L.art == "ok" and L.groesse != int(z["groesse"]):
+        # Die Groesse muss fuer JEDE Zeile stimmen - auch fuer ein Duplikat
+        # (gleicher Inhalt heisst gleiche Groesse) und fuer eine verschobene
+        # Datei (die hat sonst keinen Vergleichswert).
+        L = _Lesung("groesse", groesse=L.groesse, mtime=L.mtime)
     if L.art == "ok":
-        e.bytes_gelesen += L.groesse
+        if gelesen:
+            e.bytes_gelesen += L.groesse
         if z["status"] == "verschoben":
             dbank.verschoben_hash_setzen(quellpfad, L.hash)
             dbank.ziel_index_setzen(zielpfad, L.groesse, L.mtime, L.hash, lauf)
@@ -175,8 +192,11 @@ def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzei
     elif L.art == "groesse":
         grund = meldungen.grund_pruefung_groesse(int(z["groesse"]), L.groesse)
         e.fehler_groesse += 1
+        # Der alte Eintrag im Ziel-Index beschreibt die Datei nicht mehr.
+        dbank.ziel_index_entfernen(zielpfad)
     else:
         grund = L.grund or meldungen.GRUND_PRUEFUNG_LESEN
+        e.fehler_lesen += 1
     e.fehler += 1
     dbank.status_setzen(quellpfad, "fehler", grund)
     dbank.ereignis(lauf, ART_PRUEFUNG_FEHLGESCHLAGEN, quellpfad, 1, f"{db.pfad_text(zielpfad)} | {grund}")

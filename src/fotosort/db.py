@@ -956,12 +956,19 @@ class Datenbank:
 
     # -- Pruefen (SPEC Abschnitt 4 Phase 4) --------------------------------
 
-    ZU_PRUEFEN_SQL = "status IN ('kopiert', 'duplikat', 'verschoben') AND zielpfad != ''"
+    # verschoben: nur solange der Hash noch fehlt (er wird hier nachgetragen).
+    ZU_PRUEFEN_SQL = (
+        "zielpfad != '' AND (status IN ('kopiert', 'duplikat')"
+        " OR (status = 'verschoben' AND hash = ''))"
+    )
 
     def zu_pruefen_summe(self) -> tuple[int, int]:
+        """(Anzahl, zu lesende Bytes). Duplikate zaehlen keine Bytes: Ihre
+        Partnerdatei wird ueber die Zeile gelesen, der sie gehoert."""
         self.stapel_schreiben()
         z = self.verbindung.execute(
-            f"SELECT COUNT(*), COALESCE(SUM(groesse), 0) FROM dateien WHERE {self.ZU_PRUEFEN_SQL}"
+            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'duplikat' THEN 0 ELSE groesse END), 0)"
+            f" FROM dateien WHERE {self.ZU_PRUEFEN_SQL}"
         ).fetchone()
         return int(z[0]), int(z[1])
 
@@ -1006,8 +1013,9 @@ class Datenbank:
         """Zeilen im Status fehler, deren Grund mit praefix beginnt."""
         self.stapel_schreiben()
         return self.verbindung.execute(
-            "SELECT * FROM dateien WHERE status = 'fehler' AND fehlergrund LIKE ? ORDER BY quellpfad",
-            (praefix.replace("%", "").replace("_", "\\_") + "%",),
+            "SELECT * FROM dateien WHERE status = 'fehler' AND fehlergrund LIKE ? ESCAPE '\\'"
+            " ORDER BY quellpfad",
+            (praefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
         ).fetchall()
 
     # -- Bericht (SPEC Abschnitt 10) ----------------------------------------
@@ -1019,17 +1027,20 @@ class Datenbank:
         self.stapel_schreiben()
         leer = lambda: {k: 0 for k in (
             "gefunden", "kopiert", "verschoben", "geprueft", "duplikate", "ohne_datum",
-            "fehler", "geloescht", "uebersprungen", "bytes",
+            "fehler", "geloescht", "uebersprungen", "sonstiges", "bytes",
         )}
         ergebnis: dict[str, dict[str, int]] = {"gesamt": leer()}
         for z in self.verbindung.execute(
-            "SELECT quellwurzel, status, datum_sicher, COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b"
-            " FROM dateien WHERE dateityp IN ('foto', 'raw', 'video', 'sidecar')"
-            " GROUP BY quellwurzel, status, datum_sicher"
+            "SELECT quellwurzel, status, datum_sicher, dateityp, (zielpfad != '') AS eingeordnet,"
+            " COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b"
+            " FROM dateien GROUP BY quellwurzel, status, datum_sicher, dateityp, eingeordnet"
         ):
             for schluessel in (z["quellwurzel"], "gesamt"):
                 e = ergebnis.setdefault(schluessel, leer())
                 n = int(z["n"])
+                if z["dateityp"] not in ("foto", "raw", "video", "sidecar"):
+                    e["sonstiges"] += n   # uebersprungen nach Typ (SPEC §3)
+                    continue
                 e["gefunden"] += n
                 e["bytes"] += int(z["b"])
                 st = z["status"]
@@ -1047,7 +1058,10 @@ class Datenbank:
                     e["geloescht"] += n
                 if st == "uebersprungen":
                     e["uebersprungen"] += n
-                if z["datum_sicher"] == 0 and st not in ("gefunden", "uebersprungen", "fehler"):
+                # "ohne Datum": analysiert (Zielpfad berechnet), Datum nur aus
+                # dem Aenderungsdatum - unabhaengig davon, was spaeter mit der
+                # Datei geschah (auch eine fehlgeschlagene Pruefung).
+                if z["datum_sicher"] == 0 and z["eingeordnet"]:
                     e["ohne_datum"] += n
         return ergebnis
 

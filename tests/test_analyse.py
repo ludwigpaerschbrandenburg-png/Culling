@@ -447,7 +447,8 @@ def test_cli_analyse_mit_exiftool_pfad_nur_in_config(capsys, quelle, ziel, monke
     kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
     konf_pfad = archiv_basis / kennung / "config.toml"
     text = konf_pfad.read_text(encoding="utf-8")
-    text = text.replace('exiftool_pfad = ""', f'exiftool_pfad = "{programm}"')
+    # TOML: Backslaeche (Windows-Pfade) muessen verdoppelt werden.
+    text = text.replace('exiftool_pfad = ""', 'exiftool_pfad = "' + str(programm).replace("\\", "\\\\") + '"')
     konf_pfad.write_text(text, encoding="utf-8")
     monkeypatch.setenv("PATH", str(ziel))  # kein exiftool mehr ueber PATH
     monkeypatch.delenv("FOTOSORT_EXIFTOOL", raising=False)

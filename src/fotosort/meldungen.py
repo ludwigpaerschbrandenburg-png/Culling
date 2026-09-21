@@ -957,6 +957,8 @@ def pruefen_ergebnis(e) -> str:
         zeilen.append(f"    Zieldatei fehlt:           {anzahl(e.fehler_fehlt)}")
         zeilen.append(f"    Groesse weicht ab:         {anzahl(e.fehler_groesse)}")
         zeilen.append(f"    Inhalt weicht ab:          {anzahl(e.fehler_inhalt)}")
+        if e.fehler_lesen:
+            zeilen.append(f"    nicht lesbar:              {anzahl(e.fehler_lesen)}")
         zeilen.append(
             "  Fehlerhafte Zieldateien wurden weder geloescht noch ueberschrieben, nur gemeldet."
             " Ein erneutes 'fotosort kopieren' legt eine frische Kopie an."
@@ -968,12 +970,12 @@ def pruefen_ergebnis(e) -> str:
     return "\n".join(zeilen)
 
 
-def pruefen_zusammenfassung(status: dict) -> str:
+def pruefen_zusammenfassung(status: dict, noch_zu_pruefen: int) -> str:
     zeilen = [
         "Stand des Archivs",
         f"  geprueft (Aufraeumen offen):  {anzahl(status.get('geprueft', 0))}",
         f"  Duplikate bestaetigt:         {anzahl(status.get('duplikat_bestaetigt', 0))}",
-        f"  noch zu pruefen:              {anzahl(status.get('kopiert', 0) + status.get('duplikat', 0))}",
+        f"  noch zu pruefen:              {anzahl(noch_zu_pruefen)}",
         f"  Fehler:                       {anzahl(status.get('fehler', 0))}",
     ]
     return "\n".join(zeilen)

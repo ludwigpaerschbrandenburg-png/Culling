@@ -518,7 +518,7 @@ def befehl_pruefen(args, konsole) -> int:
             konsole.print("")
             konsole.print(meldungen.pruefen_ergebnis(ergebnis))
         konsole.print("")
-        konsole.print(meldungen.pruefen_zusammenfassung(datenbank.zaehler_je_status()))
+        konsole.print(meldungen.pruefen_zusammenfassung(datenbank.zaehler_je_status(), datenbank.zu_pruefen_summe()[0]))
         if ergebnis.abgebrochen:
             konsole.print("")
             konsole.print(meldungen.pruefen_abgebrochen())

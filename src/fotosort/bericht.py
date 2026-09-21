@@ -44,8 +44,8 @@ CSV_KODIERUNG = "utf-8-sig"
 DATEI_SPALTEN = (
     "quellwurzel", "quellpfad", "status", "dateityp", "groesse", "mtime", "kamera", "kamera_modell",
     "aufnahme_zeit", "datum_quelle", "datum_sicher", "datum_hinweis", "gruppe", "zielpfad",
-    "hash", "fehlergrund", "bestaetigt_in_lauf", "kopiert_in_lauf", "gefunden_in_lauf",
-    "zuletzt_gesehen_in_lauf",
+    "schreibpfad", "hash", "fehlergrund", "bestaetigt_in_lauf", "kopiert_in_lauf",
+    "gefunden_in_lauf", "zuletzt_gesehen_in_lauf",
 )
 EREIGNIS_SPALTEN = ("lauf_nummer", "art", "pfad", "anzahl", "text")
 
@@ -80,11 +80,14 @@ def schreiben(ziel: Path, dbank: db.Datenbank, lauf: int | None = None,
 
 
 def _csv_wert(wert):
+    """Werte so, wie sie in der Datenbank stehen. Pfade in Roh-Kodierung
+    (kein gueltiges UTF-8) bleiben in dieser Schreibweise - zurueckgewandelt
+    liessen sie sich nicht als UTF-8 speichern."""
     if wert is None:
         return ""
     if isinstance(wert, float):
         return f"{wert:.3f}"
-    return db.text_pfad(wert) if isinstance(wert, str) else wert
+    return wert
 
 
 # ------------------------------------------------------------- Text -----
@@ -136,6 +139,8 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
             f"{meldungen.anzahl(n['fehler']):>8}{meldungen.anzahl(n['geloescht']):>11}"
             f"   ({meldungen.groesse(n['bytes'])})"
         )
+    sonstiges = zahlen["gesamt"]["sonstiges"]
+    z.append(f"  Uebersprungen nach Dateityp (sonstiges, SPEC Abschnitt 3): {meldungen.anzahl(sonstiges)}")
     z.append("")
 
     # Laeufe: Dauer und Durchsatz je Phase
@@ -172,7 +177,7 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
            lambda r: f"{r['quellpfad']}  ->  {r['zielpfad']}")
     _liste(z, "Ohne sicheres Datum (nur Aenderungsdatum)",
            dbank.dateien_liste("datum_sicher = 0 AND dateityp IN ('foto','raw','video','sidecar')"
-                               " AND status NOT IN ('gefunden','uebersprungen','fehler')"),
+                               " AND zielpfad != ''"),
            lambda r: f"{r['quellpfad']}  ->  {r['zielpfad']}")
     _liste(z, "Zeitzone angenommen (Video ohne Zeitzonen-Offset)",
            dbank.dateien_liste("datum_hinweis = ?", (HINWEIS_ZEITZONE,)),
@@ -225,7 +230,8 @@ def _liste(z: list[str], titel: str, zeilen, form) -> None:
     eintraege = [form(r) for r in zeilen]
     z.append(f"{titel}: {meldungen.anzahl(len(eintraege))}")
     for e in eintraege:
-        z.append(f"  {e}")
+        # Ein Zeilenumbruch im Pfad darf die Zeile des Berichts nicht zerreissen.
+        z.append("  " + str(e).replace("\r", "\\r").replace("\n", "\\n"))
     z.append("")
 
 

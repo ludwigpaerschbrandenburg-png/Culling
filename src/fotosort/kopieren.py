@@ -725,12 +725,18 @@ def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: in
     if not zeilen:
         return 0
     struktur = ziel_modul.Zielstruktur(ziel)
+    freigegeben = 0
     for z in zeilen:
+        if _stat(Path(db.text_pfad(z["quellpfad"]))) is None:
+            # Keine Quelle mehr (verschoben oder verschwunden): Es gibt nichts,
+            # was neu kopiert werden koennte. Bleibt Fehler, steht im Bericht.
+            continue
         neu = analyse.zielpfad_aus_zeile(struktur, z, konf)
         dbank.zurueck_auf_analysiert(z["quellpfad"], neu)
         dbank.ereignis(lauf, ART_NEU_NACH_PRUEFUNG, z["quellpfad"], 1, meldungen.EREIGNIS_NEU_NACH_PRUEFUNG)
+        freigegeben += 1
     dbank.stapel_schreiben()
-    return len(zeilen)
+    return freigegeben
 
 
 def planen(ziel: Path, dbank: db.Datenbank) -> Plan:

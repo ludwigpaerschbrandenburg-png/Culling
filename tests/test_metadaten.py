@@ -19,21 +19,21 @@ def pool():
 
 def test_jpeg_und_raw_liefern_datum_und_modell(pool, baum):
     ergebnis = pool.lesen([(str(baum["jpg"]), FOTO), (str(baum["raw"]), RAW)])
-    for schluessel in (str(baum["jpg"]), str(baum["raw"])):
-        felder = ergebnis[schluessel]
+    for pfad in (baum["jpg"], baum["raw"]):
+        felder = ergebnis[metadaten.schluessel(pfad)]
         assert felder["DateTimeOriginal"] == "2026:01:01 12:30:00"
         assert felder["Model"] == "ILCE-7CM2"
         assert felder["Make"] == "SONY"
 
 
 def test_video_mit_offset_liefert_creationdate(pool, baum):
-    felder = pool.lesen([(str(baum["video_mit_offset"]), VIDEO)])[str(baum["video_mit_offset"])]
+    felder = pool.lesen([(str(baum["video_mit_offset"]), VIDEO)])[metadaten.schluessel(baum["video_mit_offset"])]
     assert felder["CreationDate"] == "2026:02:10 10:00:00+01:00"
     assert felder["CreateDate"] == "2026:02:10 09:00:00"
 
 
 def test_video_nur_utc_liefert_createdate_ohne_offset(pool, baum):
-    felder = pool.lesen([(str(baum["video_nur_utc"]), VIDEO)])[str(baum["video_nur_utc"])]
+    felder = pool.lesen([(str(baum["video_nur_utc"]), VIDEO)])[metadaten.schluessel(baum["video_nur_utc"])]
     assert felder["CreateDate"] == "2026:01:01 23:30:00"
     assert "CreationDate" not in felder and "CreationDateValue" not in felder
 
@@ -41,7 +41,7 @@ def test_video_nur_utc_liefert_createdate_ohne_offset(pool, baum):
 def test_sony_eingebettetes_xml_wird_gelesen(pool, baum):
     """Nur ohne -fast2 - deshalb lesen Videos ohne (SPEC Abschnitt 3)."""
     pfad = str(baum["video_sony_eingebettet"])
-    felder = pool.lesen([(pfad, VIDEO)])[pfad]
+    felder = pool.lesen([(pfad, VIDEO)])[metadaten.schluessel(pfad)]
     assert felder["CreationDateValue"] == "2026:01:01 23:30:00+01:00"
     assert felder["DeviceModelName"] == "ILCE-7CM2"
     assert felder["CreateDate"] == "2026:01:01 22:30:00"
@@ -57,13 +57,13 @@ def test_fast2_wuerde_das_eingebettete_xml_verlieren(pool, baum, monkeypatch):
         return args if "-fast2" in args else [*args, "-fast2"]
 
     monkeypatch.setattr(metadaten, "_argumente", mit_fast2)
-    felder = pool.lesen([(pfad, VIDEO)])[pfad]
+    felder = pool.lesen([(pfad, VIDEO)])[metadaten.schluessel(pfad)]
     assert "CreationDateValue" not in felder
 
 
 def test_sony_sidecar_xml(pool, baum):
     pfad = str(baum["sidecar_form3"])
-    felder = pool.lesen([(pfad, SIDECAR)])[pfad]
+    felder = pool.lesen([(pfad, SIDECAR)])[metadaten.schluessel(pfad)]
     assert felder["NonRealTimeMetaCreationDateValue"] == "2026:03:16 00:30:00+01:00"
 
 
@@ -72,22 +72,22 @@ def test_nicht_lesbare_datei_fehlt_im_ergebnis_statt_abzustuerzen(pool, tmp_path
     kaputt.write_bytes(b"das ist kein bild")
     fehlt = tmp_path / "gibtsnicht.jpg"
     ergebnis = pool.lesen([(str(kaputt), FOTO), (str(fehlt), FOTO), (str(baum["jpg"]), FOTO)])
-    assert str(baum["jpg"]) in ergebnis
-    assert str(fehlt) not in ergebnis
+    assert metadaten.schluessel(baum["jpg"]) in ergebnis
+    assert metadaten.schluessel(fehlt) not in ergebnis
     # eine Datei ohne Metadaten liefert einen Eintrag ohne Datumsfelder oder gar keinen
-    assert "DateTimeOriginal" not in ergebnis.get(str(kaputt), {})
+    assert "DateTimeOriginal" not in ergebnis.get(metadaten.schluessel(kaputt), {})
 
 
 def test_umlaute_im_pfad(pool, baum):
     pfad = str(baum["name_mit_uhrzeit"])  # liegt unter "Urlaub 2026 Ümläute"
     ergebnis = pool.lesen([(pfad, FOTO)])
-    assert pfad in ergebnis
+    assert metadaten.schluessel(pfad) in ergebnis
 
 
 def test_mehrere_stapel_nacheinander_im_selben_prozess(pool, baum):
     for _ in range(3):
         ergebnis = pool.lesen([(str(baum["jpg"]), FOTO)])
-        assert ergebnis[str(baum["jpg"])]["Model"] == "ILCE-7CM2"
+        assert ergebnis[metadaten.schluessel(baum["jpg"])]["Model"] == "ILCE-7CM2"
 
 
 def test_stapel_bilden_trennt_nach_typ_und_groesse():
@@ -112,8 +112,8 @@ def test_zeilenumbruch_im_namen_geht_nie_an_exiftool(pool, tmp_path, baum):
     vorher = opfer.read_bytes()
     ergebnis = pool.lesen([(str(boese), FOTO), (str(opfer), FOTO)])
     assert opfer.read_bytes() == vorher
-    assert str(boese) not in ergebnis
-    assert ergebnis[str(opfer)]["Model"] == "ILCE-7CM2"
+    assert metadaten.schluessel(boese) not in ergebnis
+    assert ergebnis[metadaten.schluessel(opfer)]["Model"] == "ILCE-7CM2"
     assert not list(tmp_path.glob("*_original")) and not list(opfer.parent.glob("*_original"))
 
 
@@ -121,7 +121,7 @@ def test_leere_datei_liefert_error_feld(pool, tmp_path):
     leer = tmp_path / "leer.jpg"
     leer.write_bytes(b"")
     ergebnis = pool.lesen([(str(leer), FOTO)])
-    assert "Error" in ergebnis.get(str(leer), {})
+    assert "Error" in ergebnis.get(metadaten.schluessel(leer), {})
 
 
 def test_prozesse_bestimmen(konf, monkeypatch):

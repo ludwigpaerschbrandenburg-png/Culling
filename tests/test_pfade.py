@@ -36,6 +36,11 @@ def test_lang_unter_linux_unveraendert(tmp_path):
     assert pfade.lang(tmp_path) == Path(tmp_path)
 
 
+_NUR_LINUX = pytest.mark.skipif(sys.platform.startswith("win"), reason="Linux-Mechanismus (/proc/mounts)")
+_NUR_WINDOWS = pytest.mark.skipif(not sys.platform.startswith("win"), reason="nur unter Windows pruefbar")
+
+
+@_NUR_LINUX
 def test_dateisystem_typ_findet_etwas(tmp_path):
     typ = pfade.dateisystem_typ(tmp_path)
     assert typ  # unter Linux ist immer ein Einhaengepunkt zustaendig
@@ -46,6 +51,7 @@ def test_ist_netzpfad_fuer_lokalen_ordner_falsch(tmp_path):
     assert pfade.ist_netzpfad(tmp_path) is False
 
 
+@_NUR_LINUX
 def test_ist_netzpfad_bei_unbekanntem_typ_wahr(tmp_path, monkeypatch):
     # Laesst sich der Typ nicht bestimmen, ist die vorsichtige Antwort
     # "Netzpfad" (docs/architektur.md Abschnitt 2).
@@ -53,9 +59,32 @@ def test_ist_netzpfad_bei_unbekanntem_typ_wahr(tmp_path, monkeypatch):
     assert pfade.ist_netzpfad(tmp_path) is True
 
 
+@_NUR_LINUX
 def test_ist_netzpfad_erkennt_netz_dateisystem(tmp_path, monkeypatch):
     monkeypatch.setattr(pfade, "_mountpunkte", lambda: [(str(tmp_path), "cifs")])
     assert pfade.ist_netzpfad(tmp_path) is True
+
+
+@_NUR_WINDOWS
+def test_windows_unc_pfad_gilt_als_netzpfad():
+    assert pfade.ist_netzpfad(Path(r"\\server\freigabe\Fotos")) is True
+    assert pfade.ist_netzpfad(Path(r"\\?\UNC\server\freigabe\Fotos")) is True
+
+
+@_NUR_WINDOWS
+def test_windows_netzlaufwerk_ueber_drive_type(tmp_path, monkeypatch):
+    """Ein verbundener Laufwerksbuchstabe gilt als Netz, sobald GetDriveType DRIVE_REMOTE liefert."""
+    import ctypes
+
+    monkeypatch.setattr(ctypes.windll.kernel32, "GetDriveTypeW", lambda wurzel: pfade._DRIVE_REMOTE)
+    assert pfade.ist_netzpfad(tmp_path) is True
+
+
+@_NUR_WINDOWS
+def test_windows_laufwerk_kennung_ist_der_buchstabe(tmp_path):
+    kennung = pfade.laufwerk_kennung(tmp_path)
+    assert kennung.startswith("laufwerk:") or kennung.startswith("server:")
+    assert pfade.laufwerk_kennung(Path(r"\\server\freigabe\a")) == "server:server"
 
 
 def test_gleiches_laufwerk_lokal(tmp_path):
