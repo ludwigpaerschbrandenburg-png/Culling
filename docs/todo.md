@@ -141,19 +141,57 @@ Zieldatei bleibt liegen.
 
 ---
 
+## Windows (GitHub Actions)
+
+Die komplette Testsuite läuft bei jedem Push auf `ubuntu-latest` und `windows-latest`
+(`.github/workflows/tests.yml`, Python 3.12, ExifTool über apt bzw. choco). Stand: beide grün.
+Unter Windows werden nur Tests übersprungen, deren Dateinamen es dort nicht geben kann
+(Zeilenumbruch, ungültige Bytes) oder die den Linux-Mechanismus `/proc/mounts` prüfen; dafür
+gibt es eigene Windows-Tests (UNC-Pfad, `GetDriveType`, Laufwerkskennung, `%LOCALAPPDATA%`).
+Behoben für Windows: Fehlernummer nach `MoveFileExW`, lange Pfade beim Anlegen des Testbaums,
+Backslashes in TOML, ExifTool-Antwortschlüssel mit Schrägstrichen, Prozessende im Absturztest.
+
+- [ ] **Unter echtem Windows 11 mit echten Laufwerken nachmessen** (Phase 6, `fotosort messen`):
+      Die Actions-Läufer haben nur eine NTFS-Platte; exFAT-Karten, SMB-Freigaben und
+      Laufwerksbuchstaben-Zuordnung sind dort nicht prüfbar.
+
+---
+
 ## Phase 5 — Verschieben, Aufräumen, leere Ordner
 
-- [ ] Alles, was löscht. Hier gilt SPEC §5 wörtlich.
+Gebaut: `loeschen.py` (die einzige Löschstelle, prüft jede Bedingung aus SPEC §5 an der frisch
+gelesenen Zeile; Löschweisen endgültig und Ordner `_geloescht_<Datum>`), `aufraeumen.py`
+(`fotosort aufraeumen` mit Bestätigungswort je Quelle, `--quelle`, `--dry-run`, `--endgueltig`,
+`--leere-ordner`), `kopieren --verschieben` (Umbenennen auf demselben Laufwerk, sonst Kopieren →
+Frischlesung beider Seiten → Löschen über die Löschstelle).
 
-### Aus der Prüfung
+- [x] `kopieren --verschieben`, `aufraeumen`, `aufraeumen --leere-ordner`
+- [x] Pflichttests: ungeprüfte Datei nie gelöscht (auch nicht über die Löschstelle direkt), Quelle
+      nach dem Kopieren verändert → nicht gelöscht, zurück auf `analysiert`, im Bericht; Zielkopie
+      fehlt/verändert → nicht gelöscht; Duplikat mit fehlender/anderer Partnerdatei → nicht gelöscht;
+      Ordner mit fremder `.txt` bleibt; nicht erreichbare Quelle → nichts, klare Meldung; Absturz
+      mitten im Aufräumen (nachgestellt und als abgeschossener Prozess) → nichts doppelt, nichts
+      Falsches; Umbenennen auf belegten Namen überschreibt nichts
+- [x] **Zielordner aus allen Durchläufen über die Quelle ausnehmen.** Das Entfernen leerer Ordner
+      fasst ein im Quellbaum liegendes Ziel nie an (und der Ordner `_geloescht_` bleibt).
 
-- [ ] **Zielordner aus allen Durchläufen über die Quelle ausnehmen, nicht nur aus dem Scan.**
-      Liegt das Ziel innerhalb der Quelle, ist es bisher nur für den Scan ausgeschlossen
-      (SPEC §4 Phase 1). Das Aufräumen der Quelle und das Entfernen leerer Ordner laufen aber
-      ebenfalls über den Quellbaum und könnten in den Archivbaum hineinwandern — etwa einen
-      gerade angelegten, noch leeren Tagesordner entfernen. Ein Bild geht dabei nicht verloren,
-      aber es ist ein Eingriff ins Archiv, den niemand erwartet. Der Ausschluss gehört einmal
-      allgemein formuliert und in jedem der drei Durchläufe geprüft.
+### Entscheidungen für den Nutzer
+
+- **Standard-Löschweise ist immer der Ordner `_geloescht_<Datum>`,** nicht nur beim ersten
+  Aufräumen. Endgültig löscht nur `--endgueltig`. Grund: Die sichere Wahl darf nicht stillschweigend
+  kippen, nur weil schon einmal aufgeräumt wurde; ein Schalter ist ausdrücklich.
+- **`kopieren --verschieben` löscht endgültig** (nach Frischlesung beider Seiten). Ein Ordner
+  `_geloescht_` innerhalb der Quelle würde die Quelle nicht freigeben, was der Sinn des Verschiebens
+  ist. Wer den Papierkorb will, kopiert und räumt danach mit `aufraeumen` auf.
+- **Bestätigungswörter:** `loeschen` (endgültig), `verschieben` (Ordner `_geloescht_`), `entfernen`
+  (leere Ordner). Ohne Terminal gibt es keine Bestätigung und keine Löschung; ein Schalter, der die
+  Frage überspringt, wurde bewusst nicht gebaut.
+- **Nach „Quelle seit dem Kopieren geändert"** ist der Weg zur frischen Kopie `scan` → `analyse`
+  → `kopieren` (die Datei hat eine andere Größe/Zeit als beim Scan; `kopieren` allein stellt sie auf
+  `gefunden` zurück). `fotosort status` zeigt das als „Analyse offen".
+- **Kein Test mit einer zweiten physischen Platte im Container:** „gleiches Laufwerk" wird in den
+  Tests durch Nachstellen (immer nein bzw. tmp_path) geprüft; das echte Umbenennen zwischen zwei
+  Laufwerksbuchstaben unter Windows prüft `fotosort messen` bzw. der erste Lauf mit Kopien.
 
 ---
 

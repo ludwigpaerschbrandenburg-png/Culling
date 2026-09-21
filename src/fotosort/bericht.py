@@ -24,18 +24,12 @@ from .analyse import ART_ZIELORDNER_MEHRDEUTIG, GRUND_SIDECAR_OHNE_HAUPT
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
                        ART_NACHTRAEGLICH_BESTAETIGT, ART_NAMENSKONFLIKT, ART_PART_AUFGERAEUMT)
+from .loeschen import (ART_LEERER_ORDNER_ENTFERNT, ART_LOESCHUNG_NACHGETRAGEN, ART_LOESCHUNG_VERWEIGERT,
+                       ART_QUELLE_GELOESCHT, ART_QUELLE_IN_PAPIERKORB, ART_QUELLE_SEIT_KOPIEREN_GEAENDERT,
+                       ART_REST_ENTFERNT, ART_REST_NICHT_ENTFERNT)
 from .pruefen import ART_PRUEFUNG_FEHLGESCHLAGEN
 from .scan import (ART_AUSGESCHLOSSEN, ART_INS_ZIEL, ART_NICHT_MEHR_VORHANDEN, ART_ORDNER_NICHT_LESBAR,
                    ART_QUELLE_ABGELEHNT, ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, ART_VERKNUEPFUNG)
-
-# Ereignisarten der Phase 5 (aufraeumen). Hier benannt, damit der Bericht
-# sie kennt; geschrieben werden sie erst dort.
-ART_QUELLE_SEIT_KOPIEREN_GEAENDERT = "quelle_seit_kopieren_geaendert"
-ART_LOESCHUNG_VERWEIGERT = "loeschung_verweigert"
-ART_REST_NICHT_ENTFERNT = "rest_nicht_entfernt"
-ART_QUELLE_GELOESCHT = "quelle_geloescht"
-ART_QUELLE_IN_PAPIERKORB = "quelle_in_geloescht_ordner"
-ART_LEERER_ORDNER_ENTFERNT = "leerer_ordner_entfernt"
 
 BERICHTE_ORDNER = "berichte"
 CSV_TRENNER = ";"
@@ -201,8 +195,12 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
                     dbank.ereignisse_liste(ART_QUELLE_GELOESCHT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "In den Ordner _geloescht_ verschobene Quelldateien",
                     dbank.ereignisse_liste(ART_QUELLE_IN_PAPIERKORB), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  ->  {e['text']}")
+    _ereignis_liste(z, "Loeschungen aus abgebrochenem Lauf nachgetragen (nichts erneut geloescht)",
+                    dbank.ereignisse_liste(ART_LOESCHUNG_NACHGETRAGEN), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "Entfernte leere Ordner",
                     dbank.ereignisse_liste(ART_LEERER_ORDNER_ENTFERNT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
+    _ereignis_liste(z, "Entfernte Reste-Dateien (Thumbs.db u. ae.)",
+                    dbank.ereignisse_liste(ART_REST_ENTFERNT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "Reste-Dateien nicht entfernt (stehen mit echtem Dateityp in der Datenbank)",
                     dbank.ereignisse_liste(ART_REST_NICHT_ENTFERNT), lambda e: f"{e['pfad']}")
     _liste(z, "Sidecars ohne Hauptdatei (uebersprungen)",

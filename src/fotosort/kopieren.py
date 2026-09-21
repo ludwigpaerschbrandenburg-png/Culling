@@ -34,7 +34,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, db, fortschritt, hashes, meldungen, pfade
+from . import FotosortFehler, db, fortschritt, hashes, loeschen, meldungen, pfade
 from .scan import ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, TEXT_QUELLE_VERAENDERT
 
 # Ereignisarten dieses Moduls (SPEC Abschnitt 6).
@@ -82,6 +82,12 @@ class Ergebnis:
     profil: str = ""
     exfat_rueckfall: bool = False
     neu_nach_pruefung: int = 0       # nach fehlgeschlagener Pruefung neu zu kopieren
+    # Verschieben-Modus (SPEC Abschnitt 4 Phase 3, Phase 5):
+    verschieben: bool = False
+    verschoben: int = 0              # durch Umbenennen ins Ziel gebracht
+    quelle_geloescht: int = 0        # kopiert, beide Seiten frisch gelesen, Quelle geloescht
+    quelle_seit_kopieren: int = 0    # Quelle hat sich nach dem Kopieren geaendert: nicht geloescht
+    loeschung_verweigert: int = 0
 
 
 @dataclass
@@ -281,13 +287,17 @@ class _Lauf:
     """Zustand eines Kopierlaufs; nur der Hauptstrang fasst ihn an."""
 
     def __init__(self, ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole,
-                 kopier_worker: int, hash_worker: int, direkt: bool) -> None:
+                 kopier_worker: int, hash_worker: int, direkt: bool, verschieben: bool = False) -> None:
         self.ziel = ziel
         self.konf = konf
         self.dbank = dbank
         self.lauf = lauf
         self.konsole = konsole
         self.direkt = direkt                   # Rueckfall ohne .part
+        self.verschieben = verschieben
+        self.byte_vergleich = bool(konf.wert("sicherheit.byte_vergleich_vor_loeschen"))
+        self.umbenennen_je_wurzel: dict[str, bool] = {}
+        self.nachpruefung: deque = deque()     # (Auftrag, Endname, Future) im Verschieben-Modus
         self.stop = threading.Event()
         self.kopierer = ThreadPoolExecutor(max_workers=kopier_worker, thread_name_prefix="kopie")
         self.hasher = ThreadPoolExecutor(max_workers=hash_worker, thread_name_prefix="hash")
@@ -394,6 +404,12 @@ class _Lauf:
             if db.pfad_text(ziel) in self.in_arbeit or db.pfad_text(part_pfad(ziel)) in self.in_arbeit:
                 return False
             auftraege.append(_Auftrag(z, Path(db.text_pfad(z["quellpfad"])), ziel, part_pfad(ziel), _stamm(z)))
+        if self.verschieben and self.umbenennen_moeglich(zeilen[0]["quellwurzel"]):
+            # Gleiches Laufwerk, nachweislich: umbenennen statt kopieren.
+            # Was sich nicht umbenennen laesst, geht den Kopierweg.
+            auftraege = self._gruppe_umbenennen(auftraege)
+            if not auftraege:
+                return True
         if self.direkt and not self._exklusiv_anlegen(auftraege):
             return True   # als Fehler verbucht, nichts mehr zu tun
         for a in auftraege:
@@ -412,6 +428,160 @@ class _Lauf:
             )
         self.offen.append(auftraege)
         return True
+
+    def umbenennen_moeglich(self, quellwurzel: str) -> bool:
+        """Verschieben durch Umbenennen nur, wenn Quelle und Ziel NACHWEISLICH
+        auf demselben Laufwerk liegen (nie bei Netzpfaden, SPEC §4 Phase 3)
+        und das Ziel nicht ueberschreibendes Umbenennen kann (SPEC §5)."""
+        if quellwurzel not in self.umbenennen_je_wurzel:
+            self.umbenennen_je_wurzel[quellwurzel] = (
+                not self.direkt and pfade.gleiches_laufwerk(Path(db.text_pfad(quellwurzel)), self.ziel)
+            )
+        return self.umbenennen_je_wurzel[quellwurzel]
+
+    def _gruppe_umbenennen(self, auftraege: list[_Auftrag]) -> list[_Auftrag]:
+        """Verschieben auf demselben Laufwerk: nicht ueberschreibend umbenennen.
+        Liefert die Auftraege, die doch kopiert werden muessen (KeinNoReplace)."""
+        e = self.ergebnis
+        rest: list[_Auftrag] = []
+        for a in auftraege:
+            st = _stat(a.quelle)
+            if st is None:
+                self._quelle_fehlt(a)
+                continue
+            if st.st_size != int(a.zeile["groesse"]) or not db._gleiche_zeit(st.st_mtime, a.zeile["mtime"]):
+                self._quelle_veraendert(a, st.st_size, st.st_mtime_ns)
+                continue
+            if _stat(a.ziel) is not None:
+                # Zielname belegt: gleicher Inhalt? Dafuer muss die Quelle einmal gelesen werden.
+                try:
+                    hq = hashes.blake3_datei(_L(a.quelle))
+                    hz = self.hash_von_vorhandener(a.ziel).result()
+                except OSError as fehler:
+                    self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
+                    continue
+                self.index_nachtragen(a.ziel, hz)
+                if hq == hz:
+                    self.dbank.duplikat_setzen(a.zeile["quellpfad"], a.ziel, hq, self.lauf)
+                    self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(a.ziel))
+                    e.duplikate += 1
+                    e.bearbeitet += 1
+                    if self.anzeige:
+                        self.anzeige.weiter(1, 0)
+                    continue
+            rest.append(a)
+        if not rest:
+            return []
+        anhang = self._freier_anhang(rest, ab=0)
+        kopieren_stattdessen: list[_Auftrag] = []
+        for a in rest:
+            k = anhang
+            while True:
+                endname = mit_anhang(a.ziel, k, a.stamm)
+                # Anspruch VOR dem Umbenennen festschreiben (SPEC §5).
+                self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, endname, self.lauf)
+                self.dbank.stapel_schreiben()
+                try:
+                    _L(endname.parent).mkdir(parents=True, exist_ok=True)
+                    pfade.umbenennen_ohne_ueberschreiben(a.quelle, endname)
+                except FileExistsError:
+                    k += 1
+                    continue
+                except pfade.KeinNoReplace:
+                    # Dieses Verzeichnis kann es doch nicht: Kopierweg fuer diese Datei.
+                    self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
+                    kopieren_stattdessen.append(a)
+                    break
+                except OSError as fehler:
+                    self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
+                    self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
+                    e.fehler += 1
+                    e.bearbeitet += 1
+                    if self.anzeige:
+                        self.anzeige.weiter(1, 0)
+                    break
+                # Danach: Existenz und Groesse pruefen (SPEC §4 Phase 3).
+                st2 = _stat(endname)
+                groesse = int(a.zeile["groesse"])
+                self.dbank.verschoben_setzen(a.zeile["quellpfad"], endname, self.lauf)
+                if st2 is None or st2.st_size != groesse:
+                    self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", meldungen.GRUND_VERSCHIEBEN_GROESSE)
+                    e.fehler += 1
+                else:
+                    e.verschoben += 1
+                    e.bytes_kopiert += groesse
+                    if k > 0:
+                        e.namenskonflikte += 1
+                        self.dbank.ereignis(self.lauf, ART_NAMENSKONFLIKT, a.quelle, 1, db.pfad_text(endname))
+                e.bearbeitet += 1
+                if self.anzeige:
+                    self.anzeige.weiter(1, groesse)
+                break
+        return kopieren_stattdessen
+
+    def _quelle_fehlt(self, a: _Auftrag) -> None:
+        e = self.ergebnis
+        e.fehler += 1
+        e.bearbeitet += 1
+        self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_QUELLE_FEHLT)
+        if self.anzeige:
+            self.anzeige.weiter(1, 0)
+
+    def _quelle_veraendert(self, a: _Auftrag, groesse: int, mtime_ns: int) -> None:
+        e = self.ergebnis
+        e.quelle_veraendert += 1
+        e.bearbeitet += 1
+        self.dbank.zurueck_auf_gefunden(a.zeile["quellpfad"], groesse, mtime_ns / 1e9)
+        self.dbank.ereignis(self.lauf, ART_QUELLE_VERAENDERT, a.quelle, 1, TEXT_QUELLE_VERAENDERT)
+        if self.anzeige:
+            self.anzeige.weiter(1, 0)
+
+    # -- Verschieben ueber Kopieren: Frischlesung, dann Quelle entfernen -------
+
+    def nachpruefung_einreihen(self, a: _Auftrag, endname: Path) -> None:
+        zukunft = self.hasher.submit(loeschen.frisch_lesen, a.quelle, endname, self.byte_vergleich, self.stop)
+        self.nachpruefung.append((a, endname, zukunft))
+
+    def nachpruefungen_verbuchen(self, alle: bool) -> None:
+        while self.nachpruefung:
+            a, endname, zukunft = self.nachpruefung[0]
+            if not zukunft.done():
+                if not alle:
+                    return
+                wait([zukunft], timeout=1.0)
+                continue
+            self.nachpruefung.popleft()
+            self._quelle_freigeben(a, endname, zukunft.result())
+
+    def _quelle_freigeben(self, a: _Auftrag, endname: Path, L: loeschen.Lesung) -> None:
+        """Nach dem Kopieren: Ziel UND Quelle wurden frisch gelesen. Stimmen
+        beide mit dem beim Kopieren berechneten Hash ueberein, wird die Quelle
+        ueber die einzige Loeschstelle entfernt (SPEC §4 Phase 3, §5)."""
+        e = self.ergebnis
+        quellpfad = a.zeile["quellpfad"]
+        h = a.ergebnis.hash
+        if L.art == "abgebrochen":
+            return
+        if L.art == "ok" and L.ziel_hash == h and L.quell_hash != h:
+            self.dbank.zurueck_auf_analysiert_ohne_hash(quellpfad)
+            self.dbank.ereignis(self.lauf, loeschen.ART_QUELLE_SEIT_KOPIEREN_GEAENDERT, quellpfad, 1,
+                                meldungen.GRUND_QUELLE_ABWEICHUNG)
+            e.quelle_seit_kopieren += 1
+            return
+        if L.art == "ok" and L.ziel_hash == h and L.quell_hash == h:
+            self.dbank.geprueft_setzen(quellpfad)
+            try:
+                loeschen.quelldatei_entfernen(self.dbank, self.lauf, quellpfad, L, loeschen.WEISE_ENDGUELTIG, self.byte_vergleich)
+            except loeschen.Verweigert as v:
+                self.dbank.ereignis(self.lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, str(v))
+                e.loeschung_verweigert += 1
+                return
+            e.quelle_geloescht += 1
+            return
+        grund = L.grund or (meldungen.grund_lesung(L.art) if L.art != "ok" else meldungen.GRUND_ZIEL_ABWEICHUNG)
+        self.dbank.status_setzen(quellpfad, "fehler", grund)
+        self.dbank.ereignis(self.lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
+        e.loeschung_verweigert += 1
 
     def _exklusiv_anlegen(self, auftraege: list[_Auftrag]) -> bool:
         """Rueckfall ohne .part: Dateien unter dem endgueltigen Namen exklusiv
@@ -637,6 +807,8 @@ class _Lauf:
         if anhang > 0:
             e.namenskonflikte += 1
             self.dbank.ereignis(self.lauf, ART_NAMENSKONFLIKT, a.quelle, 1, db.pfad_text(endname))
+        if self.verschieben:
+            self.nachpruefung_einreihen(a, endname)
 
     def _part_ohne_umbenennen(self, a: _Auftrag, endname: Path) -> str:
         """Rueckfall mitten im Lauf: .part -> Zielname als exklusive Kopie.
@@ -685,6 +857,7 @@ class _Lauf:
                         _entfernen_eigene(a.schreibziel)
                 self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.offen.clear()
+        self.nachpruefung.clear()   # Zeilen bleiben "kopiert"; aufraeumen holt sie nach
         self.hasher.shutdown(wait=True, cancel_futures=True)
 
     def schliessen(self) -> None:
@@ -764,13 +937,14 @@ def planen(ziel: Path, dbank: db.Datenbank) -> Plan:
 
 def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
                kopier_worker: int | None = None, hash_worker: int | None = None,
-               profil: str | None = None) -> Ergebnis:
+               profil: str | None = None, verschieben: bool = False) -> Ergebnis:
     begonnen = time.monotonic()
     kw, hw, prof = worker_zahlen(konf, profil, kopier_worker, hash_worker)
     direkt = not pfade.kann_ohne_ueberschreiben(ziel)
-    lauf_zustand = _Lauf(ziel, konf, dbank, lauf, konsole, kw, hw, direkt)
+    lauf_zustand = _Lauf(ziel, konf, dbank, lauf, konsole, kw, hw, direkt, verschieben)
     e = lauf_zustand.ergebnis
     e.kopier_worker, e.hash_worker, e.profil = kw, hw, prof
+    e.verschieben = verschieben
     if direkt:
         e.exfat_rueckfall = True
         dbank.ereignis(lauf, ART_EXFAT_RUECKFALL, ziel, 1, meldungen.EREIGNIS_RUECKFALL_ZIEL)
@@ -793,6 +967,11 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
             raise FotosortFehler(meldungen.zu_wenig_platz(ziel, e.geplant_bytes, frei))
         if konsole is not None:
             konsole.print(meldungen.kopieren_beginnt(e.geplant, e.geplant_bytes, kw, hw, prof, direkt))
+            if verschieben:
+                for quellen in je_laufwerk.values():
+                    for q in quellen:
+                        konsole.print(f"  {q.wurzel}: " + meldungen.verschieben_hinweis(
+                            lauf_zustand.umbenennen_moeglich(q.wurzel), direkt))
         lauf_zustand.anzeige = fortschritt.Fortschritt(konsole, e.geplant, e.geplant_bytes, meldungen.kopieren_laeuft)
 
         # 3. Kopieren: Laufwerke abwechselnd, je Laufwerk in Ordnerreihenfolge.
@@ -823,8 +1002,10 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
             if not L.gruppe_einreichen(*gruppe):
                 zurueckgestellt.append(gruppe)
         L.wartend.extend(zurueckgestellt)
+        L.nachpruefungen_verbuchen(alle=False)
         if not L.offen:
             if not L.wartend:
+                L.nachpruefungen_verbuchen(alle=True)
                 break
             # Nichts mehr in Arbeit, also kann auch kein Name mehr "in Arbeit"
             # sein: Merkliste leeren und die Wartenden einreihen.

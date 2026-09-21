@@ -338,13 +338,6 @@ def test_dry_run_fasst_nichts_an(baum, quelle, ziel, nachschauen, capsys):
         assert d.verbindung.execute("SELECT COUNT(*) FROM dateien WHERE status = 'analysiert'").fetchone()[0] > 0
 
 
-def test_verschieben_kommt_erst_in_phase_5(baum, quelle, ziel, capsys):
-    _vorbereiten(ziel, quelle)
-    assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.SPAETERE_PHASE
-    assert "Phase 5" in capsys.readouterr().out
-    assert _zieldateien(ziel) == {}
-
-
 def test_zu_wenig_platz_bricht_vorher_ab(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
     _vorbereiten(ziel, quelle)
     monkeypatch.setattr(kopieren.pfade, "freier_platz", lambda pfad: 10)

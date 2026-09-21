@@ -1018,6 +1018,81 @@ class Datenbank:
             (praefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
         ).fetchall()
 
+    # -- Aufraeumen und Verschieben (SPEC Abschnitt 4 Phase 5, Abschnitt 5) ---
+
+    ZU_LOESCHEN_SQL = "status IN ('geprueft', 'duplikat_bestaetigt') AND zielpfad != ''"
+
+    def zu_loeschen_summe(self, quellwurzeln=None) -> dict[str, tuple[int, int]]:
+        """Je Quellwurzel (Anzahl, Bytes) der loeschberechtigten Zeilen."""
+        self.stapel_schreiben()
+        sql = f"SELECT quellwurzel, COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b FROM dateien WHERE {self.ZU_LOESCHEN_SQL}"
+        werte: list = []
+        if quellwurzeln is not None:
+            wurzeln = [pfad_text(w) for w in quellwurzeln]
+            if not wurzeln:
+                return {}
+            sql += " AND quellwurzel IN (" + ",".join("?" * len(wurzeln)) + ")"
+            werte = wurzeln
+        return {z["quellwurzel"]: (int(z["n"]), int(z["b"])) for z in self.verbindung.execute(sql + " GROUP BY quellwurzel", werte)}
+
+    def zu_loeschen(self, quellwurzel, ab: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            f"SELECT * FROM dateien WHERE quellwurzel = ? AND {self.ZU_LOESCHEN_SQL} AND quellpfad > ?"
+            " ORDER BY quellpfad LIMIT ?",
+            (pfad_text(quellwurzel), ab, int(grenze)),
+        ).fetchall()
+
+    def bestaetigt_setzen(self, quellpfad, lauf: int, papierkorb_pfad=None) -> None:
+        """Quelle und Ziel wurden in diesem Lauf frisch gelesen und stimmen.
+        Wird VOR dem Entfernen festgeschrieben (SPEC Abschnitt 5, 6)."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET bestaetigt_in_lauf = ?, schreibpfad = ? WHERE quellpfad = ?",
+            (lauf, pfad_text(papierkorb_pfad) if papierkorb_pfad else "", pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def quelle_geloescht_setzen(self, quellpfad, lauf: int, neuer_pfad=None) -> None:
+        """Nach dem Entfernen. schreibpfad: wo die Datei im Papierkorb liegt, sonst leer."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'quelle_geloescht', schreibpfad = ?, fehlergrund = ''"
+            " WHERE quellpfad = ?",
+            (pfad_text(neuer_pfad) if neuer_pfad else "", pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def zurueck_auf_analysiert_ohne_hash(self, quellpfad) -> None:
+        """Quelle seit dem Kopieren geaendert: neu kopieren (SPEC Abschnitt 5).
+        Hash und Lauf-Kennung werden geleert, der Zielpfad bleibt."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'analysiert', hash = '', bestaetigt_in_lauf = NULL,"
+            " schreibpfad = '', kopiert_in_lauf = NULL, fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(quellpfad),),
+        )
+        self._vielleicht_schreiben()
+
+    def verschoben_setzen(self, quellpfad, zielpfad, lauf: int) -> None:
+        """Durch Umbenennen ins Ziel gebracht; Hash traegt die Pruef-Phase nach."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'verschoben', zielpfad = ?, schreibpfad = '', hash = '',"
+            " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
+            (pfad_text(zielpfad), lauf, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def echter_typ_bekannt(self, quellpfad) -> bool:
+        """Steht die Datei mit echtem Dateityp in der Datenbank? (Reste-Regel, SPEC §5)"""
+        self.stapel_schreiben()
+        z = self.verbindung.execute(
+            "SELECT 1 FROM dateien WHERE quellpfad = ? AND dateityp IN ('foto', 'raw', 'video', 'sidecar')",
+            (pfad_text(quellpfad),),
+        ).fetchone()
+        return z is not None
+
     # -- Bericht (SPEC Abschnitt 10) ----------------------------------------
 
     def bericht_zahlen(self) -> dict[str, dict[str, int]]:

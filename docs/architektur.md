@@ -42,6 +42,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ hashes.py              BLAKE3-Prüfsummen, Byte-Vergleich
 │  ├─ kopieren.py            Phase 3: übertragen
 │  ├─ pruefen.py             Phase 4: nachrechnen
+│  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
+│  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
 │  ├─ aufraeumen.py          Phase 5+6: löschen             ← nur nach Statusprüfung
 │  └─ bericht.py             Text- und CSV-Bericht

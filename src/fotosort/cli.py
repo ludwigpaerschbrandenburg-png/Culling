@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, bericht, kopieren, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -453,10 +453,8 @@ def befehl_analyse(args, konsole) -> int:
 
 
 def befehl_kopieren(args, konsole) -> int:
-    """Phase 3: Uebertragen im Kopier-Modus (SPEC Abschnitt 4 Phase 3)."""
-    if getattr(args, "verschieben", False):
-        konsole.print(meldungen.verschieben_spaeter())
-        return SPAETERE_PHASE
+    """Phase 3: Uebertragen (SPEC Abschnitt 4 Phase 3); --verschieben nach Phase 5."""
+    verschieben = bool(getattr(args, "verschieben", False))
     probelauf = bool(getattr(args, "dry_run", False))
     archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=not probelauf)
     datenbank = archiv.datenbank
@@ -471,6 +469,7 @@ def befehl_kopieren(args, konsole) -> int:
             ergebnis = kopieren.ausfuehren(
                 archiv.ziel, archiv.konf, datenbank, lauf, konsole,
                 kopier_worker=args.kopier_worker, hash_worker=args.hash_worker, profil=args.profil,
+                verschieben=verschieben,
             )
         except FotosortFehler:
             _lauf_sauber_abbrechen(datenbank, lauf)
@@ -482,6 +481,8 @@ def befehl_kopieren(args, konsole) -> int:
         else:
             konsole.print("")
             konsole.print(meldungen.kopieren_ergebnis(ergebnis))
+            if verschieben:
+                konsole.print(meldungen.verschieben_ergebnis(ergebnis))
         konsole.print("")
         konsole.print(meldungen.kopieren_zusammenfassung(datenbank.kopier_zusammenfassung()))
         if ergebnis.abgebrochen:
@@ -528,6 +529,79 @@ def befehl_pruefen(args, konsole) -> int:
             "dateien": ergebnis.bearbeitet, "bytes": ergebnis.bytes_gelesen, "sekunden": ergebnis.sekunden,
         })
         return FEHLER if ergebnis.fehler else OK
+    finally:
+        datenbank.schliessen()
+
+
+def _bestaetigung_lesen(konsole, frage: str, wort: str) -> bool:
+    """Ein Wort abfragen - nicht nur Enter. Ohne Eingabemoeglichkeit: nein."""
+    if not sys.stdin or not sys.stdin.isatty() and os.environ.get("FOTOSORT_EINGABE_ERZWINGEN", "") != "1":
+        # In einer Pipe oder ohne Terminal gibt es keine bewusste Bestaetigung.
+        konsole.print(frage)
+        konsole.print(meldungen.aufraeumen_keine_eingabe())
+        return False
+    konsole.print(frage, end="")
+    try:
+        antwort = input()
+    except EOFError:
+        antwort = ""
+    return antwort.strip().lower() == wort
+
+
+def befehl_aufraeumen(args, konsole) -> int:
+    """Phase 5: Quelle aufraeumen, leere Ordner (SPEC Abschnitt 4 Phase 5 und 6)."""
+    probelauf = bool(args.dry_run)
+    weise = loeschen.WEISE_ENDGUELTIG if args.endgueltig else loeschen.WEISE_PAPIERKORB
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=not probelauf)
+    datenbank = archiv.datenbank
+    try:
+        kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
+        plan = aufraeumen.planen(datenbank, args.quelle)
+        if plan.unbekannt:
+            for q in plan.unbekannt:
+                konsole.print(meldungen.quelle_unbekannt(q))
+            return FEHLENDE_ANGABE
+        for q in plan.nicht_erreichbar:
+            konsole.print(meldungen.aufraeumen_quelle_nicht_erreichbar(q))
+        konsole.print(meldungen.aufraeumen_plan(plan.je_quelle, weise, plan.nicht_erreichbar))
+        if not any(n for n, _ in plan.je_quelle.values()) and not args.leere_ordner:
+            konsole.print(meldungen.aufraeumen_nichts_zu_tun())
+            return OK if not plan.nicht_erreichbar else FEHLER
+        if probelauf:
+            ergebnis = aufraeumen.ausfuehren(
+                archiv.ziel, archiv.konf, datenbank, 0, konsole, quellen=args.quelle, weise=weise,
+                dry_run=True, leere_ordner=args.leere_ordner,
+            )
+            konsole.print(meldungen.aufraeumen_dry_run_schluss())
+            return OK
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+
+        def bestaetigen(wurzel, n, b, w):
+            return _bestaetigung_lesen(konsole, meldungen.aufraeumen_frage(wurzel, n, b, w), meldungen.BESTAETIGUNGSWORT[w])
+
+        def bestaetigen_ordner(wurzel, n):
+            return _bestaetigung_lesen(konsole, meldungen.aufraeumen_ordner_frage(wurzel, n), meldungen.BESTAETIGUNGSWORT["ordner"])
+
+        try:
+            ergebnis = aufraeumen.ausfuehren(
+                archiv.ziel, archiv.konf, datenbank, lauf, konsole, quellen=args.quelle, weise=weise,
+                leere_ordner=args.leere_ordner, bestaetigen=bestaetigen, bestaetigen_ordner=bestaetigen_ordner,
+                hash_worker=args.hash_worker, profil=args.profil,
+            )
+        except FotosortFehler:
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            raise
+        konsole.print("")
+        konsole.print(meldungen.aufraeumen_ergebnis(ergebnis))
+        if ergebnis.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.aufraeumen_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return ABGEBROCHEN
+        _abschliessen(archiv, konsole, lauf, {
+            "dateien": ergebnis.bearbeitet, "bytes": ergebnis.bytes_gelesen, "sekunden": ergebnis.sekunden,
+        })
+        return FEHLER if (ergebnis.verweigert or ergebnis.quelle_veraendert or ergebnis.nicht_erreichbar) else OK
     finally:
         datenbank.schliessen()
 
@@ -601,7 +675,8 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("kopieren", help="Dateien ins Ziel uebertragen")
-    p.add_argument("--verschieben", action="store_true", help="statt kopieren verschieben (erst Phase 5)")
+    p.add_argument("--verschieben", action="store_true",
+                   help="verschieben: kopieren, beide Seiten frisch lesen, dann Quelle loeschen; gleiches Laufwerk: umbenennen")
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
     p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
     p.add_argument("--kopier-worker", type=int, metavar="N", help="gleichzeitige Kopiervorgaenge")
@@ -613,9 +688,14 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
-    p = unterbefehle.add_parser("aufraeumen", help="gepruefte Quelldateien entfernen")
+    p = unterbefehle.add_parser("aufraeumen", help="gepruefte Quelldateien entfernen (nur nach Bestaetigung)")
+    p.add_argument("--quelle", metavar="PFAD", action="append", help="nur diese Quelle; mehrfach angebbar")
     p.add_argument("--leere-ordner", action="store_true", help="leere Ordner entfernen")
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
+    p.add_argument("--endgueltig", action="store_true",
+                   help="endgueltig loeschen statt in den Ordner _geloescht_<Datum> zu verschieben")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("status", help="Zaehler je Status und aktuelle Phase")
@@ -687,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
     # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
     # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht"):
+    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -711,6 +791,8 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_pruefen(args, konsole)
         if args.befehl == "bericht":
             return befehl_bericht(args, konsole)
+        if args.befehl == "aufraeumen":
+            return befehl_aufraeumen(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

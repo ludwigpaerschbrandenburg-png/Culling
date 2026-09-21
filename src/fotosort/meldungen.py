@@ -767,13 +767,6 @@ EREIGNIS_RUECKFALL_ZIEL = "Ziel kann kein nicht ueberschreibendes Umbenennen: oh
 EREIGNIS_QUELLE_UEBERSPRUNGEN = "nicht erreichbar, uebersprungen"
 
 
-def verschieben_spaeter() -> str:
-    return (
-        "Verschieben (--verschieben) gibt es noch nicht: Es loescht in der Quelle und"
-        " kommt erst in Phase 5. Bitte ohne --verschieben aufrufen - dann wird nur kopiert."
-    )
-
-
 def profil_ungueltig(profil, erlaubt: list) -> str:
     return (
         f"Unbekanntes Profil {profil!r}. Erlaubt sind: {', '.join(erlaubt)}"
@@ -998,3 +991,187 @@ def bericht_geschrieben(txt, csv_dateien, csv_ereignisse) -> str:
         f"  {csv_dateien}\n"
         f"  {csv_ereignisse}"
     )
+
+
+# --------------------------------------------------------- Loeschen -----
+# Gruende, die in die Datenbank und den Bericht gelangen (Phase 5).
+
+GRUND_ZEILE_FEHLT = "Loeschung verweigert: keine Zeile in der Datenbank"
+GRUND_KEIN_ECHTER_TYP = "Loeschung verweigert: kein echter Dateityp"
+GRUND_KEIN_HASH = "Loeschung verweigert: kein gespeicherter Quell-Hash"
+GRUND_QUELLE_ABWEICHUNG = "Quelle seit dem Kopieren geaendert (Hash der Quelle weicht ab) - nicht geloescht, wird neu kopiert"
+GRUND_ZIEL_ABWEICHUNG = "Loeschung verweigert: Zieldatei weicht vom gespeicherten Hash ab"
+GRUND_BYTEVERGLEICH = "Loeschung verweigert: Byte-Vergleich von Quelle und Ziel ungleich"
+GRUND_KEINE_FRISCHLESUNG = "Loeschung verweigert: keine Frischlesung im laufenden Lauf"
+GRUND_QUELLE_NICHT_LESBAR = "Loeschung verweigert: Quelldatei nicht lesbar"
+GRUND_ZIEL_NICHT_LESBAR = "Loeschung verweigert: Zieldatei nicht lesbar"
+GRUND_PAPIERKORB_FEHLT = "Loeschung verweigert: kein Ordner _geloescht_ angegeben"
+GRUND_PAPIERKORB_KOPIE = "Loeschung verweigert: Kopie in den Ordner _geloescht_ stimmt nicht ueberein"
+GRUND_QUELLE_FEHLT_LOESCHEN = "Loeschung verweigert: Quelldatei nicht mehr vorhanden"
+GRUND_ZIEL_FEHLT_LOESCHEN = "Loeschung verweigert: Zieldatei nicht mehr vorhanden"
+GRUND_VERSCHIEBEN_GROESSE = "Verschieben: Zieldatei nach dem Umbenennen nicht vorhanden oder Groesse weicht ab"
+EREIGNIS_GELOESCHT = "Quelldatei endgueltig geloescht"
+EREIGNIS_NACHGETRAGEN = "Loeschung aus abgebrochenem Lauf nachgetragen (Quelle fehlt, Ziel stimmt, Frischlesung war festgeschrieben)"
+EREIGNIS_REST_NICHT_ENTFERNT = "Name in reste_dateien, steht aber mit echtem Dateityp in der Datenbank - nicht entfernt"
+EREIGNIS_REST_ENTFERNT = "Reste-Datei entfernt"
+EREIGNIS_LEERER_ORDNER = "leerer Ordner entfernt"
+
+
+def grund_status_nicht_berechtigt(status: str) -> str:
+    return f"Loeschung verweigert: Status {status!r} berechtigt nicht zum Loeschen"
+
+
+def grund_lesung(art: str) -> str:
+    return {
+        "quelle_fehlt": GRUND_QUELLE_FEHLT_LOESCHEN,
+        "ziel_fehlt": GRUND_ZIEL_FEHLT_LOESCHEN,
+        "abgebrochen": "Loeschung verweigert: Lesen abgebrochen",
+    }.get(art, f"Loeschung verweigert: {art}")
+
+
+def grund_groesse_abweichung(erwartet: int, quelle: int, ziel: int) -> str:
+    return (
+        f"Loeschung verweigert: Groesse weicht ab (gespeichert {anzahl(erwartet)} Byte,"
+        f" Quelle {anzahl(quelle)}, Ziel {anzahl(ziel)})"
+    )
+
+
+def grund_weise_unbekannt(weise) -> str:
+    return f"Loeschung verweigert: unbekannte Loeschweise {weise!r}"
+
+
+# --------------------------------------------------------- Aufraeumen ---
+
+BESTAETIGUNGSWORT = {"endgueltig": "loeschen", "papierkorb": "verschieben", "ordner": "entfernen"}
+
+
+def weise_text(weise: str) -> str:
+    if weise == "papierkorb":
+        return "in den Ordner _geloescht_<Datum> innerhalb der Quelle verschieben (Standard; den Ordner loeschen Sie spaeter selbst)"
+    return "ENDGUELTIG loeschen (--endgueltig)"
+
+
+def aufraeumen_plan(je_quelle: dict, weise: str, nicht_erreichbar: list) -> str:
+    zeilen = ["Aufraeumen der Quellen: loeschberechtigt sind nur Dateien mit Status geprueft oder duplikat_bestaetigt."]
+    zeilen.append(f"Loeschweise: {weise_text(weise)}")
+    gesamt_n = gesamt_b = 0
+    for wurzel in sorted(je_quelle):
+        n, b = je_quelle[wurzel]
+        gesamt_n += n
+        gesamt_b += b
+        zeilen.append(f"  {wurzel}: {anzahl(n)} Dateien, {groesse(b)}")
+    zeilen.append(f"  gesamt: {anzahl(gesamt_n)} Dateien, {groesse(gesamt_b)}")
+    if nicht_erreichbar:
+        zeilen.append("Nicht erreichbare Quellen (dort passiert nichts):")
+        zeilen.extend(f"  {q}" for q in nicht_erreichbar)
+    return "\n".join(zeilen)
+
+
+def aufraeumen_frage(wurzel, n: int, bytes_: int, weise: str) -> str:
+    wort = BESTAETIGUNGSWORT[weise]
+    return (
+        f"Quelle {wurzel}: {anzahl(n)} Dateien ({groesse(bytes_)}) {weise_text(weise)}.\n"
+        f"Vor jeder Loeschung werden Quelle und Ziel vollstaendig neu gelesen und verglichen.\n"
+        f"Zum Bestaetigen das Wort '{wort}' eingeben, alles andere ueberspringt diese Quelle: "
+    )
+
+
+def aufraeumen_ordner_frage(wurzel, n: int) -> str:
+    return (
+        f"Quelle {wurzel}: {anzahl(n)} leere Ordner entfernen (Reste-Dateien laut Konfiguration zaehlen als leer;"
+        f" der Wurzelordner bleibt).\nZum Bestaetigen das Wort '{BESTAETIGUNGSWORT['ordner']}' eingeben: "
+    )
+
+
+def aufraeumen_uebersprungen(wurzel) -> str:
+    return f"Quelle {wurzel}: uebersprungen (nicht bestaetigt)."
+
+
+def aufraeumen_nichts_zu_tun() -> str:
+    return "Nichts aufzuraeumen: Es gibt keine Dateien mit Status geprueft oder duplikat_bestaetigt."
+
+
+def aufraeumen_dry_run_liste(wurzel, pfade_liste: list, weitere: int) -> str:
+    zeilen = [f"Quelle {wurzel}: diese Dateien wuerden entfernt:"]
+    zeilen.extend(f"  {p}" for p in pfade_liste)
+    if weitere:
+        zeilen.append(f"  ... und {anzahl(weitere)} weitere (vollstaendig im Bericht)")
+    return "\n".join(zeilen)
+
+
+def aufraeumen_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
+    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    return (
+        f"Aufraeumen: {anzahl(dateien)} von {anzahl(gesamt)} Dateien geprueft,"
+        f" {groesse(bytes_)} von {groesse(gesamt_bytes)} gelesen, {mb} MB/s"
+    )
+
+
+def aufraeumen_ergebnis(e) -> str:
+    zeilen = [
+        "Ergebnis des Aufraeumens (dieser Lauf)",
+        f"  angestanden:                       {anzahl(e.geplant)}",
+        f"  endgueltig geloescht:              {anzahl(e.geloescht)}",
+        f"  in _geloescht_-Ordner verschoben:  {anzahl(e.in_papierkorb)}",
+        f"  aus abgebrochenem Lauf nachgetragen: {anzahl(e.nachgetragen)}",
+        f"  QUELLE SEIT DEM KOPIEREN GEAENDERT - nicht geloescht, neu zu kopieren: {anzahl(e.quelle_veraendert)}",
+        f"  Loeschung verweigert (Ziel fehlt oder weicht ab, Lesefehler): {anzahl(e.verweigert)}",
+        f"  freigegebener Platz:               {groesse(e.bytes_frei)}",
+    ]
+    if e.leere_ordner_entfernt or e.reste_entfernt or e.reste_verweigert:
+        zeilen.append(f"  leere Ordner entfernt:             {anzahl(e.leere_ordner_entfernt)}")
+        zeilen.append(f"  Reste-Dateien entfernt:            {anzahl(e.reste_entfernt)}")
+        zeilen.append(f"  Reste mit echtem Dateityp, NICHT entfernt: {anzahl(e.reste_verweigert)}")
+    zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
+    if e.sekunden > 0:
+        zeilen.append(f"  Durchsatz:       {durchsatz(e.bearbeitet, e.bytes_gelesen, e.sekunden)}")
+    if e.quelle_veraendert:
+        zeilen.append("  Geaenderte Quellen stehen im Bericht unter 'Quelle seit dem Kopieren geaendert' und werden beim naechsten 'kopieren' neu kopiert.")
+    return "\n".join(zeilen)
+
+
+def aufraeumen_abgebrochen() -> str:
+    return "Abgebrochen. Was geloescht wurde, steht in der Datenbank und im Bericht; nichts ist halb."
+
+
+def aufraeumen_quelle_nicht_erreichbar(wurzel) -> str:
+    return f"Quelle {wurzel} ist nicht erreichbar - dort passiert nichts."
+
+
+def aufraeumen_keine_eingabe() -> str:
+    return "Keine Bestaetigung moeglich (keine Eingabe verfuegbar). Es wurde nichts geloescht."
+
+
+def aufraeumen_ordner_dry_run(wurzel, ordner: list) -> str:
+    zeilen = [f"Quelle {wurzel}: diese leeren Ordner wuerden entfernt ({anzahl(len(ordner))}):"]
+    zeilen.extend(f"  {o}" for o in ordner)
+    return "\n".join(zeilen)
+
+
+# ------------------------------------------------------- Verschieben ----
+
+
+def verschieben_hinweis(umbenennen: bool, direkt: bool) -> str:
+    if umbenennen:
+        return "Verschieben: Quelle und Ziel liegen auf demselben Laufwerk - Dateien werden umbenannt, nicht kopiert."
+    if direkt:
+        return "Verschieben: Ziel kann kein nicht ueberschreibendes Umbenennen - kopieren, pruefen, dann Quelle loeschen."
+    return "Verschieben: kopieren, Ziel und Quelle frisch lesen, dann Quelle loeschen."
+
+
+def verschieben_ergebnis(e) -> str:
+    zeilen = [
+        f"  verschoben durch Umbenennen:  {anzahl(e.verschoben)}",
+        f"  Quelle nach Pruefung geloescht: {anzahl(e.quelle_geloescht)}",
+        f"  Quelle seit dem Kopieren geaendert (nicht geloescht): {anzahl(e.quelle_seit_kopieren)}",
+        f"  Loeschung verweigert:         {anzahl(e.loeschung_verweigert)}",
+    ]
+    return "\n".join(zeilen)
+
+
+def quelle_unbekannt(pfad) -> str:
+    return f"Quelle {pfad} ist in diesem Archiv nicht bekannt (fotosort status zeigt die bekannten Quellen)."
+
+
+def aufraeumen_dry_run_schluss() -> str:
+    return "Probelauf (--dry-run): Es wurde nichts geloescht und kein Lauf angelegt."
