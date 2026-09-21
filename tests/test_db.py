@@ -73,6 +73,7 @@ def test_dateien_hat_alle_spalten_aus_der_spec(datenbank):
         "fehlergrund",
         "bestaetigt_in_lauf",
         "kopiert_in_lauf",
+        "schreibpfad",
         "gefunden_in_lauf",
         "zuletzt_gesehen_in_lauf",
     }

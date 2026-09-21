@@ -753,6 +753,19 @@ def zeitzone_ungueltig(name) -> str:
 
 # --------------------------------------------------------- Kopieren -----
 
+# Texte, die beim Kopieren in die Datenbank gelangen (fehlergrund, Ereignistext).
+GRUND_QUELLE_FEHLT = "Quelldatei nicht gefunden"
+GRUND_QUELLE_WAEHREND_KOPIE = "Quelle hat sich waehrend des Kopierens veraendert"
+GRUND_KOPIE = "Kopieren fehlgeschlagen"
+GRUND_PART_BELEGT = "Zwischendatei (.part) ist von einem anderen Vorgang belegt"
+GRUND_PART_INHALT = "Inhalt der .part-Datei stimmt nicht mehr"
+EREIGNIS_PART_AUFGERAEUMT = "liegengebliebene .part-Datei entfernt"
+EREIGNIS_ANGEFANGENE_ENTFERNT = "angefangene Zieldatei aus abgebrochenem Lauf entfernt"
+EREIGNIS_NACHTRAEGLICH = "Kopie aus abgebrochenem Lauf war vollstaendig"
+EREIGNIS_RUECKFALL_ORDNER = "Dateisystem kann kein nicht ueberschreibendes Umbenennen"
+EREIGNIS_RUECKFALL_ZIEL = "Ziel kann kein nicht ueberschreibendes Umbenennen: ohne .part, exklusiv angelegt"
+EREIGNIS_QUELLE_UEBERSPRUNGEN = "nicht erreichbar, uebersprungen"
+
 
 def verschieben_spaeter() -> str:
     return (

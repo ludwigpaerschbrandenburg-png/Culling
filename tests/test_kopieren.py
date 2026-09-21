@@ -71,12 +71,19 @@ def _echte(zeilen: dict) -> dict:
     return {k: v for k, v in zeilen.items() if v["dateityp"] in ("foto", "raw", "video", "sidecar")}
 
 
-def _zeile_vorbereiten(nachschauen, ziel, quellpfad, status, lauf=1):
-    """Eine Zeile so hinstellen, als haette ein frueherer Lauf sie beansprucht."""
+def _zielpfad(nachschauen, ziel, quellpfad) -> Path:
+    with nachschauen(ziel) as d:
+        return Path(d.zeile(quellpfad)["zielpfad"])
+
+
+def _beanspruchen(nachschauen, ziel, quellpfad, schreibpfad, lauf=1) -> Path:
+    """Eine Zeile so hinstellen, als haette ein frueherer (abgestuerzter) Lauf
+    sie beansprucht und unter schreibpfad geschrieben."""
     with nachschauen(ziel) as d:
         d.verbindung.execute(
-            "UPDATE dateien SET status = ?, kopiert_in_lauf = ? WHERE quellpfad = ?",
-            (status, lauf, db.pfad_text(quellpfad)),
+            "UPDATE dateien SET status = 'kopieren_laeuft', kopiert_in_lauf = ?, schreibpfad = ?"
+            " WHERE quellpfad = ?",
+            (lauf, db.pfad_text(schreibpfad), db.pfad_text(quellpfad)),
         )
         d.verbindung.commit()
         return Path(d.zeile(quellpfad)["zielpfad"])
@@ -310,6 +317,10 @@ def test_nicht_erreichbare_quelle_wird_uebersprungen(baum, quelle, ziel, zwei_qu
     assert all(z["status"] == "analysiert" for k, z in zeilen.items() if k.startswith(str(zwei_quellen)))
     assert zeilen[str(baum["jpg"])]["status"] in ("kopiert", "duplikat")
     assert any(e["pfad"] == str(zwei_quellen) for e in _ereignisse(nachschauen, ziel, "quelle_nicht_erreichbar"))
+    # Zweiter Lauf: Nur die unerreichbare Quelle hat noch Offenes - das zaehlt nicht als Arbeit.
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert "Nichts zu kopieren" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------- Vorpruefungen ----
@@ -374,9 +385,10 @@ def test_mit_anhang_haengt_hinter_den_stamm_der_hauptdatei():
 
 def test_liegengebliebene_part_datei_wird_entfernt_und_neu_geschrieben(baum, quelle, ziel, nachschauen, capsys):
     _vorbereiten(ziel, quelle)
-    zp = _zeile_vorbereiten(nachschauen, ziel, baum["analog"], "kopieren_laeuft")
-    zp.parent.mkdir(parents=True, exist_ok=True)
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
     part = kopieren.part_pfad(zp)
+    _beanspruchen(nachschauen, ziel, baum["analog"], part)
+    zp.parent.mkdir(parents=True, exist_ok=True)
     part.write_bytes(b"halbfertig")
     assert _cli("kopieren", "--ziel", ziel) == cli.OK
     aus = capsys.readouterr().out
@@ -390,7 +402,8 @@ def test_liegengebliebene_part_datei_wird_entfernt_und_neu_geschrieben(baum, que
 
 def test_fertige_kopie_aus_abgebrochenem_lauf_wird_nachtraeglich_bestaetigt(baum, quelle, ziel, nachschauen, capsys):
     _vorbereiten(ziel, quelle)
-    zp = _zeile_vorbereiten(nachschauen, ziel, baum["analog"], "kopieren_laeuft")
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
+    _beanspruchen(nachschauen, ziel, baum["analog"], zp)   # Absturz zwischen Umbenennen und "kopiert"
     zp.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(baum["analog"], zp)
     assert _cli("kopieren", "--ziel", ziel) == cli.OK
@@ -413,7 +426,8 @@ def test_angefangene_zieldatei_wird_nur_im_rueckfall_entfernt(
     if direkt:
         monkeypatch.setattr(kopieren.pfade, "kann_ohne_ueberschreiben", lambda ordner: False)
     _vorbereiten(ziel, quelle)
-    zp = _zeile_vorbereiten(nachschauen, ziel, baum["analog"], "kopieren_laeuft")
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
+    _beanspruchen(nachschauen, ziel, baum["analog"], zp)
     zp.parent.mkdir(parents=True, exist_ok=True)
     zp.write_bytes(baum["analog"].read_bytes()[:10])   # angefangen, kleiner
     assert _cli("kopieren", "--ziel", ziel) == cli.OK
@@ -431,10 +445,53 @@ def test_angefangene_zieldatei_wird_nur_im_rueckfall_entfernt(
 
 def test_fremde_kopieren_laeuft_zeile_ohne_dateien_faellt_zurueck(baum, quelle, ziel, nachschauen):
     _vorbereiten(ziel, quelle)
-    zp = _zeile_vorbereiten(nachschauen, ziel, baum["analog"], "kopieren_laeuft")
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
+    _beanspruchen(nachschauen, ziel, baum["analog"], kopieren.part_pfad(zp))
     assert _cli("kopieren", "--ziel", ziel) == cli.OK
     z = _zeilen(nachschauen, ziel)[str(baum["analog"])]
     assert z["status"] == "kopiert" and Path(z["zielpfad"]) == zp
+
+
+def test_rueckfall_fremde_datei_unter_dem_zielnamen_bleibt_nach_absturz(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
+    """Befund B1 der Pruefung: Im Rueckfall lag der Anspruch auf dem berechneten
+    Namen, unter dem eine FREMDE Datei lag; nach einem Absturz haette das
+    Aufraeumen sie entfernt. Jetzt beansprucht die Zeile den Namen, den sie
+    wirklich schreibt (_1), und nur der wird angefasst."""
+    monkeypatch.setattr(kopieren.pfade, "kann_ohne_ueberschreiben", lambda ordner: False)
+    _vorbereiten(ziel, quelle)
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
+    zp.parent.mkdir(parents=True, exist_ok=True)
+    zp.write_bytes(b"fremdes Archivbild, klein")           # fremd, kleiner als die Quelle
+    eigen = zp.with_name("scan_001_1.tif")
+    eigen.write_bytes(baum["analog"].read_bytes()[:4])     # unsere angefangene Kopie
+    _beanspruchen(nachschauen, ziel, baum["analog"], eigen)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert zp.read_bytes() == b"fremdes Archivbild, klein"
+    assert "angefangene Zieldateien entfernt:       1" in aus
+    z = _zeilen(nachschauen, ziel)[str(baum["analog"])]
+    assert z["status"] == "kopiert" and Path(z["zielpfad"]) == eigen
+    assert eigen.read_bytes() == baum["analog"].read_bytes()
+    assert not zp.with_name("scan_001_2.tif").exists()
+    assert not zp.with_name("scan_001_1_1.tif").exists()
+
+
+def test_absturz_zwischen_umbenennen_und_kopiert_hinterlaesst_keine_waise(baum, quelle, ziel, nachschauen, capsys):
+    """Befund B2: fertige Kopie unter X_1, Zeile beansprucht noch X. Der Neustart
+    findet sie ueber den schreibpfad und legt keine zweite Kopie X_2 an."""
+    _vorbereiten(ziel, quelle)
+    zp = _zielpfad(nachschauen, ziel, baum["analog"])
+    zp.parent.mkdir(parents=True, exist_ok=True)
+    zp.write_bytes(b"fremd")
+    fertig = zp.with_name("scan_001_1.tif")
+    shutil.copy2(baum["analog"], fertig)
+    _beanspruchen(nachschauen, ziel, baum["analog"], fertig)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert "nachtraeglich bestaetigt: 1" in capsys.readouterr().out
+    z = _zeilen(nachschauen, ziel)[str(baum["analog"])]
+    assert z["status"] == "kopiert" and Path(z["zielpfad"]) == fertig
+    assert not zp.with_name("scan_001_2.tif").exists()
+    assert zp.read_bytes() == b"fremd"
 
 
 # ------------------------------------------------------------- Abbruch ----
@@ -476,9 +533,10 @@ _KIND = textwrap.dedent(
     import blake3
     from fotosort import hashes, cli
 
-    def langsam(quelle, ziel, stop=None):
+    def langsam(quelle, ziel, stop=None, fd=None):
         h = blake3.blake3(); n = 0
-        fd = os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        if fd is None:
+            fd = os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         with open(quelle, "rb") as ein, os.fdopen(fd, "wb") as aus:
             while True:
                 block = ein.read(65536)

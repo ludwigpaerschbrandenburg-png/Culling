@@ -68,7 +68,9 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 Gebaut: `hashes.py` (BLAKE3 beim Kopieren mitgerechnet, exklusives Anlegen), `kopieren.py`,
 `fotosort kopieren` mit `--dry-run`, `--profil`, `--kopier-worker`, `--hash-worker`;
 `pfade.umbenennen_ohne_ueberschreiben`, `kann_ohne_ueberschreiben` (Probe), `freier_platz`.
-Schema-Version 3 (`kopiert_in_lauf`, Indizes auf Hash und Gruppe).
+Schema-Version 4 (`kopiert_in_lauf`, `schreibpfad`, Indizes auf Hash und Gruppe).
+Ein Prüf-Agent hat den Stand gegen SPEC §4/§5/§6 gelesen; sein Verlustpfad-Befund (Anspruch im
+Rückfall auf dem berechneten statt dem geschriebenen Namen) ist behoben und mit Tests belegt.
 
 - [x] Kopieren über `.part`, nicht überschreibendes Umbenennen, BLAKE3 nebenbei
 - [x] Duplikate (gleicher Name und über den Ziel-Index), Ziel-Index, Worker-Zahlen nach Profil
@@ -90,6 +92,11 @@ Schema-Version 3 (`kopiert_in_lauf`, Indizes auf Hash und Gruppe).
       neu analysiert (zweiter Scan, geänderte Quelle), ziehen nur Mitglieder mit Status
       `analysiert` mit; schon kopierte bleiben, wo sie sind. Beim Bericht entscheiden, ob das
       als Ereignis gemeldet wird.
+- [ ] **Gruppenanhang im Wettlauf mit einem Fremdprozess (Phase 6).** Legt ein anderes Programm
+      genau zwischen Anhang-Bestimmung und Umbenennen eine Datei unter `X_1` an, bekommt nur
+      das betroffene Mitglied `_2`, die übrigen behalten `_1`. Nichts geht verloren, aber die
+      Gruppe hat dann zwei Anhänge. Innerhalb des Programms kann das nicht passieren (Zielnamen
+      „in Arbeit" warten). Mit `fotosort ziel-index` und dem Bericht sichtbar machen.
 - [ ] **Windows-Zweig des nicht überschreibenden Umbenennens (`MoveFileExW`) ist im Container
       nicht prüfbar** und muss beim ersten Lauf unter Windows mit dem künstlichen Testbaum
       nachgezogen werden (`tests/test_pfade.py`, `tests/test_kopieren.py`).

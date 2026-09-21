@@ -72,7 +72,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quellen (
@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS dateien (
     datum_hinweis           TEXT    NOT NULL DEFAULT '',
     gruppe                  TEXT    NOT NULL DEFAULT '',
     zielpfad                TEXT    NOT NULL DEFAULT '',
+    schreibpfad             TEXT    NOT NULL DEFAULT '',
     status                  TEXT    NOT NULL DEFAULT 'gefunden',
     fehlergrund             TEXT    NOT NULL DEFAULT '',
     bestaetigt_in_lauf      INTEGER,
@@ -789,12 +790,18 @@ class Datenbank:
 
     # -- Kopieren (SPEC Abschnitt 4 Phase 3, Abschnitt 5) -----------------
 
-    def zu_kopieren_summe(self) -> tuple[int, int]:
+    def zu_kopieren_summe(self, quellwurzeln=None) -> tuple[int, int]:
+        """(Anzahl, Bytes) der anstehenden Dateien, wahlweise nur bestimmter Quellen."""
         self.stapel_schreiben()
-        z = self.verbindung.execute(
-            "SELECT COUNT(*), COALESCE(SUM(groesse), 0) FROM dateien"
-            " WHERE status = 'analysiert' AND zielpfad != ''"
-        ).fetchone()
+        sql = "SELECT COUNT(*), COALESCE(SUM(groesse), 0) FROM dateien WHERE status = 'analysiert' AND zielpfad != ''"
+        werte: list = []
+        if quellwurzeln is not None:
+            wurzeln = [pfad_text(w) for w in quellwurzeln]
+            if not wurzeln:
+                return 0, 0
+            sql += " AND quellwurzel IN (" + ",".join("?" * len(wurzeln)) + ")"
+            werte = wurzeln
+        z = self.verbindung.execute(sql, werte).fetchone()
         return int(z[0]), int(z[1])
 
     def zu_kopieren(self, quellwurzel, ab_gruppe: str = "", ab_pfad: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
@@ -817,21 +824,35 @@ class Datenbank:
             (pfad_text(quellwurzel), gruppe),
         ).fetchall()
 
-    def kopieren_beanspruchen(self, quellpfad, zielpfad, lauf: int) -> None:
-        """Zielpfad beanspruchen, BEVOR geschrieben wird (SPEC §5)."""
+    def kopieren_beanspruchen(self, quellpfad, zielpfad, schreibpfad, lauf: int) -> None:
+        """Zielpfad beanspruchen, BEVOR geschrieben wird (SPEC §5).
+
+        zielpfad ist der berechnete Name (ohne Anhang), schreibpfad die Datei,
+        in die dieser Lauf tatsaechlich schreibt: die .part-Datei oder im
+        Rueckfall der endgueltige Name mit Anhang.
+        """
         self._beginnen()
         self.verbindung.execute(
-            "UPDATE dateien SET status = 'kopieren_laeuft', zielpfad = ?, kopiert_in_lauf = ?"
-            " WHERE quellpfad = ?",
-            (pfad_text(zielpfad), lauf, pfad_text(quellpfad)),
+            "UPDATE dateien SET status = 'kopieren_laeuft', zielpfad = ?, schreibpfad = ?,"
+            " kopiert_in_lauf = ? WHERE quellpfad = ?",
+            (pfad_text(zielpfad), pfad_text(schreibpfad), lauf, pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
+    def schreibpfad_setzen(self, quellpfad, schreibpfad) -> None:
+        """Vor dem Umbenennen: unter welchem endgueltigen Namen die Datei gleich liegt."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET schreibpfad = ? WHERE quellpfad = ?",
+            (pfad_text(schreibpfad), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
 
     def kopiert_setzen(self, quellpfad, zielpfad, hash_: str, lauf: int) -> None:
         self._beginnen()
         self.verbindung.execute(
-            "UPDATE dateien SET status = 'kopiert', zielpfad = ?, hash = ?, kopiert_in_lauf = ?,"
-            " fehlergrund = '' WHERE quellpfad = ?",
+            "UPDATE dateien SET status = 'kopiert', zielpfad = ?, schreibpfad = '', hash = ?,"
+            " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
             (pfad_text(zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -840,8 +861,8 @@ class Datenbank:
         """Inhaltsgleiche Datei liegt schon im Ziel: nicht kopiert, zielpfad = Partner."""
         self._beginnen()
         self.verbindung.execute(
-            "UPDATE dateien SET status = 'duplikat', zielpfad = ?, hash = ?, kopiert_in_lauf = ?,"
-            " fehlergrund = '' WHERE quellpfad = ?",
+            "UPDATE dateien SET status = 'duplikat', zielpfad = ?, schreibpfad = '', hash = ?,"
+            " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
             (pfad_text(partner_zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -849,8 +870,8 @@ class Datenbank:
     def zurueck_auf_analysiert(self, quellpfad, zielpfad) -> None:
         self._beginnen()
         self.verbindung.execute(
-            "UPDATE dateien SET status = 'analysiert', zielpfad = ?, kopiert_in_lauf = NULL"
-            " WHERE quellpfad = ?",
+            "UPDATE dateien SET status = 'analysiert', zielpfad = ?, schreibpfad = '',"
+            " kopiert_in_lauf = NULL WHERE quellpfad = ?",
             (pfad_text(zielpfad), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -860,8 +881,8 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'gefunden', groesse = ?, mtime = ?, hash = '',"
-            " zielpfad = '', bestaetigt_in_lauf = NULL, kopiert_in_lauf = NULL, fehlergrund = ''"
-            " WHERE quellpfad = ?",
+            " zielpfad = '', schreibpfad = '', bestaetigt_in_lauf = NULL, kopiert_in_lauf = NULL,"
+            " fehlergrund = '' WHERE quellpfad = ?",
             (int(groesse), float(mtime), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()

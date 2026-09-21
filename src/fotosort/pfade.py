@@ -287,7 +287,7 @@ def kann_ohne_ueberschreiben(ordner: Path) -> bool:
     a = Path(ordner) / f".fotosort_probe_{uuid.uuid4().hex}"
     b = Path(str(a) + ".b")
     try:
-        a.write_bytes(b"probe")
+        lang(a).write_bytes(b"probe")
         umbenennen_ohne_ueberschreiben(a, b)
         return True
     except KeinNoReplace:
@@ -295,7 +295,7 @@ def kann_ohne_ueberschreiben(ordner: Path) -> bool:
     finally:
         for p in (a, b):
             try:
-                os.unlink(p)
+                os.unlink(lang(p))
             except OSError:
                 pass
 
@@ -303,4 +303,4 @@ def kann_ohne_ueberschreiben(ordner: Path) -> bool:
 def freier_platz(pfad: Path) -> int:
     import shutil
 
-    return shutil.disk_usage(_vorhandener_teil(Path(pfad))).free
+    return shutil.disk_usage(lang(_vorhandener_teil(Path(pfad)))).free

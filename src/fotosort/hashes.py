@@ -31,19 +31,34 @@ def blake3_datei(pfad: Path) -> str:
     return h.hexdigest()
 
 
-def kopieren_mit_hash(quelle: Path, ziel: Path, stop: threading.Event | None = None) -> tuple[str, int]:
+def exklusiv_anlegen(ziel: Path) -> int:
+    """Zieldatei exklusiv anlegen (O_EXCL) und den Dateigriff liefern.
+
+    Schlaegt mit FileExistsError fehl, wenn der Name belegt ist - so wird
+    nie etwas ueberschrieben (SPEC §5), auch auf exFAT und FAT32.
+    """
+    return os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+
+
+def kopieren_mit_hash(
+    quelle: Path, ziel: Path, stop: threading.Event | None = None, fd: int | None = None
+) -> tuple[str, int]:
     """Quelle nach ziel kopieren und dabei hashen. (Hash, Bytes).
 
     Die Zieldatei wird EXKLUSIV angelegt (O_EXCL): Existiert sie schon,
     schlaegt das Anlegen fehl, statt etwas zu ueberschreiben (SPEC §5).
+    Wahlweise kommt der schon exklusiv angelegte Dateigriff "fd" herein
+    (Rueckfall ohne .part: dort legt der Hauptstrang die Datei an, bevor er
+    den Anspruch festschreibt); er wird hier uebernommen und geschlossen.
     Ist "stop" gesetzt, wird nach dem laufenden Block abgebrochen; die
     halbfertige Zieldatei wird dann entfernt und Abgebrochen geworfen.
     """
     h = blake3.blake3()
     bytes_gesamt = 0
-    fd = os.open(ziel, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+    if fd is None:
+        fd = exklusiv_anlegen(ziel)
     try:
-        with open(quelle, "rb", buffering=0) as ein, os.fdopen(fd, "wb", buffering=0) as aus:
+        with os.fdopen(fd, "wb", buffering=0) as aus, open(quelle, "rb", buffering=0) as ein:
             while True:
                 if stop is not None and stop.is_set():
                     raise Abgebrochen()

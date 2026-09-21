@@ -45,10 +45,11 @@ ART_ANGEFANGENE_ENTFERNT = "angefangene_zieldatei_entfernt"
 ART_NACHTRAEGLICH_BESTAETIGT = "kopie_nachtraeglich_bestaetigt"
 ART_EXFAT_RUECKFALL = "rueckfall_kopieren"
 
-GRUND_QUELLE_FEHLT = "Quelldatei nicht gefunden"
-GRUND_QUELLE_WAEHREND_KOPIE = "Quelle hat sich waehrend des Kopierens veraendert"
-GRUND_KOPIE = "Kopieren fehlgeschlagen"
-GRUND_PART_BELEGT = "Zwischendatei (.part) ist von einem anderen Vorgang belegt"
+# Deutsche Texte, die in die Datenbank gelangen, stehen in meldungen.py.
+GRUND_QUELLE_FEHLT = meldungen.GRUND_QUELLE_FEHLT
+GRUND_QUELLE_WAEHREND_KOPIE = meldungen.GRUND_QUELLE_WAEHREND_KOPIE
+GRUND_KOPIE = meldungen.GRUND_KOPIE
+GRUND_PART_BELEGT = meldungen.GRUND_PART_BELEGT
 
 PART = ".part"
 PROFILE: dict[str, int] = {"hdd": 2, "netzwerk": 4, "ssd": 8}
@@ -209,6 +210,7 @@ class _Auftrag:
     schreibziel: Path                # .part oder (Rueckfall) der endgueltige Name
     stamm: str = ""                  # Stammname der Hauptdatei (fuer den Anhang)
     anhang: int = 0                  # nur im Rueckfall vorab bestimmt
+    fd: int | None = None            # Rueckfall: vom Hauptstrang exklusiv angelegt
     zukunft: Future | None = None
     ziel_hash: Future | None = None  # Hash einer schon vorhandenen Datei am Zielnamen
     ergebnis: object = None
@@ -227,19 +229,32 @@ class _Kopie:
 # ------------------------------------------------------------- Worker ----
 
 
-def _kopieren_worker(quelle: Path, schreibziel: Path, groesse: int, mtime: float, stop: threading.Event) -> _Kopie:
-    """Laeuft im Kopier-Worker. Fasst nur das Dateisystem an."""
+def _kopieren_worker(quelle: Path, schreibziel: Path, groesse: int, mtime: float,
+                     stop: threading.Event, fd: int | None = None) -> _Kopie:
+    """Laeuft im Kopier-Worker. Fasst nur das Dateisystem an.
+
+    fd: im Rueckfall ohne .part der vom Hauptstrang schon exklusiv angelegte
+    Dateigriff. Gibt der Worker vorher auf, ist die leere Datei seine eigene
+    und wird entfernt.
+    """
+    def aufgeben(k: _Kopie) -> _Kopie:
+        if fd is not None:
+            os.close(fd)
+            _entfernen_eigene(schreibziel)
+        return k
+
     try:
         st = os.stat(_L(quelle))
     except FileNotFoundError:
-        return _Kopie("fehlt")
+        return aufgeben(_Kopie("fehlt"))
     except OSError as fehler:
-        return _Kopie("fehler", grund=f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
+        return aufgeben(_Kopie("fehler", grund=f"{GRUND_KOPIE}: {fehler.strerror or fehler}"))
     if st.st_size != int(groesse) or not db._gleiche_zeit(st.st_mtime, mtime):
-        return _Kopie("veraendert", bytes=st.st_size, mtime_ns=st.st_mtime_ns)
+        return aufgeben(_Kopie("veraendert", bytes=st.st_size, mtime_ns=st.st_mtime_ns))
     try:
-        _L(schreibziel.parent).mkdir(parents=True, exist_ok=True)
-        h, n = hashes.kopieren_mit_hash(_L(quelle), _L(schreibziel), stop)
+        if fd is None:
+            _L(schreibziel.parent).mkdir(parents=True, exist_ok=True)
+        h, n = hashes.kopieren_mit_hash(_L(quelle), _L(schreibziel), stop, fd)
     except FileExistsError:
         return _Kopie("belegt")
     except hashes.Abgebrochen:
@@ -277,7 +292,6 @@ class _Lauf:
         self.hasher = ThreadPoolExecutor(max_workers=hash_worker, thread_name_prefix="hash")
         self.max_offen = max(2, kopier_worker * 2)
         self.in_arbeit: set[str] = set()       # Zielnamen (Text), die gerade entstehen
-        self.eigene: set[str] = set()          # Dateien, die dieser Lauf angelegt hat
         self.offen: list[list[_Auftrag]] = []  # eingereichte Gruppen
         self.wartend: deque[tuple[_Quelle, list]] = deque()
         self.ergebnis = Ergebnis()
@@ -314,6 +328,8 @@ class _Lauf:
         return self.hasher.submit(hashes.blake3_datei, _L(p))
 
     def index_nachtragen(self, p: Path, h: str) -> None:
+        if not h:
+            return
         st = _stat(p)
         if st is not None:
             self.dbank.ziel_index_setzen(p, st.st_size, st.st_mtime, h, self.lauf)
@@ -321,43 +337,49 @@ class _Lauf:
     # -- Aufraeumen (SPEC Abschnitt 5) ------------------------------------
 
     def liegengebliebene_aufraeumen(self) -> None:
+        """Reste eines abgebrochenen Laufs (SPEC Abschnitt 5).
+
+        Je Zeile mit kopieren_laeuft aus einem anderen Lauf: Die .part-Datei
+        zum beanspruchten Zielnamen wird entfernt (die Zeile beansprucht sie,
+        sie wird neu geschrieben). Unter dem "schreibpfad" - dem Namen, unter
+        dem der abgebrochene Lauf tatsaechlich geschrieben hat - wird
+        nachgesehen: vollstaendig und inhaltsgleich mit der Quelle -> die Kopie
+        war fertig, Status kopiert; unvollstaendig -> nur im Rueckfall ohne
+        .part entfernen, denn nur dort hat das Programm die Datei selbst
+        exklusiv angelegt, bevor es den Anspruch festgeschrieben hat.
+        """
+        e = self.ergebnis
         for z in self.dbank.liegengebliebene(self.lauf):
             quelle = Path(db.text_pfad(z["quellpfad"]))
             ziel = Path(db.text_pfad(z["zielpfad"]))
             part = part_pfad(ziel)
+            schreib = Path(db.text_pfad(z["schreibpfad"])) if z["schreibpfad"] else None
             if _stat(part) is not None:
-                # Diese Zeile beansprucht die .part-Datei; sie wird neu geschrieben.
                 _entfernen_eigene(part)
-                self.ergebnis.part_aufgeraeumt += 1
-                self.dbank.ereignis(self.lauf, ART_PART_AUFGERAEUMT, part, 1, "liegengebliebene .part-Datei entfernt")
-            st = _stat(ziel)
+                e.part_aufgeraeumt += 1
+                self.dbank.ereignis(self.lauf, ART_PART_AUFGERAEUMT, part, 1, meldungen.EREIGNIS_PART_AUFGERAEUMT)
+            st = _stat(schreib) if schreib is not None and db.pfad_text(schreib) != db.pfad_text(part) else None
             if st is not None:
                 if st.st_size == int(z["groesse"]) and _stat(quelle) is not None:
-                    # Vollstaendig? Dann beide frisch lesen und vergleichen.
-                    h_ziel = self.hasher.submit(hashes.blake3_datei, _L(ziel))
+                    h_ziel = self.hasher.submit(hashes.blake3_datei, _L(schreib))
                     h_quelle = self.hasher.submit(hashes.blake3_datei, _L(quelle))
                     try:
                         hz, hq = h_ziel.result(), h_quelle.result()
                     except OSError:
-                        hz, hq = "", "x"
-                    if hz == hq:
-                        self.dbank.kopiert_setzen(z["quellpfad"], ziel, hq, self.lauf)
-                        self.index_nachtragen(ziel, hz)
-                        self.ergebnis.nachtraeglich_bestaetigt += 1
+                        hz, hq = "", ""
+                    if hz and hz == hq:
+                        self.dbank.kopiert_setzen(z["quellpfad"], schreib, hq, self.lauf)
+                        self.index_nachtragen(schreib, hz)
+                        e.nachtraeglich_bestaetigt += 1
                         self.dbank.ereignis(self.lauf, ART_NACHTRAEGLICH_BESTAETIGT, quelle, 1,
-                                            "Kopie aus abgebrochenem Lauf war vollstaendig")
+                                            meldungen.EREIGNIS_NACHTRAEGLICH)
                         continue
-                    self.index_nachtragen(ziel, hz)   # spart das zweite Lesen gleich
+                    self.index_nachtragen(schreib, hz)   # spart das zweite Lesen gleich
                 elif self.direkt and st.st_size < int(z["groesse"]):
-                    # Nur im Rueckfall ohne .part kann unter dem endgueltigen
-                    # Namen etwas Unvollstaendiges von uns liegen. SPEC §5:
-                    # Zeile beansprucht genau diesen Pfad, Status
-                    # kopieren_laeuft, Lauf nicht der laufende - und zusaetzlich
-                    # kleiner als die Quelle.
-                    _entfernen_eigene(ziel)
-                    self.ergebnis.angefangene_entfernt += 1
-                    self.dbank.ereignis(self.lauf, ART_ANGEFANGENE_ENTFERNT, ziel, 1,
-                                        "angefangene Zieldatei aus abgebrochenem Lauf entfernt")
+                    _entfernen_eigene(schreib)
+                    e.angefangene_entfernt += 1
+                    self.dbank.ereignis(self.lauf, ART_ANGEFANGENE_ENTFERNT, schreib, 1,
+                                        meldungen.EREIGNIS_ANGEFANGENE_ENTFERNT)
             self.dbank.zurueck_auf_analysiert(z["quellpfad"], ziel)
         self.dbank.stapel_schreiben()
 
@@ -371,18 +393,13 @@ class _Lauf:
             if db.pfad_text(ziel) in self.in_arbeit or db.pfad_text(part_pfad(ziel)) in self.in_arbeit:
                 return False
             auftraege.append(_Auftrag(z, Path(db.text_pfad(z["quellpfad"])), ziel, part_pfad(ziel), _stamm(z)))
-        anhang = 0
-        if self.direkt:
-            # Ohne .part muss der endgueltige Name vor dem Schreiben feststehen.
-            anhang = self._freier_anhang(auftraege, ab=0)
+        if self.direkt and not self._exklusiv_anlegen(auftraege):
+            return True   # als Fehler verbucht, nichts mehr zu tun
         for a in auftraege:
-            a.anhang = anhang
-            if self.direkt:
-                a.schreibziel = mit_anhang(a.ziel, anhang, a.stamm)
-            self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, self.lauf)
+            self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, a.schreibziel, self.lauf)
             self.in_arbeit.add(db.pfad_text(a.ziel))
             self.in_arbeit.add(db.pfad_text(a.schreibziel))
-            if _stat(a.ziel) is not None:
+            if db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel) and _stat(a.ziel) is not None:
                 a.ziel_hash = self.hash_von_vorhandener(a.ziel)   # parallel zur Kopie
         # Der Anspruch muss VOR dem ersten Schreiben festgeschrieben sein
         # (SPEC §5): Nur dann erkennt der naechste Start nach einem Absturz,
@@ -390,10 +407,56 @@ class _Lauf:
         self.dbank.stapel_schreiben()
         for a in auftraege:
             a.zukunft = self.kopierer.submit(
-                _kopieren_worker, a.quelle, a.schreibziel, a.zeile["groesse"], a.zeile["mtime"], self.stop
+                _kopieren_worker, a.quelle, a.schreibziel, a.zeile["groesse"], a.zeile["mtime"], self.stop, a.fd
             )
         self.offen.append(auftraege)
         return True
+
+    def _exklusiv_anlegen(self, auftraege: list[_Auftrag]) -> bool:
+        """Rueckfall ohne .part: Dateien unter dem endgueltigen Namen exklusiv
+        anlegen, BEVOR der Anspruch festgeschrieben wird.
+
+        So ist nach einem Absturz bewiesen, dass die Datei unter dem
+        beanspruchten Pfad vom Programm stammt (SPEC §5) - eine fremde Datei
+        haette das exklusive Anlegen scheitern lassen. Der Anhang steht damit
+        vor der Duplikat-Entscheidung fest. False: als Fehler verbucht.
+        """
+        k = 0
+        while True:
+            k = self._freier_anhang(auftraege, ab=k)
+            angelegt: list[_Auftrag] = []
+            try:
+                for a in auftraege:
+                    name = mit_anhang(a.ziel, k, a.stamm)
+                    _L(name.parent).mkdir(parents=True, exist_ok=True)
+                    a.fd = hashes.exklusiv_anlegen(_L(name))
+                    a.schreibziel = name
+                    a.anhang = k
+                    angelegt.append(a)
+                return True
+            except FileExistsError:
+                # Jemand war schneller: Eigenes zuruecknehmen, naechster Anhang.
+                self._zuruecknehmen(angelegt)
+                k += 1
+            except OSError as fehler:
+                self._zuruecknehmen(angelegt)
+                grund = f"{GRUND_KOPIE}: {fehler.strerror or fehler}"
+                for a in auftraege:
+                    self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", grund)
+                    self.ergebnis.fehler += 1
+                    self.ergebnis.bearbeitet += 1
+                    if self.anzeige:
+                        self.anzeige.weiter(1, 0)
+                return False
+
+    @staticmethod
+    def _zuruecknehmen(angelegt: list[_Auftrag]) -> None:
+        for a in angelegt:
+            if a.fd is not None:
+                os.close(a.fd)
+                a.fd = None
+            _entfernen_eigene(a.schreibziel)
+            a.schreibziel = part_pfad(a.ziel)
 
     def _freier_anhang(self, auftraege: list[_Auftrag], ab: int) -> int:
         """Kleinster Anhang, unter dem KEIN Name der Gruppe vergeben ist.
@@ -423,7 +486,6 @@ class _Lauf:
             a.ergebnis = k
             self.in_arbeit.discard(db.pfad_text(a.schreibziel))
             if k.art == "ok":
-                self.eigene.add(db.pfad_text(a.schreibziel))
                 if self.anzeige:
                     self.anzeige.weiter(1, k.bytes)
                 bleiben.append(a)
@@ -441,7 +503,7 @@ class _Lauf:
                     _entfernen_eigene(a.schreibziel)
                     e.part_aufgeraeumt += 1
                     self.dbank.ereignis(self.lauf, ART_PART_AUFGERAEUMT, a.schreibziel, 1,
-                                        "liegengebliebene .part-Datei entfernt")
+                                        meldungen.EREIGNIS_PART_AUFGERAEUMT)
                     self.wartend.append((None, [a.zeile]))
                 else:
                     self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_PART_BELEGT)
@@ -474,7 +536,6 @@ class _Lauf:
             partner = self._duplikat_partner(a)
             if partner is not None:
                 _entfernen_eigene(a.schreibziel)
-                self.eigene.discard(db.pfad_text(a.schreibziel))
                 self.in_arbeit.discard(db.pfad_text(a.ziel))
                 self.dbank.duplikat_setzen(a.zeile["quellpfad"], partner, a.ergebnis.hash, self.lauf)
                 self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(partner))
@@ -540,6 +601,11 @@ class _Lauf:
             k = anhang
             while True:
                 endname = mit_anhang(a.ziel, k, a.stamm)
+                # Vor dem Umbenennen festhalten, wo die Datei gleich liegt:
+                # Nach einem Absturz zwischen Umbenennen und "kopiert" findet
+                # der naechste Start sie so wieder (SPEC §5).
+                self.dbank.schreibpfad_setzen(a.zeile["quellpfad"], endname)
+                self.dbank.stapel_schreiben()
                 try:
                     pfade.umbenennen_ohne_ueberschreiben(a.schreibziel, endname)
                     break
@@ -549,17 +615,18 @@ class _Lauf:
                 except pfade.KeinNoReplace:
                     # Dieses Ziel-Verzeichnis kann kein nicht ueberschreibendes
                     # Umbenennen: Inhalt exklusiv an den Zielnamen kopieren.
-                    if not self._part_ohne_umbenennen(a, endname):
+                    stand = self._part_ohne_umbenennen(a, endname)
+                    if stand == "belegt":
                         k += 1
                         continue
+                    if stand != "ok":
+                        self._fehler(a, stand)
+                        return
                     break
                 except OSError as fehler:
                     self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
                     return
-            if k != anhang:
-                anhang = k
-            self.eigene.discard(db.pfad_text(a.schreibziel))
-        self.eigene.add(db.pfad_text(endname))
+            anhang = k
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.kopiert_setzen(a.zeile["quellpfad"], endname, a.ergebnis.hash, self.lauf)
         self.index_nachtragen(endname, a.ergebnis.hash)
@@ -570,25 +637,32 @@ class _Lauf:
             e.namenskonflikte += 1
             self.dbank.ereignis(self.lauf, ART_NAMENSKONFLIKT, a.quelle, 1, db.pfad_text(endname))
 
-    def _part_ohne_umbenennen(self, a: _Auftrag, endname: Path) -> bool:
-        """Rueckfall mitten im Lauf: .part -> Zielname als exklusive Kopie."""
+    def _part_ohne_umbenennen(self, a: _Auftrag, endname: Path) -> str:
+        """Rueckfall mitten im Lauf: .part -> Zielname als exklusive Kopie.
+
+        Liefert "ok", "belegt" (Name inzwischen vergeben) oder einen
+        Fehlergrund. Wirft nie - ein Fehler einer Datei bricht den Lauf nicht ab.
+        """
         try:
             h, _n = hashes.kopieren_mit_hash(_L(a.schreibziel), _L(endname), self.stop)
         except FileExistsError:
-            return False
+            return "belegt"
+        except hashes.Abgebrochen:
+            return f"{GRUND_KOPIE}: abgebrochen"
+        except OSError as fehler:
+            return f"{GRUND_KOPIE}: {fehler.strerror or fehler}"
         if h != a.ergebnis.hash:
             _entfernen_eigene(endname)
-            raise OSError(0, "Inhalt der .part-Datei stimmt nicht mehr")
+            return meldungen.GRUND_PART_INHALT
         _entfernen_eigene(a.schreibziel)
         if not self.ergebnis.exfat_rueckfall:
             self.ergebnis.exfat_rueckfall = True
             self.dbank.ereignis(self.lauf, ART_EXFAT_RUECKFALL, endname.parent, 1,
-                                "Dateisystem kann kein nicht ueberschreibendes Umbenennen")
-        return True
+                                meldungen.EREIGNIS_RUECKFALL_ORDNER)
+        return "ok"
 
     def _fehler(self, a: _Auftrag, grund: str) -> None:
         _entfernen_eigene(a.schreibziel)
-        self.eigene.discard(db.pfad_text(a.schreibziel))
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", grund)
@@ -628,7 +702,7 @@ def _quellen(dbank: db.Datenbank, lauf: int, ergebnis) -> dict[str, list[_Quelle
         if not pfad.is_dir():
             ergebnis.quellen_nicht_erreichbar.append(z["wurzel"])
             if lauf:
-                dbank.ereignis(lauf, ART_QUELLE_NICHT_ERREICHBAR, pfad, 1, "nicht erreichbar, uebersprungen")
+                dbank.ereignis(lauf, ART_QUELLE_NICHT_ERREICHBAR, pfad, 1, meldungen.EREIGNIS_QUELLE_UEBERSPRUNGEN)
             continue
         laufwerk = z["laufwerk"] or pfade.laufwerk_kennung(pfad)
         je_laufwerk.setdefault(laufwerk, []).append(_Quelle(z["wurzel"], pfad, laufwerk))
@@ -669,15 +743,16 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     e.kopier_worker, e.hash_worker, e.profil = kw, hw, prof
     if direkt:
         e.exfat_rueckfall = True
-        dbank.ereignis(lauf, ART_EXFAT_RUECKFALL, ziel, 1,
-                       "Ziel kann kein nicht ueberschreibendes Umbenennen: ohne .part, exklusiv angelegt")
+        dbank.ereignis(lauf, ART_EXFAT_RUECKFALL, ziel, 1, meldungen.EREIGNIS_RUECKFALL_ZIEL)
     try:
         # 1. Reste eines abgebrochenen Laufs (SPEC Abschnitt 5).
         lauf_zustand.liegengebliebene_aufraeumen()
 
-        # 2. Vorpruefungen.
-        e.geplant, e.geplant_bytes = dbank.zu_kopieren_summe()
+        # 2. Vorpruefungen. Gezaehlt wird nur, was aus erreichbaren Quellen
+        #    ansteht - sonst waeren Platzpruefung und Anzeige zu hoch.
         je_laufwerk = _quellen(dbank, lauf, e)
+        erreichbar = [q.wurzel for quellen in je_laufwerk.values() for q in quellen]
+        e.geplant, e.geplant_bytes = dbank.zu_kopieren_summe(erreichbar)
         if e.geplant == 0:
             return e
         frei = pfade.freier_platz(ziel)
@@ -732,27 +807,24 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
 
 
 def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:
-    if L.wartend:
+    while L.wartend:
         q, zeilen = L.wartend.popleft()
         if q is None:
             # Ein einzelner Wiederholungsversuch: Zeile frisch aus der Datenbank.
             z = L.dbank.zeile(zeilen[0]["quellpfad"])
             if z is None or z["status"] != "analysiert":
-                return _naechste(L, reihe)
+                continue
             return _Quelle(z["quellwurzel"], Path(db.text_pfad(z["quellwurzel"])), ""), [z]
         return q, zeilen
-    versuche = len(reihe)
-    while versuche and reihe:
+    while reihe:
         quellen = reihe[0]
-        reihe.rotate(-1)
-        versuche -= 1
+        reihe.rotate(-1)            # dieses Laufwerk liegt jetzt hinten
         while quellen:
             gruppe = quellen[0].naechste_gruppe(L.dbank)
             if gruppe is not None:
                 return quellen[0], gruppe
             quellen.pop(0)
-        reihe.remove(quellen)
-        versuche = len(reihe)
+        reihe.pop()                 # erschoepft: das hintere Laufwerk entfernen
     return None
 
 
