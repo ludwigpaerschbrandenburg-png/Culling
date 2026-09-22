@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterator
 
-from . import FotosortFehler, dateitypen, loeschen, meldungen, pfade
+from . import FotosortFehler, dateitypen, loeschen, meldungen, pfade, steuerung
 
 # Ereignisarten in lauf_ereignisse (SPEC Abschnitt 6).
 ART_AUSGESCHLOSSEN = "ausgeschlossen"
@@ -415,7 +415,9 @@ def ausfuehren(quelle: Path, ziel: Path, konf, dbank, lauf: int, konsole=None) -
                     seit_anzeige += 1
                     if seit_anzeige >= _ANZEIGE_ALLE:
                         _fortschritt_zeigen(balken, aufgabe, ergebnis, seit_anzeige)
+                        steuerung.melden(ergebnis.dateien, 0, ergebnis.bytes_gesamt, 0)
                         seit_anzeige = 0
+            steuerung.melden(ergebnis.dateien, 0, ergebnis.bytes_gesamt, 0)   # Endstand
         except KeyboardInterrupt:
             ergebnis.abgebrochen = True
     finally:
@@ -555,8 +557,12 @@ def ausfuehren_mehrere(
                 if fund.art == "datei":
                     seit_anzeige += 1
                     if seit_anzeige >= _ANZEIGE_ALLE:
-                        _fortschritt_zeigen(balken, aufgabe, _summe(gesamt), seit_anzeige)
+                        summe = _summe(gesamt)
+                        _fortschritt_zeigen(balken, aufgabe, summe, seit_anzeige)
+                        steuerung.melden(summe.dateien, 0, summe.bytes_gesamt, 0)
                         seit_anzeige = 0
+            summe = _summe(gesamt)
+            steuerung.melden(summe.dateien, 0, summe.bytes_gesamt, 0)   # Endstand
         except KeyboardInterrupt:
             stop.set()
             for e in gesamt.je_quelle.values():

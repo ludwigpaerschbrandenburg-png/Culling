@@ -4,9 +4,9 @@ Paketordner zusammenstellen.
 Aufruf (im Repository-Ordner, mit installiertem fotosort und PyInstaller):
     python paket/bauen.py --exiftool <ordner mit exiftool.exe und exiftool_files> [--ausgabe build/paket]
 
-Ergebnis: <ausgabe>/fotosort/ mit fotosort.exe (bzw. fotosort unter Linux),
-_internal/ (Python und Bibliotheken), exiftool/ (mitgeliefertes ExifTool),
-fotosort.bat, start.bat, LIESMICH.md, VERSION.txt.
+Ergebnis: <ausgabe>/fotosort/ mit fotosort.exe (Konsole) und fotosort-fenster.exe
+(Fenster, Phase 7; unter Linux ohne .exe), _internal/ (Python und Bibliotheken),
+exiftool/ (mitgeliefertes ExifTool), fotosort.bat, start.bat, LIESMICH.md, VERSION.txt.
 """
 
 from __future__ import annotations
@@ -25,21 +25,23 @@ def bauen(ausgabe: Path, exiftool: Path | None) -> Path:
     from fotosort import __version__
 
     dist = ausgabe / "dist"
+    # Was hinein muss (zwei Programme, gemeinsamer Ordner _internal, Seite der
+    # Oberflaeche, Zeitzonen, Fensterbibliotheken) steht in paket/fotosort.spec.
     befehl = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-        "--onedir", "--console", "--name", "fotosort",
-        "--distpath", str(dist), "--workpath", str(ausgabe / "work"), "--specpath", str(ausgabe),
-        # Zeitzonendaten (Video-Umrechnung) und deren Paketangaben mitnehmen.
-        "--collect-all", "tzdata",
-        "--collect-submodules", "rich",
-        str(WURZEL / "paket" / "fotosort_start.py"),
+        "--distpath", str(dist), "--workpath", str(ausgabe / "work"),
+        str(WURZEL / "paket" / "fotosort.spec"),
     ]
     print(" ".join(befehl))
     subprocess.run(befehl, check=True)
     paket = dist / "fotosort"
-    exe = paket / ("fotosort.exe" if sys.platform.startswith("win") else "fotosort")
-    if not exe.is_file():
-        raise SystemExit(f"PyInstaller hat {exe} nicht erzeugt.")
+    endung = ".exe" if sys.platform.startswith("win") else ""
+    for name in ("fotosort", "fotosort-fenster"):
+        exe = paket / (name + endung)
+        if not exe.is_file():
+            raise SystemExit(f"PyInstaller hat {exe} nicht erzeugt.")
+    if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / "index.html").is_file():
+        raise SystemExit("Die Seite der Oberflaeche (static/index.html) fehlt im Paket.")
 
     if exiftool is not None:
         ziel = paket / "exiftool"

@@ -418,6 +418,8 @@ fotosort wiederherstellen   --ziel <Ziel>
 fotosort config             --ziel <Ziel> [--nur-pfad]
 fotosort start              [--quelle D:\Chaos] [--ziel <Ziel>] [--verschieben] [--profil hdd|ssd|netzwerk]
 fotosort messen             --quelle D:\Chaos --ziel <Ziel> [--mb N]
+fotosort fenster            [--ziel <Ziel>] [--ohne-fenster] [--port N] [--selbsttest]
+fotosort arbeit             --auftrag <Datei>          (intern: ein Schritt im Auftrag der Oberfläche)
 ```
 
 `fotosort ziel-index --neu-aufbauen` liest alle Dateien im Zielordner neu, berechnet ihre Hashes und baut die Tabelle `ziel_index` vollständig neu auf (§6). Er wird gebraucht, wenn die lokale Datenbank und die Sicherungskopie beide fehlen, oder wenn im Ziel von Hand etwas verändert wurde. Er löscht nichts und verschiebt nichts. Er ist zugleich der einzige Befehl, der eine fehlende lokale Datenbank neu anlegen darf — nicht stillschweigend, sondern weil er ausdrücklich dafür aufgerufen wurde; er füllt sie mit dem, was tatsächlich im Ziel liegt (§6).
@@ -440,15 +442,19 @@ Dazu ein geführter Modus `fotosort start`, der die Phasen nacheinander durchgeh
 
 **Aufräumen je Quelle** (Phase 5): `aufraeumen` und `aufraeumen --leere-ordner` wirken mit `--quelle A` nur auf diese Quelle; ohne Angabe wird je Quelle einzeln gefragt. Jeder Quell-Wurzelordner selbst bleibt stehen.
 
-**Bedienung wie eine normale App** (Vormerk für Phase 7, jetzt nicht gebaut): Unter Windows startet das Programm per Doppelklick und zeigt die Oberfläche in einem **eigenen Fenster** (z. B. `pywebview`), nicht nur als Browser-Tab; Quelle und Ziel werden über den **normalen Windows-Ordnerdialog** gewählt. Auf dem Server läuft **dieselbe Oberfläche im Browser**, mit einem einfachen Ordner-Browser statt des Systemdialogs. Die Regeln unten gelten für beide.
+**Gebaut (Phase 7): die Oberfläche — `fotosort fenster`.** Unter Windows startet das Programm per Doppelklick (`start.bat` bzw. `fotosort-fenster.exe`, auch `fotosort.exe` ohne Angaben) und zeigt die Oberfläche in einem **eigenen Fenster** (`pywebview`, unter Windows über die WebView2-Laufzeit von Microsoft Edge), ohne Browser-Tab und ohne sichtbare Konsole; Zielordner und Quellordner werden über den **normalen Windows-Ordnerdialog** gewählt. Mit `--ohne-fenster` läuft nur der Server, und die Adresse (`http://127.0.0.1:<Port>/`, nur vom eigenen Rechner erreichbar) wird genannt — derselbe Weg für den Browser und später für den Container auf dem Server (Phase 8); dort wird der Pfad eingetippt. `--selbsttest` öffnet das Fenster, lässt die Seite den Zustand abfragen und schließt wieder (Rückgabewert 0/1; das prüft die CI im Windows-Paket).
 
-**Weboberfläche** (spätere Phase, lokal im Browser, später im Container auf dem Server):
+Aufbau: FastAPI-Server im Programm, eine statische Seite ohne Rahmenwerk, und **jeder Schritt läuft als eigener Prozess** `fotosort arbeit --auftrag <Datei>` — losgelöst gestartet, sodass das Schließen des Fensters den Lauf nicht beeinflusst; beim nächsten Öffnen wird ein noch laufender Schritt erkannt und angezeigt, ein ohne Abmeldung verschwundener als „unerwartet beendet“ gemeldet. Der Arbeitsprozess schreibt seinen Stand (Dateien und Datenmenge erledigt/gesamt, MB/s, Restzeit) höchstens zweimal je Sekunde in eine kleine Statusdatei, mit einem Herzschlag alle 2 s; die Oberfläche liest nur diese Datei. Pause, Fortsetzen und Abbrechen laufen über eine Steuerdatei, die der Arbeitsprozess bei jeder Fortschrittsmeldung liest; Abbruch geht denselben Weg wie Strg+C. Die Statusdateien liegen im lokalen Datenordner unter `oberflaeche/` (neben den Archiv-Ordnern, §6), dazu `arbeit.log` mit der Ausgabe der Arbeitsprozesse und `fenster.log` mit der des Fensterprogramms. **Die Datenbank bleibt einsträngig:** Solange ein Arbeitsprozess läuft, liest die Oberfläche die Datenbank nicht; Zusammenfassungen und Listen holt sie erst danach, nur lesend und in ihrem eigenen Prozess durch eine Sperre nacheinander.
+
+Ablauf im Fenster: Startseite mit Zielordner, Liste der Quellordner (bekannte Quellen des Archivs werden gezeigt, neue hinzugefügt oder entfernt; geprüft wie im geführten Modus), Kopieren/Verschieben (Standard Kopieren), Profil als Auswahlliste mit Erklärung, großer Knopf „Los geht's“ (prüft ExifTool nach §2 und startet den Scan; ein fehlender Zielordner wird nur nach Rückfrage angelegt). Wird im Ziel ein angefangenes Archiv erkannt, zeigt die Startseite den Stand in einem Satz und bietet „Weitermachen“ beim offenen Schritt an — ohne erneuten Scan. Je Schritt eine Seite mit Fortschrittsbalken, Zahlen, Pause/Fortsetzen/Abbrechen; nach jedem Schritt eine Zusammenfassung in einfachen Worten aus der Datenbank mit „Weiter: <nächster Schritt>“. Nach der Analyse die Kameramodelle als Tabelle mit tippbarem Ordnernamen; geänderte Namen werden wie im geführten Modus in die `config.toml` eingetragen, die betroffenen Dateien neu analysiert. Verschieben verlangt vor dem Start das Wort „verschieben“. Aufräumen hat eine eigene Seite: Anzahl und Größe je Quelle, Wahl `_geloescht_`-Ordner oder endgültig, Bestätigung durch Tippen des Bestätigungsworts in ein Feld (die Prüfung des Worts geschieht im Kern, nicht in der Seite), leere Ordner mit eigenem Wort. Fehler, Duplikate und Dateien ohne Datum als seitenweise geblätterte Tabellen (100 je Seite). Knöpfe „Bericht öffnen“ (schreibt den Bericht nach §10 und öffnet die Textdatei) und „Einstellungen öffnen“ (`config.toml`). Alle Texte deutsch, jede Frage mit einem Satz Erklärung.
+
+Die Regeln für die Oberfläche (sie gelten für Fenster und Browser gleichermaßen):
 
 - Zeigt **nur Zusammenfassungen**: Zähler, Fortschrittsbalken, Durchsatz, Restzeit, Fehlerliste. Niemals alle Dateien auf einmal in die Seite laden.
 - Listen (Fehler, Duplikate, Dateien ohne Datum) nur seitenweise, serverseitig geblättert.
-- Fortschritt höchstens 1–2× pro Sekunde aktualisieren (Polling oder SSE), nicht ein Ereignis pro Datei.
-- Die Arbeit läuft in einem eigenen Prozess. Browser schließen oder Seite neu laden darf den Lauf nicht beeinflussen.
-- Knöpfe für die Phasen, Auswahl Kopieren/Verschieben, Pause/Fortsetzen, Alias-Tabelle bearbeiten.
+- Fortschritt höchstens 1–2× pro Sekunde aktualisieren, nicht ein Ereignis pro Datei.
+- Die Arbeit läuft in einem eigenen Prozess. Fenster oder Browser schließen oder Seite neu laden darf den Lauf nicht beeinflussen.
+- Der Server hört nur auf 127.0.0.1 und lehnt Anfragen ab, die eine fremde Seite im Browser auslöst (`Origin` passt nicht zum eigenen Host).
 
 ## 9. Konfiguration
 

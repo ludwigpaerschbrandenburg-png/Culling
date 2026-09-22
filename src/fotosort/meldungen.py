@@ -1437,3 +1437,187 @@ def messen_abgebrochen(rest=None) -> str:
 
 def messen_netz_hinweis(wo: str) -> str:
     return f"Hinweis: {wo} liegt auf einem Netzlaufwerk; deshalb wird das Profil netzwerk vorgeschlagen."
+
+
+# ------------------------------------------------- Arbeitsprozess (Phase 7) -----
+
+
+def arbeit_auftrag_fehlt(pfad) -> str:
+    return f"Auftragsdatei nicht lesbar: {pfad}"
+
+
+def arbeit_schritt_unbekannt(schritt: str) -> str:
+    return f"Unbekannter Schritt im Auftrag: {schritt}"
+
+
+def arbeit_mit_fehlern(schritt: str) -> str:
+    return f"Der Schritt '{schritt}' ist durchgelaufen, hat aber Fehler gemeldet (siehe Bericht)."
+
+
+# ------------------------------------------------ Oberflaeche (Phase 7) ----
+# Diese Texte erscheinen nur im Fenster (UTF-8), nie in der Windows-Konsole.
+# Deshalb duerfen sie - anders als der Rest dieser Datei - Umlaute tragen.
+
+SCHRITT_NAME: dict[str, str] = {
+    "scan": "Quellen durchsuchen",
+    "analyse": "Analyse: Datum, Kamera und Zielordner bestimmen",
+    "kopieren": "Kopieren ins Archiv",
+    "verschieben": "Verschieben ins Archiv",
+    "pruefen": "Prüfen: jede Zieldatei vollständig neu lesen",
+    "aufraeumen": "Quelle aufräumen",
+}
+
+SCHRITT_ERKLAERUNG: dict[str, str] = {
+    "scan": "Das Programm sieht alle Quellordner durch und merkt sich jede Datei. Es wird noch nichts kopiert oder verändert.",
+    "analyse": "Für jede Datei werden Aufnahmedatum und Kameramodell gelesen und daraus der Zielordner berechnet. Es wird noch nichts kopiert.",
+    "kopieren": "Die Dateien werden ins Archiv kopiert. Die Quelle bleibt unverändert; nie wird eine vorhandene Datei überschrieben.",
+    "verschieben": "Die Dateien werden ins Archiv gebracht und erst nach erfolgreicher Prüfung in der Quelle gelöscht.",
+    "pruefen": "Jede kopierte Datei wird im Archiv vollständig neu gelesen und mit der Quelle verglichen.",
+    "aufraeumen": "Nur Dateien, deren Kopie im Archiv nachweislich stimmt, werden aus der Quelle entfernt. Vorher werden Quelle und Ziel noch einmal komplett gelesen.",
+}
+
+OB_PROFILE: list[tuple[str, str]] = [
+    ("hdd", "Festplatte – der Zielordner liegt auf einer normalen Festplatte (Standard, immer sicher)"),
+    ("ssd", "SSD – der Zielordner liegt auf einer SSD (mehrere Dateien gleichzeitig, schneller)"),
+    ("netzwerk", "Netzlaufwerk – der Zielordner liegt auf einem NAS oder einer Netzfreigabe"),
+]
+
+OB_ZUSTAND: dict[str, str] = {
+    "startet": "Wird gestartet …",
+    "laeuft": "Läuft",
+    "pause": "Angehalten",
+    "fertig": "Fertig",
+    "abgebrochen": "Abgebrochen – das Bisherige ist gespeichert, der nächste Lauf macht dort weiter.",
+    "fehler": "Beendet, aber mit Fehlern",
+    "abgestuerzt": "Der Arbeitsvorgang ist unerwartet beendet worden. Das Bisherige ist gespeichert; ein neuer Start macht dort weiter.",
+}
+
+
+def ob_laeuft_schon(schritt: str) -> str:
+    return f"Es läuft gerade noch ein Schritt ({SCHRITT_NAME.get(schritt, schritt)}). Bitte warten, bis er fertig ist."
+
+
+def ob_kein_lauf() -> str:
+    return "Im Moment läuft nichts, das sich anhalten oder abbrechen ließe."
+
+
+def ob_wort_falsch(wort: str) -> str:
+    return f"Zur Bestätigung muss genau das Wort „{wort}“ eingetippt werden. Es wurde nichts gestartet."
+
+
+def ob_quelle_noetig() -> str:
+    return "Bitte mindestens einen Quellordner hinzufügen – den Ordner, in dem die unsortierten Fotos liegen."
+
+
+def ob_quelle_fehlt_pfad() -> str:
+    return "Bitte zuerst einen Ordner eintragen oder auswählen."
+
+
+def ob_frage_ziel_anlegen(ziel) -> str:
+    return f"Den Ordner {ziel} gibt es noch nicht. Soll er angelegt werden?"
+
+
+def ob_nichts_ausgewaehlt() -> str:
+    return "Es ist nichts ausgewählt: Entweder das Bestätigungswort für die Dateien eintippen oder „Leere Ordner entfernen“ ankreuzen."
+
+
+def ob_liste_unbekannt(art: str) -> str:
+    return f"Unbekannte Liste: {art}"
+
+
+def ob_datenbank_belegt() -> str:
+    return "Solange ein Schritt läuft, kann die Zusammenfassung nicht gelesen werden. Bitte warten, bis er fertig ist."
+
+
+def ob_kein_archiv(ziel) -> str:
+    return f"In {ziel} liegt noch kein Archiv. Bitte zuerst „Los geht's“ mit mindestens einem Quellordner."
+
+
+def ob_bericht(pfad, geoeffnet: bool) -> str:
+    if geoeffnet:
+        return f"Der Bericht wurde geschrieben und geöffnet: {pfad}"
+    return f"Der Bericht wurde geschrieben: {pfad} (er ließ sich nicht automatisch öffnen)."
+
+
+def ob_einstellungen(pfad, geoeffnet: bool) -> str:
+    if geoeffnet:
+        return f"Die Einstellungsdatei wurde geöffnet: {pfad}"
+    return f"Die Einstellungsdatei liegt hier: {pfad} (sie ließ sich nicht automatisch öffnen)."
+
+
+def ob_aliase_geschrieben(n: int, zurueck: int) -> str:
+    return (
+        f"{anzahl(n)} Ordnernamen gespeichert. {anzahl(zurueck)} Dateien werden jetzt noch einmal analysiert,"
+        " damit sie den neuen Ordnernamen bekommen."
+    )
+
+
+def ob_keine_aliase() -> str:
+    return "Es wurde kein Ordnername geändert."
+
+
+def ob_kopieren_text(n: int, bytes_: int, verschieben: bool) -> str:
+    if verschieben:
+        return (
+            f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv verschoben. Jede Datei wird erst in der"
+            " Quelle gelöscht, wenn ihre Kopie im Archiv geprüft ist. Zur Bestätigung bitte das Wort"
+            " „verschieben“ eintippen."
+        )
+    return f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv kopiert. Die Quelle bleibt unverändert."
+
+
+def ob_pruefen_text(n: int, bytes_: int) -> str:
+    return f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden im Archiv vollständig neu gelesen und verglichen."
+
+
+def ob_analyse_text(n: int) -> str:
+    return f"{anzahl(n)} Dateien warten auf die Analyse."
+
+
+def ob_fertig_text() -> str:
+    return "Alle Schritte sind erledigt. Es gibt nichts mehr zu tun."
+
+
+def ob_herkunft_abgelehnt() -> str:
+    return "Anfrage von einer fremden Seite abgelehnt."
+
+
+def ob_adresse(adresse: str) -> str:
+    return f"Die Oberfläche läuft. Im Browser öffnen: {adresse}   (Beenden mit Strg+C)"
+
+
+def ob_kein_fenster(grund: str) -> str:
+    return (
+        f"Das Fenster lässt sich hier nicht öffnen ({grund}).\n"
+        "Ersatz: fotosort fenster --ohne-fenster  und die genannte Adresse im Browser öffnen."
+    )
+
+
+def ob_server_fehlgeschlagen(fehler) -> str:
+    return f"Der Server der Oberfläche konnte nicht gestartet werden: {fehler}"
+
+
+def ob_selbsttest(ok: bool, einzelheit: str, fenster: bool = True) -> str:
+    if ok and fenster:
+        return f"Selbsttest bestanden: Fenster geöffnet, Seite geladen, Zustand gelesen. {einzelheit}"
+    if ok:
+        return f"Selbsttest bestanden: Server läuft, Seite und Zustand lesbar. {einzelheit}"
+    return f"Selbsttest FEHLGESCHLAGEN: {einzelheit}"
+
+
+def ob_abgebrochen_hart(schritt: str) -> str:
+    return f"Der Schritt {SCHRITT_NAME.get(schritt, schritt)} wurde sofort beendet. Angefangene Kopien räumt der nächste Lauf auf."
+
+
+def ob_phase_kurz(niedrigster: str | None, dateien_erfasst: bool) -> str:
+    """Die aktuelle Phase in einem Satz fuer die Startseite."""
+    if niedrigster is None:
+        return "Es sind noch keine Dateien erfasst." if not dateien_erfasst else "Alle erfassten Dateien sind erledigt oder übersprungen."
+    return {
+        "gefunden": "Die Quellen sind durchsucht; die Analyse steht noch aus.",
+        "analysiert": "Die Analyse ist fertig; das Kopieren steht noch aus.",
+        "kopieren_laeuft": "Ein Kopiervorgang wurde unterbrochen; er kann fortgesetzt werden.",
+        "kopiert": "Kopiert; die Prüfung steht noch aus.",
+        "geprueft": "Kopiert und geprüft; die Quelle kann aufgeräumt werden.",
+        "quelle_geloescht": "Alles erledigt; höchstens leere Ordner sind noch zu entfernen.",
+    }.get(niedrigster, "")

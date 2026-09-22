@@ -357,11 +357,14 @@ Kein Fund der Stufe „Verlust möglich". Alle Funde sind behoben (Tests in `tes
 
 ## Windows-Paket (eigenständiges Programm)
 
-Gebaut: `paket/bauen.py` (PyInstaller, Ordner-Variante, kein Einzel-exe wegen Startzeit und
-Virenscanner), `paket/exiftool_holen.py` (ExifTool 64 Bit mit dem Ordner `exiftool_files`, den
-die Windows-Fassung neben der exe braucht), `paket/pruefen.py` (das gepackte Programm läuft in
-der CI wirklich durch `--version`, scan, analyse, kopieren, pruefen), Workflow `paket.yml`
-(Artefakt `fotosort-windows` je Push, Release mit `fotosort-windows.zip` bei Tag `v*`).
+Gebaut: `paket/bauen.py` mit `paket/fotosort.spec` (PyInstaller, Ordner-Variante, kein Einzel-exe
+wegen Startzeit und Virenscanner; seit Phase 7 zwei Programme auf einem gemeinsamen `_internal`:
+`fotosort.exe` mit Konsole und `fotosort-fenster.exe` ohne), `paket/exiftool_holen.py` (ExifTool
+64 Bit mit dem Ordner `exiftool_files`, den die Windows-Fassung neben der exe braucht),
+`paket/pruefen.py` (das gepackte Programm läuft in der CI wirklich durch `--version`, scan,
+analyse, kopieren, pruefen, den Fenster-Selbsttest beider Programme und einen Schritt als
+Arbeitsprozess), Workflow `paket.yml` (Artefakt `fotosort-windows` je Push, Release mit
+`fotosort-windows.zip` bei Tag `v*` oder `release_tag`).
 `fotosort --version` nennt Programm- und ExifTool-Version; das mitgelieferte ExifTool wird vor
 `PATH` gefunden (SPEC §2). `fotosort.bat` erkennt selbst, ob es im Paket oder im Quellcode liegt.
 
@@ -378,9 +381,43 @@ der CI wirklich durch `--version`, scan, analyse, kopieren, pruefen), Workflow `
 
 ---
 
-## Phase 7 — Weboberfläche
+## Phase 7 — Oberfläche mit Fenster
 
-- [ ] FastAPI, nur Zusammenfassungen, eigener Prozess
+Gebaut: `fotosort fenster` (SPEC §8). Paket `src/fotosort/oberflaeche/` mit `ablauf.py` (Zustand,
+Arbeitsprozess, Zusammenfassungen und Listen aus der Datenbank), `server.py` (FastAPI, nur
+127.0.0.1, Origin-Prüfung), `fenster.py` (Server im eigenen Strang, pywebview-Fenster,
+Ordnerdialog, Selbsttest) und `static/` (eine Seite ohne Rahmenwerk). `steuerung.py` im Kern:
+Statusdatei (≤ 2×/s, Herzschlag 2 s) und Steuerdatei (Pause/Weiter/Abbruch) je Schritt;
+`fotosort arbeit --auftrag` führt einen Schritt als eigenen, losgelösten Prozess aus. Windows-Paket
+mit `fotosort-fenster.exe` (ohne Konsole) neben `fotosort.exe`; `start.bat` öffnet das Fenster;
+die CI startet das Fenster im Selbsttest und lässt einen Schritt als Arbeitsprozess laufen.
+Version 0.2.0, Release v0.2.
+
+- [x] Startseite (Ziel, Quellen, Kopieren/Verschieben, Profil, „Los geht's“, „Weitermachen“)
+- [x] Eine Seite je Schritt: Balken, Dateien/MB erledigt/gesamt, MB/s, Restzeit, Pause/Fortsetzen/Abbrechen
+- [x] Zusammenfassung je Schritt mit „Weiter“, Alias-Tabelle nach der Analyse, Aufräumen-Seite mit Wort
+- [x] Listen Fehler/Duplikate/ohne Datum seitenweise (100 je Seite), Bericht und config.toml per Knopf
+- [x] Fenster schließen bricht den Lauf nicht ab; laufender Schritt wird beim Öffnen übernommen
+- [ ] **Ordner-Browser für den Server (Phase 8):** Im Browser (`--ohne-fenster`) wird der Pfad
+      eingetippt; der einfache Ordner-Browser aus SPEC §8 kommt mit dem Container.
+
+### Entscheidungen für den Nutzer
+
+- [ ] **WebView2-Laufzeit:** Das Fenster braucht die WebView2-Laufzeit von Microsoft Edge. Auf
+      Windows 11 und aktuellem Windows 10 ist sie vorhanden. Fehlt sie, meldet das Programm das
+      im `fenster.log`; Ausweg ist `fotosort.bat fenster --ohne-fenster` und die genannte Adresse
+      im Browser. Soll das Paket die Laufzeit selbst mitbringen (etwa 1,5 MB Installer)?
+- [ ] **„Weitermachen“ scannt nicht neu.** Der Knopf springt zum offenen Schritt. Wer inzwischen
+      Dateien in die Quelle gelegt hat, drückt „Los geht's“ — das durchsucht immer zuerst.
+- [ ] **Pause greift bei der nächsten Fortschrittsmeldung,** also nach der laufenden Datei (bei der
+      Analyse nach dem laufenden Stapel, beim Scan nach 50 Dateien). Eine große Videodatei wird
+      erst zu Ende kopiert. Reicht das, oder soll Pause mitten in einer Datei anhalten?
+- [ ] **„Sofort beenden“** erscheint 20 s nach einem Abbruch, auf den der Schritt nicht reagiert.
+      Es beendet den Prozess hart; die Datenbank übersteht das (WAL), angefangene `.part`-Dateien
+      räumt der nächste Lauf auf. Ist der Knopf erwünscht, oder lieber nur der sanfte Abbruch?
+- [ ] **Ein Fenster, ein Archiv zugleich.** Die Oberfläche merkt sich ein Ziel und lässt einen
+      Schritt zugleich laufen. Zwei Fenster für zwei Archive gleichzeitig sind nicht vorgesehen
+      (das zweite sähe den Lauf des ersten). Reicht das?
 
 ---
 

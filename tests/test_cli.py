@@ -39,6 +39,8 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
         "config",
         "start",
         "messen",
+        "fenster",
+        "arbeit",
     }
 
 

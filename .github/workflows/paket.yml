@@ -46,7 +46,21 @@ jobs:
       - name: Paket bauen
         run: python paket/bauen.py --exiftool build/exiftool --ausgabe build/paket
 
-      - name: Paket pruefen (startet, findet ExifTool, --version, scan/analyse/kopieren/pruefen)
+      # Das Fenster (pywebview) braucht die WebView2-Laufzeit von Microsoft Edge.
+      # Auf dem Runner ist sie in der Regel schon da; zur Sicherheit nachinstallieren.
+      - name: WebView2-Laufzeit sicherstellen
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $schluessel = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          if (Test-Path $schluessel) { Write-Host "WebView2 vorhanden:" (Get-ItemProperty $schluessel).pv }
+          else {
+            Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\webview2.exe"
+            Start-Process -FilePath "$env:TEMP\webview2.exe" -ArgumentList "/silent","/install" -Wait
+            if (Test-Path $schluessel) { Write-Host "WebView2 installiert:" (Get-ItemProperty $schluessel).pv }
+          }
+
+      - name: Paket pruefen (startet, ExifTool, --version, scan/analyse/kopieren/pruefen, Fenster, Arbeitsprozess)
         run: python paket/pruefen.py build/paket/dist/fotosort build/pruefung
 
       - name: ZIP packen
@@ -76,8 +90,9 @@ jobs:
             Eigenstaendiges Windows-Programm, nichts zu installieren.
 
             1. `fotosort-windows.zip` herunterladen und entpacken, zum Beispiel nach `C:\fotosort`.
-            2. Im entpackten Ordner `start.bat` doppelklicken - der gefuehrte Ablauf stellt die Fragen.
-            3. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
+            2. Im entpackten Ordner `start.bat` doppelklicken - es oeffnet sich das Fenster mit Knoepfen und Ordnerauswahl.
+            3. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - danach fuehrt das Fenster Schritt fuer Schritt.
+            4. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
 
             ExifTool ist im Ordner `exiftool` mitgeliefert (Version siehe `exiftool\VERSION.txt`).
             Bitte zuerst mit Kopien einiger Fotos ausprobieren.

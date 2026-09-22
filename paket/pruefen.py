@@ -1,7 +1,9 @@
 """Das gepackte Programm wirklich ausprobieren (in GitHub Actions unter
 Windows, lokal auch unter Linux): startet es, findet es sein mitgeliefertes
-ExifTool, gibt es --version aus, und laeuft der kuenstliche Testbaum einmal
-durch scan, analyse, kopieren und pruefen?
+ExifTool, gibt es --version aus, laeuft der kuenstliche Testbaum einmal
+durch scan, analyse, kopieren und pruefen, startet das Fenster der
+Oberflaeche (Selbsttest: Fenster auf, Seite geladen, Zustand gelesen, Fenster
+zu), und laeuft ein Schritt als Arbeitsprozess der Oberflaeche?
 
 Aufruf:
     python paket/pruefen.py <paketordner> <arbeitsordner>
@@ -56,6 +58,11 @@ def main() -> int:
     for name in ("fotosort.bat", "start.bat", "LIESMICH.md", "VERSION.txt"):
         if not (paket / name).is_file():
             fehler.append(f"{name} fehlt im Paket")
+    fenster_exe = paket / ("fotosort-fenster.exe" if sys.platform.startswith("win") else "fotosort-fenster")
+    if not fenster_exe.is_file():
+        fehler.append(f"Fensterprogramm fehlt: {fenster_exe}")
+    if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / "index.html").is_file():
+        fehler.append("Seite der Oberflaeche (static/index.html) fehlt im Paket")
 
     shutil.rmtree(arbeit, ignore_errors=True)
     arbeit.mkdir(parents=True)
@@ -97,6 +104,40 @@ def main() -> int:
             fehler.append(f"{argumente[0]}: '{erwartet}' fehlt in der Ausgabe")
     if not any(p.is_file() and ".fotosortierer" not in p.parts for p in ziel.rglob("*")):
         fehler.append("im Ziel liegen keine kopierten Dateien")
+
+    # Oberflaeche (Phase 7): erst nur der Server, dann das echte Fenster.
+    rc, text = _lauf([str(exe), "fenster", "--ohne-fenster", "--selbsttest"], umgebung, arbeit)
+    if rc != 0 or "Selbsttest bestanden" not in text:
+        fehler.append("Oberflaeche ohne Fenster: Selbsttest nicht bestanden")
+    if sys.platform.startswith("win"):
+        rc, text = _lauf([str(exe), "fenster", "--selbsttest"], umgebung, arbeit)
+        if rc != 0 or "Selbsttest bestanden" not in text:
+            fehler.append("Fenster (aus fotosort.exe): Selbsttest nicht bestanden")
+        # Das Fensterprogramm hat keine Konsole; seine Ausgabe landet in fenster.log.
+        rc, text = _lauf([str(fenster_exe), "fenster", "--selbsttest"], umgebung, arbeit)
+        protokoll = arbeit / "datenbank" / "oberflaeche" / "fenster.log"
+        if protokoll.is_file():
+            print(protokoll.read_text(encoding="utf-8", errors="replace")[-3000:], flush=True)
+        if rc != 0:
+            fehler.append(f"Fensterprogramm fotosort-fenster.exe: Rueckgabewert {rc}")
+    else:
+        print("(Fenster-Selbsttest nur unter Windows; hier ohne Anzeige)", flush=True)
+
+    # Ein Schritt so, wie die Oberflaeche ihn startet: als Arbeitsprozess mit Auftrag.
+    import json
+    auftrag = arbeit / "auftrag.json"
+    status = arbeit / "status.json"
+    auftrag.write_text(json.dumps({
+        "schritt": "scan", "ziel": str(ziel), "quellen": [], "ziel_anlegen": False,
+        "status_datei": str(status), "steuer_datei": str(arbeit / "steuer.json"),
+    }), encoding="utf-8")
+    rc, text = _lauf([str(exe), "arbeit", "--auftrag", str(auftrag)], umgebung, arbeit)
+    try:
+        stand = json.loads(status.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        stand = {}
+    if rc != 0 or stand.get("zustand") != "fertig" or not stand.get("dateien"):
+        fehler.append(f"Arbeitsprozess der Oberflaeche: Rueckgabewert {rc}, Stand {stand}")
     return _ende(fehler)
 
 
@@ -106,7 +147,7 @@ def _ende(fehler: list[str]) -> int:
         for f in fehler:
             print("  -", f)
         return 1
-    print("PAKETPRUEFUNG BESTANDEN: Programm startet, findet sein ExifTool und laeuft durch scan, analyse, kopieren, pruefen.")
+    print("PAKETPRUEFUNG BESTANDEN: Programm startet, findet sein ExifTool, laeuft durch scan, analyse, kopieren, pruefen; Oberflaeche und Arbeitsprozess laufen.")
     return 0
 
 

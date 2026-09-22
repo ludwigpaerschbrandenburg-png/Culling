@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foto-Sortierer</title>
+<link rel="stylesheet" href="/static/stil.css">
+</head>
+<body>
+<header>
+  <h1>Foto-Sortierer</h1>
+  <span id="version" class="version"></span>
+</header>
+<main>
+  <div id="meldung" class="meldung versteckt"></div>
+
+  <!-- ============================== Startseite ============================== -->
+  <section id="seite-start" class="seite">
+    <h2>1. Wohin sollen die sortierten Fotos?</h2>
+    <p class="erklaerung">Der <b>Zielordner</b> ist der Ort, an dem alle Fotos und Videos sortiert nach Jahr, Tag und Kamera abgelegt werden. Er darf leer sein oder ein früher angefangenes Archiv enthalten.</p>
+    <div class="feldzeile">
+      <input id="ziel" type="text" class="feld gross" placeholder="z. B. D:\Fotos\Archiv" autocomplete="off" spellcheck="false">
+      <button id="ziel-waehlen" class="knopf nur-fenster">Auswählen…</button>
+    </div>
+    <p class="erklaerung nur-browser">Ohne Fenster gibt es keinen Ordnerdialog: Bitte den Pfad eintippen.</p>
+    <div id="archiv-info" class="hinweis versteckt"></div>
+    <div id="weitermachen-box" class="karte versteckt">
+      <p id="weitermachen-text"></p>
+      <button id="weitermachen" class="knopf gross">Weitermachen</button>
+      <span class="erklaerung">Macht beim offenen Schritt weiter, ohne die Quellen erneut zu durchsuchen.</span>
+    </div>
+
+    <h2>2. Wo liegen die unsortierten Fotos?</h2>
+    <p class="erklaerung">Ein oder mehrere <b>Quellordner</b>, zum Beispiel eine Speicherkarte, ein alter Fotoordner oder eine externe Platte. Beim Kopieren wird in der Quelle nichts verändert.</p>
+    <ul id="quellen" class="liste"></ul>
+    <div class="feldzeile">
+      <input id="quelle-neu" type="text" class="feld" placeholder="Quellordner eintippen" autocomplete="off" spellcheck="false">
+      <button id="quelle-hinzu" class="knopf">Hinzufügen</button>
+      <button id="quelle-waehlen" class="knopf nur-fenster">Quelle hinzufügen…</button>
+    </div>
+
+    <h2>3. Kopieren oder verschieben?</h2>
+    <label class="wahl"><input type="radio" name="modus" value="kopieren" checked>
+      <span><b>Kopieren</b> (empfohlen) – die Quelle bleibt unverändert. Aufräumen können Sie später, wenn alles geprüft ist.</span></label>
+    <label class="wahl"><input type="radio" name="modus" value="verschieben">
+      <span><b>Verschieben</b> – jede Datei wird erst dann in der Quelle gelöscht, wenn ihre Kopie im Archiv geprüft ist.</span></label>
+
+    <h2>4. Auf welcher Art Laufwerk liegt der Zielordner?</h2>
+    <p class="erklaerung">Davon hängt ab, wie viele Dateien das Programm gleichzeitig kopiert. Im Zweifel „Festplatte“ lassen – das ist immer sicher, nur etwas langsamer.</p>
+    <select id="profil" class="feld"></select>
+    <p id="profil-text" class="erklaerung"></p>
+
+    <div class="aktionen">
+      <button id="los" class="knopf riesig">Los geht's</button>
+      <p class="erklaerung">Durchsucht die Quellen und führt Sie dann Schritt für Schritt durch Analyse, Kopieren und Prüfen. Nach jedem Schritt sehen Sie eine Zusammenfassung und entscheiden, ob es weitergeht. Gelöscht wird nie ohne Ihre ausdrückliche Bestätigung.</p>
+    </div>
+
+    <div id="werkzeuge" class="werkzeuge versteckt">
+      <h3>Zu diesem Archiv</h3>
+      <button data-liste="fehler" class="knopf klein">Fehler ansehen</button>
+      <button data-liste="duplikate" class="knopf klein">Doppelte Dateien</button>
+      <button data-liste="ohne_datum" class="knopf klein">Dateien ohne Datum</button>
+      <button id="bericht" class="knopf klein">Bericht öffnen</button>
+      <button id="einstellungen" class="knopf klein">Einstellungen öffnen</button>
+      <button id="zum-aufraeumen" class="knopf klein">Quelle aufräumen…</button>
+    </div>
+  </section>
+
+  <!-- ============================== Laufseite ============================== -->
+  <section id="seite-lauf" class="seite versteckt">
+    <h2 id="lauf-titel"></h2>
+    <p id="lauf-erklaerung" class="erklaerung"></p>
+    <div class="balken"><div id="balken-fuellung"></div><span id="balken-text"></span></div>
+    <div class="zahlen">
+      <div><span class="bez">Dateien</span><span id="lauf-dateien">–</span></div>
+      <div><span class="bez">Datenmenge</span><span id="lauf-bytes">–</span></div>
+      <div><span class="bez">Geschwindigkeit</span><span id="lauf-rate">–</span></div>
+      <div><span class="bez">Restzeit (geschätzt)</span><span id="lauf-rest">–</span></div>
+      <div><span class="bez">Bisher</span><span id="lauf-dauer">–</span></div>
+    </div>
+    <p id="lauf-zustand" class="zustand"></p>
+    <div class="aktionen">
+      <button id="pause" class="knopf">Pause</button>
+      <button id="fortsetzen" class="knopf versteckt">Fortsetzen</button>
+      <button id="abbrechen" class="knopf warn">Abbrechen</button>
+      <button id="sofort" class="knopf warn versteckt">Sofort beenden</button>
+    </div>
+    <p class="erklaerung">„Pause“ hält nach der aktuellen Datei an. „Abbrechen“ beendet den Schritt sauber; das Bisherige bleibt gespeichert, und der nächste Lauf macht dort weiter. Sie können dieses Fenster auch schließen – die Arbeit läuft weiter, und beim nächsten Öffnen sehen Sie den Stand.</p>
+    <pre id="lauf-log" class="log versteckt"></pre>
+  </section>
+
+  <!-- ============================ Zusammenfassung ============================ -->
+  <section id="seite-zusammenfassung" class="seite versteckt">
+    <h2 id="zf-titel"></h2>
+    <p id="zf-zustand" class="zustand"></p>
+    <table id="zf-tabelle" class="tabelle"></table>
+    <div id="zf-extra"></div>
+    <div id="zf-karte" class="karte versteckt"></div>
+    <div class="aktionen">
+      <button id="zf-weiter" class="knopf gross">Weiter</button>
+      <button id="zf-fehler" class="knopf klein versteckt">Fehler ansehen</button>
+      <button id="zf-duplikate" class="knopf klein versteckt">Doppelte Dateien ansehen</button>
+      <button id="zf-start" class="knopf klein">Zur Startseite</button>
+    </div>
+  </section>
+
+  <!-- ============================== Aufräumen ============================== -->
+  <section id="seite-aufraeumen" class="seite versteckt">
+    <h2>Quelle aufräumen</h2>
+    <p class="erklaerung">Entfernt aus der Quelle nur Dateien, deren Kopie im Archiv <b>geprüft</b> ist. Unmittelbar vor jeder Löschung liest das Programm Quelle und Archivdatei noch einmal vollständig und vergleicht sie. Stimmt etwas nicht, bleibt die Datei liegen.</p>
+    <table id="auf-tabelle" class="tabelle"></table>
+    <p id="auf-summe" class="zustand"></p>
+
+    <h3>Wie soll entfernt werden?</h3>
+    <label class="wahl"><input type="radio" name="weise" value="papierkorb" checked>
+      <span><b>In einen Ordner „_geloescht_…“ innerhalb der Quelle verschieben</b> (empfohlen). Nichts ist endgültig weg; den Ordner löschen Sie später selbst, wenn Sie sicher sind.</span></label>
+    <label class="wahl"><input type="radio" name="weise" value="endgueltig">
+      <span><b>Endgültig löschen.</b> Die Dateien sind danach nicht mehr wiederherstellbar.</span></label>
+
+    <div class="feldzeile">
+      <label for="auf-wort" id="auf-wort-text" class="bez"></label>
+      <input id="auf-wort" type="text" class="feld" autocomplete="off" spellcheck="false">
+    </div>
+    <p class="erklaerung">Leer lassen, wenn keine Dateien entfernt werden sollen.</p>
+
+    <label class="wahl"><input type="checkbox" id="auf-ordner">
+      <span><b>Leere Ordner entfernen.</b> Ordner, in denen nur noch Reste wie „Thumbs.db“ liegen, zählen als leer. Der Quellordner selbst bleibt stehen.</span></label>
+    <div id="auf-ordner-box" class="feldzeile versteckt">
+      <label for="auf-wort-ordner" id="auf-wort-ordner-text" class="bez"></label>
+      <input id="auf-wort-ordner" type="text" class="feld" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="aktionen">
+      <button id="auf-los" class="knopf gross warn">Aufräumen starten</button>
+      <button id="auf-nicht" class="knopf">Überspringen – nichts löschen</button>
+    </div>
+  </section>
+
+  <!-- ================================ Liste ================================ -->
+  <section id="seite-liste" class="seite versteckt">
+    <h2 id="liste-titel"></h2>
+    <p id="liste-erklaerung" class="erklaerung"></p>
+    <div class="blaettern">
+      <button id="liste-zurueck" class="knopf klein">‹ Vorherige Seite</button>
+      <span id="liste-stand"></span>
+      <button id="liste-vor" class="knopf klein">Nächste Seite ›</button>
+    </div>
+    <table id="liste-tabelle" class="tabelle klein"></table>
+    <div class="aktionen">
+      <button id="liste-schliessen" class="knopf">Zurück</button>
+    </div>
+  </section>
+
+  <!-- ================================ Fertig ================================ -->
+  <section id="seite-fertig" class="seite versteckt">
+    <h2>Alles erledigt</h2>
+    <p id="fertig-text" class="zustand"></p>
+    <table id="fertig-tabelle" class="tabelle"></table>
+    <div class="aktionen">
+      <button id="fertig-bericht" class="knopf gross">Bericht öffnen</button>
+      <button id="fertig-aufraeumen" class="knopf">Quelle aufräumen…</button>
+      <button id="fertig-start" class="knopf">Zur Startseite</button>
+    </div>
+  </section>
+
+  <!-- ================================ Frage ================================ -->
+  <div id="frage" class="frage versteckt">
+    <div class="frage-karte">
+      <p id="frage-text"></p>
+      <div class="aktionen">
+        <button id="frage-ja" class="knopf gross">Ja</button>
+        <button id="frage-nein" class="knopf">Nein</button>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

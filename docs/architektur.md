@@ -46,12 +46,19 @@ Culling/ (Repository-Wurzel)
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
 │  ├─ bericht.py             Text- und CSV-Bericht
-│  └─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
+│  ├─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
+│  ├─ steuerung.py           Statusdatei und Steuerdatei je Schritt (Phase 7): Stand ≤ 2×/s, Pause, Abbruch
+│  └─ oberflaeche/           Phase 7: die Oberfläche mit Fenster
+│     ├─ ablauf.py           Zustand, Arbeitsprozess (fotosort arbeit), Zusammenfassungen und Listen
+│     ├─ server.py           FastAPI-Schnittstelle (nur 127.0.0.1, Origin-Prüfung), uvicorn im Strang
+│     ├─ fenster.py          Server starten, pywebview-Fenster, Ordnerdialog, Selbsttest
+│     └─ static/             index.html, app.js, stil.css — eine Seite, kein Rahmenwerk
 ├─ paket/
 │  ├─ fotosort_start.py      Einstieg fuer PyInstaller
+│  ├─ fotosort.spec          PyInstaller-Spec: fotosort.exe (Konsole) und fotosort-fenster.exe auf einem _internal
 │  ├─ exiftool_holen.py      ExifTool (Windows, 64 Bit, mit exiftool_files) von exiftool.org holen
 │  ├─ bauen.py               PyInstaller-Ordnervariante bauen, Paketordner zusammenstellen
-│  └─ pruefen.py             gepacktes Programm ausprobieren (--version, scan, analyse, kopieren, pruefen)
+│  └─ pruefen.py             gepacktes Programm ausprobieren (--version, scan … pruefen, Fenster-Selbsttest, Arbeitsprozess)
 ├─ .github/workflows/
 │  ├─ tests.yml              Testsuite auf ubuntu-latest und windows-latest
 │  └─ paket.yml              Windows-Paket bauen und pruefen; Artefakt je Push, Release bei Tag v*
@@ -334,7 +341,9 @@ und kaputtgehen kann. Darum bewusst wenige:
 | `tzdata` | Zeitzonendatenbank | Videos ohne Zeitzonen-Offset werden von UTC in die Heimat-Zeitzone umgerechnet (SPEC §3). Python bringt dafür `zoneinfo` mit, holt sich die Zeitzonendaten aber aus dem Betriebssystem. Windows hat keine, dort scheitert `Europe/Berlin` ohne dieses Paket. Aufgenommen wird es trotzdem **unbedingt**, nicht als bedingte Abhängigkeit für Windows: Die Alternative wäre die Annahme, dass jedes Container-Image eine Zeitzonendatenbank mitbringt, und schlanke Images bringen sie oft nicht mit. Das Paket ist klein und schadet unter Linux nicht — dort wird es schlicht nicht gebraucht. In `pyproject.toml` steht es deshalb ohne jede Bedingung, insbesondere **nicht** mit einer Markierung wie `platform_system == "Windows"`. |
 | `rich` | Fortschrittsbalken, Tabellen | Ein Balken mit Restzeit ist bei stundenlangen Läufen kein Luxus. Selbstgebaut wäre das mehr Code als die Bibliothek. |
 | `tomli-w` | `config.toml` schreiben | Python kann TOML seit 3.11 **lesen** (`tomllib`), aber nicht schreiben. Wird nur beim ersten Start gebraucht. |
-| `pytest` | Tests | Standard. Nur zum Entwickeln, nicht im Betrieb. |
+| `fastapi`, `uvicorn` | Oberfläche (Phase 7) | Der Server hinter der Seite: kleine JSON-Anfragen, nur auf 127.0.0.1. FastAPI liefert Routing und Fehlerbehandlung, uvicorn den Server in einem eigenen Strang des Programms. Kein Rahmenwerk auf der Seite selbst. |
+| `pywebview` | Fenster (Phase 7) | Zeigt die Seite in einem eigenen Fenster statt im Browser und bietet den normalen Ordnerdialog des Systems. Unter Windows nutzt es die WebView2-Laufzeit von Microsoft Edge (über `pythonnet`); im Container (Phase 8) wird es nicht gebraucht, dort läuft `--ohne-fenster`. |
+| `pytest`, `httpx` | Tests | Standard; `httpx` nur für den Testclient der Schnittstelle. Nur zum Entwickeln, nicht im Betrieb. |
 
 Ausdrücklich **nicht**:
 
@@ -342,7 +351,8 @@ Ausdrücklich **nicht**:
   Unterbefehle aus der SPEC.
 - **`exiftool` ist kein Python-Paket**, sondern ein externes Programm. Es wird beim Start
   gesucht und mit einer verständlichen Meldung samt Download-Adresse angemahnt, wenn es fehlt.
-- **FastAPI erst in Phase 7.** Bis dahin taucht es nirgends auf.
+- **Kein Rahmenwerk auf der Seite** (React, Vue …). Die Seite der Oberfläche ist eine HTML-Datei
+  mit etwas JavaScript; sie zeigt nur, was der Server fertig formatiert liefert.
 
 ---
 

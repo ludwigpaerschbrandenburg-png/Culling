@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten
+from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten, steuerung
 from . import datum as datum_modul
 from . import ziel as ziel_modul
 
@@ -301,6 +301,7 @@ class _Anzeige:
             return
         self.bisher += n
         self._seit += n
+        steuerung.melden(self.bisher, self.gesamt, 0, 0)
         if self.balken is not None:
             if self._seit >= _ANZEIGE_ALLE:
                 self.balken.update(self.aufgabe, advance=self._seit,

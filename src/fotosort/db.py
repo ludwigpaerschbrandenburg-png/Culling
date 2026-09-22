@@ -1201,6 +1201,19 @@ class Datenbank:
                     e["ohne_datum"] += n
         return ergebnis
 
+    def dateien_seite(self, bedingung: str, werte: tuple, seite: int, groesse: int = 100) -> tuple[list[sqlite3.Row], int]:
+        """Eine Seite (1-basiert) einer Dateiliste plus Gesamtzahl - die
+        Oberflaeche zeigt nie alle Zeilen auf einmal (SPEC Abschnitt 8)."""
+        self.stapel_schreiben()
+        gesamt = int(self.verbindung.execute(f"SELECT COUNT(*) FROM dateien WHERE {bedingung}", werte).fetchone()[0])
+        seiten = max(1, (gesamt + int(groesse) - 1) // int(groesse))
+        seite = max(1, min(int(seite), seiten))   # hinter der letzten Seite: die letzte
+        zeilen = self.verbindung.execute(
+            f"SELECT * FROM dateien WHERE {bedingung} ORDER BY quellpfad LIMIT ? OFFSET ?",
+            (*werte, int(groesse), (seite - 1) * int(groesse)),
+        ).fetchall()
+        return zeilen, gesamt
+
     def dateien_liste(self, bedingung: str = "1", werte: tuple = ()) -> sqlite3.Cursor:
         """Zeilen als Cursor (nicht alles auf einmal in den Speicher)."""
         self.stapel_schreiben()

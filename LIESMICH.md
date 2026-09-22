@@ -21,16 +21,24 @@ schon im Paket enthalten.
 
 1. Auf der Release-Seite des Projekts die Datei **`fotosort-windows.zip`** herunterladen.
 2. Die ZIP-Datei entpacken (Rechtsklick, „Alle extrahieren…"), zum Beispiel nach
-   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort.bat`,
-   `fotosort.exe`, dieser Anleitung und den Unterordnern `_internal` und `exiftool`.
-3. **`start.bat` doppelklicken.** Es öffnet sich ein schwarzes Fenster mit Fragen
-   (Abschnitt 2).
+   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort-fenster.exe`,
+   `fotosort.exe`, `fotosort.bat`, dieser Anleitung und den Unterordnern `_internal` und
+   `exiftool`.
+3. **`start.bat` doppelklicken.** Es öffnet sich ein Fenster mit Knöpfen und Ordnerauswahl
+   (Abschnitt 2). Genauso geht ein Doppelklick auf `fotosort-fenster.exe`.
 
 **Wenn Windows beim ersten Start warnt:** Zeigt SmartScreen das blaue Fenster „Der
 Computer wurde durch Windows geschützt", klicken Sie auf „Weitere Informationen" und dann
-auf „Trotzdem ausführen". Meldet der Virenscanner die Datei `fotosort.exe`, ist das ein
-Fehlalarm, der bei selbst gebauten Programmen ohne Herstellersignatur vorkommt; lassen Sie
-die Datei als Ausnahme zu. Beides fragt Windows nur beim ersten Mal.
+auf „Trotzdem ausführen". Meldet der Virenscanner `fotosort-fenster.exe` oder `fotosort.exe`,
+ist das ein Fehlalarm, der bei selbst gebauten Programmen ohne Herstellersignatur vorkommt;
+lassen Sie die Datei als Ausnahme zu. Beides fragt Windows nur beim ersten Mal.
+
+**Wenn sich kein Fenster öffnet:** Das Fenster braucht die „WebView2-Laufzeit" von Microsoft
+Edge, die auf Windows 11 und aktuellem Windows 10 vorhanden ist. Fehlt sie, steht der Grund in
+`C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\fenster.log`. Ausweg: In einem
+schwarzen Fenster (Eingabeaufforderung) im Programmordner `fotosort.bat fenster --ohne-fenster`
+eingeben und die genannte Adresse im Browser öffnen – dieselbe Oberfläche, nur den Ordnerpfad
+tippen Sie dann selbst.
 
 Ob alles zusammenpasst, zeigt `fotosort.bat --version` im schwarzen Fenster: Es nennt die
 Programmversion und das mitgelieferte ExifTool.
@@ -49,23 +57,29 @@ bevor es um Ihre Bilder geht.
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
-3. `start.bat` doppelklicken. Es öffnet sich ein schwarzes Fenster mit Fragen.
+3. `start.bat` doppelklicken. Es öffnet sich das Fenster des Foto-Sortierers.
 
-Die Fragen des geführten Ablaufs:
+Auf der Startseite tragen Sie ein:
 
-| Frage | Was Sie eingeben |
+| Feld | Was Sie tun |
 |---|---|
-| Zielordner des Archivs | `D:\Probe\Archiv` |
-| Soll er angelegt werden? (nur wenn es den Ordner noch nicht gibt) | `ja` |
-| Quellordner mit den unsortierten Bildern | `D:\Probe\Quelle` |
-| Weiterer Quellordner (leer = keiner mehr) | nur Enter |
-| Kopieren oder Verschieben? (k/v) | Enter (= kopieren; die Quelle bleibt unverändert) |
-| Wo liegt das Ziel? hdd / ssd / netzwerk | `hdd` für eine Festplatte, `ssd` für eine SSD, `netzwerk` für ein Netzlaufwerk |
-| Stimmt das so? | Enter |
+| **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` wählen (oder den Pfad eintippen). Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
+| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Mehrere Quellen sind möglich; „Entfernen" nimmt eine wieder heraus. |
+| **Kopieren oder verschieben?** | „Kopieren" lassen – die Quelle bleibt unverändert. |
+| **Art des Laufwerks** | „Festplatte" lassen; bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
 
-Danach laufen die Schritte nacheinander. **Vor jedem Schritt fragt das Programm**;
-Enter heißt „ja", `n` heißt „hier aufhören". Alles Bisherige bleibt gespeichert,
-und beim nächsten `start.bat` geht es an derselben Stelle weiter.
+Dann den großen grünen Knopf **„Los geht's"** drücken. Danach laufen die Schritte
+nacheinander. Während eines Schritts sehen Sie einen Balken, die erledigten Dateien und die
+Datenmenge, die Geschwindigkeit und die geschätzte Restzeit, dazu die Knöpfe **Pause**,
+**Fortsetzen** und **Abbrechen**. **Nach jedem Schritt zeigt das Fenster eine Zusammenfassung**
+und einen Knopf „Weiter: …", der sagt, was als Nächstes kommt. Nichts läuft ohne diesen Knopf.
+Alles Bisherige bleibt gespeichert; wer das Fenster schließt, hält den laufenden Schritt nicht
+an, und beim nächsten `start.bat` zeigt die Startseite den Stand und bietet **„Weitermachen"**
+an.
+
+Liegt im Zielordner schon ein angefangenes Archiv, sagt die Startseite das in einem Satz.
+„Weitermachen" springt zum offenen Schritt, ohne die Quellen erneut zu durchsuchen; „Los geht's"
+durchsucht immer zuerst – das ist der richtige Knopf, wenn neue Dateien in der Quelle liegen.
 
 ### Schritt 1: Quellen durchsuchen (Scan)
 
@@ -98,17 +112,18 @@ das Programm berechnet für jede Datei den Zielordner. Ausgabe:
 - **Mögliche Duplikate (Schätzung)** – gleiche Größe und Aufnahmezeit; sicher weiß es
   das Programm erst beim Kopieren.
 
-Danach fragt der geführte Ablauf: **Soll ein Kameramodell einen anderen Ordnernamen
-bekommen?** Wenn ein Modell einen unschönen Ordnernamen bekäme, tippen Sie das
-Modell genau wie in der Liste ein und dann den gewünschten Ordnernamen. Der Eintrag
-wird dauerhaft in die Einstellungen geschrieben (siehe Abschnitt 6), und die
-betroffenen Dateien werden neu eingeordnet. Enter allein heißt „nichts ändern".
+Die Zusammenfassung im Fenster zeigt die Kameras als Tabelle: links das Modell, wie es in den
+Dateien steht, rechts ein Feld mit dem Ordnernamen. **Tippen Sie dort einfach den gewünschten
+Namen hinein** (etwa `Sony A7C` statt `ILCE-7CM2`) und drücken Sie „Weiter". Der Eintrag wird
+dauerhaft in die Einstellungen geschrieben (siehe Abschnitt 6), und die betroffenen Dateien
+werden noch einmal analysiert. Im schwarzen Fenster fragt der geführte Ablauf stattdessen:
+**Soll ein Kameramodell einen anderen Ordnernamen bekommen?** – Modell eintippen, dann den
+Ordnernamen; Enter allein heißt „nichts ändern".
 
 ### Schritt 3: Kopieren
 
-Zuerst zeigt das Programm einen **Probelauf**: wie viele Dateien und wie viel
-Speicher es kopieren würde, und ob im Ziel schon Dateien gleichen Namens liegen.
-Nach Ihrem Enter wird kopiert. Jede Datei wird zuerst unter einem Zwischennamen
+Zuerst sagt das Fenster, wie viele Dateien und wie viel Speicher kopiert werden (im
+schwarzen Fenster ist das der **Probelauf**). Nach „Jetzt kopieren" wird kopiert. Jede Datei wird zuerst unter einem Zwischennamen
 (`.part`) geschrieben, dabei wird eine Prüfsumme berechnet (ein Fingerabdruck des
 Inhalts), und erst am Ende bekommt sie ihren richtigen Namen. Ausgabe:
 
@@ -129,23 +144,42 @@ oder überschrieben; ein erneutes Kopieren legt eine frische Kopie daneben.
 
 ### Schritt 5: Quelle aufräumen
 
-Hier fragt das Programm, ob es die geprüften Originale aus der Quelle entfernen
-soll. **Beim ersten Mal: Enter (= nein) oder „ja" mit dem sicheren Standard.** Der
-Standard verschiebt die Originale nicht ins Nichts, sondern in einen Ordner
-`_geloescht_<Datum>` innerhalb der Quelle. Dort können Sie in Ruhe nachsehen und den
-Ordner später selbst löschen. Vor jeder einzelnen Datei werden Original und
-Archivkopie noch einmal vollständig gelesen und verglichen; stimmt etwas nicht,
+Das Aufräumen hat eine eigene Seite. Sie zeigt je Quellordner, wie viele Dateien eine
+geprüfte Kopie im Archiv haben und wie groß sie sind. **Beim ersten Mal: „Überspringen –
+nichts löschen" oder den sicheren Standard.** Der Standard verschiebt die Originale nicht ins
+Nichts, sondern in einen Ordner `_geloescht_<Datum>` innerhalb der Quelle. Dort können Sie in
+Ruhe nachsehen und den Ordner später selbst löschen. Vor jeder einzelnen Datei werden
+Original und Archivkopie noch einmal vollständig gelesen und verglichen; stimmt etwas nicht,
 bleibt die Datei stehen und wird gemeldet.
 
-Zum Bestätigen verlangt das Programm ein ganzes Wort (`verschieben` für den Ordner
-`_geloescht_`, `loeschen` für endgültiges Löschen, `entfernen` für leere Ordner).
-Enter allein oder ein anderes Wort heißt: nichts tun. Danach fragt der Ablauf noch
-**„Leere Ordner in den Quellen entfernen? (ja/nein)"** – auch das nur auf `ja` und nach
-dem Wort `entfernen`. Haben Sie im geführten Ablauf **Verschieben** gewählt, verlangt er
-schon vor Schritt 3 das Wort `verschieben`, weil dort die Quelle geleert wird.
+Zum Bestätigen tippen Sie ein ganzes Wort in das Feld (`verschieben` für den Ordner
+`_geloescht_`, `loeschen` für endgültiges Löschen). Ein leeres Feld oder ein anderes Wort
+heißt: keine Datei anfassen – das Programm sagt dann, dass nichts gestartet wurde. Wer das
+Häkchen **„Leere Ordner entfernen"** setzt, tippt dafür das Wort `entfernen`. Haben Sie auf
+der Startseite **Verschieben** gewählt, verlangt das Fenster schon vor Schritt 3 das Wort
+`verschieben`, weil dort die Quelle geleert wird. Im schwarzen Fenster gelten dieselben
+Wörter.
 
-Am Ende steht **Gefuehrter Ablauf beendet** mit der Anzahl der Dateien je Status
-(Abschnitt 5 erklärt die Wörter).
+Am Ende steht **Alles erledigt** mit der Anzahl der Dateien je Status (Abschnitt 5 erklärt
+die Wörter), dazu die Knöpfe „Bericht öffnen" und „Quelle aufräumen…".
+
+### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
+
+Wer lieber Fragen im Textfenster beantwortet, ruft im Programmordner `fotosort.bat start`
+auf (Eingabeaufforderung öffnen: in der Adresszeile des Explorers `cmd` eintippen). Die
+Fragen dort:
+
+| Frage | Was Sie eingeben |
+|---|---|
+| Zielordner des Archivs | `D:\Probe\Archiv` |
+| Soll er angelegt werden? (nur wenn es den Ordner noch nicht gibt) | `ja` |
+| Quellordner mit den unsortierten Bildern | `D:\Probe\Quelle` |
+| Weiterer Quellordner (leer = keiner mehr) | nur Enter |
+| Kopieren oder Verschieben? (k/v) | Enter (= kopieren; die Quelle bleibt unverändert) |
+| Wo liegt das Ziel? hdd / ssd / netzwerk | `hdd` für eine Festplatte, `ssd` für eine SSD, `netzwerk` für ein Netzlaufwerk |
+| Stimmt das so? | Enter |
+
+Vor jedem Schritt fragt das Programm; Enter heißt „ja", `n` heißt „hier aufhören".
 
 ---
 
@@ -200,9 +234,17 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
 
 ## 4. Was während eines Laufs zu sehen ist
 
-Während des Kopierens und Prüfens zeigt eine Zeile den Fortschritt: erledigte
-Dateien und Datenmenge, MB pro Sekunde und die geschätzte Restzeit. Am Ende jeder
-Phase stehen Dauer und Durchsatz.
+Im Fenster zeigt jeder Schritt einen Balken mit erledigten Dateien und Datenmenge, MB pro
+Sekunde und der geschätzten Restzeit, höchstens zweimal je Sekunde erneuert. **Pause** hält
+nach der laufenden Datei an, **Fortsetzen** macht weiter, **Abbrechen** beendet den Schritt
+sauber – das Bisherige bleibt gespeichert, der nächste Lauf macht dort weiter. Reagiert ein
+Schritt nicht auf „Abbrechen", erscheint nach einer Weile „Sofort beenden". Im schwarzen
+Fenster zeigt beim Kopieren und Prüfen eine Zeile dasselbe. Am Ende jeder Phase stehen Dauer
+und Durchsatz.
+
+Die Listen **Fehler**, **Doppelte Dateien** und **Dateien ohne Datum** öffnen sich über die
+Knöpfe auf der Startseite und in den Zusammenfassungen – immer seitenweise mit 100 Zeilen,
+nie alles auf einmal.
 
 Nach jeder Phase schreibt das Programm
 
@@ -318,14 +360,20 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   eingebunden ist.
 - **Sicherungskopie und Berichte**: `<Ziel>\.fotosortierer\` (siehe Abschnitt 4).
 - **Ordner `_geloescht_<Datum>`**: in der Quelle, nur wenn Sie aufgeräumt haben.
+- **Oberfläche**: `C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\` – der Stand des
+  laufenden Schritts, die Ausgabe der Arbeitsprozesse (`arbeit.log`) und die des Fensters
+  (`fenster.log`). Bei einer Fehlermeldung im Fenster lohnt ein Blick in `arbeit.log`.
 
 ---
 
 ## 8. Wenn etwas abbricht
 
-**Sie drücken Strg+C, der Rechner geht aus, das Netzlaufwerk fällt weg:** Nichts ist
-verloren. Alles bis dahin Erledigte ist gespeichert. Starten Sie einfach denselben
-Befehl (oder `start.bat`) noch einmal – das Programm macht genau dort weiter.
+**Sie schließen das Fenster, drücken Abbrechen oder Strg+C, der Rechner geht aus, das
+Netzlaufwerk fällt weg:** Nichts ist verloren. Alles bis dahin Erledigte ist gespeichert.
+Ein geschlossenes Fenster hält den laufenden Schritt nicht einmal an. Starten Sie einfach
+`start.bat` (oder denselben Befehl) noch einmal – das Programm zeigt den Stand und macht
+genau dort weiter. Meldet das Fenster „unerwartet beendet", ist der Arbeitsprozess abgestürzt
+oder wurde beendet; die letzten Zeilen seiner Ausgabe stehen dann im Fenster.
 Halbfertige Kopien (`.part`-Dateien) räumt es beim nächsten Kopieren selbst weg und
 kopiert die betroffenen Dateien erneut.
 
@@ -365,7 +413,8 @@ neben der alten den Anhang `_1`.
 - **Beim ersten Aufräumen den Standard nehmen** (Ordner `_geloescht_<Datum>`), nicht
   `--endgueltig`. Den Ordner löschen Sie selbst, wenn Sie das Archiv gesehen haben.
 - **Nie zwei Läufe gleichzeitig** auf dasselbe Archiv. Das Programm sperrt das Archiv,
-  aber warten Sie trotzdem, bis das Fenster fertig ist.
+  und das Fenster startet keinen zweiten Schritt, solange einer läuft – aber starten Sie
+  nicht zusätzlich Befehle im schwarzen Fenster, während das Fenster arbeitet.
 - **Die Datenbank bleibt auf dem Rechner.** Beim Wechsel auf einen anderen Rechner
   übernimmt das Programm nur die Einstellungen aus dem Archiv; die Datenbank selbst holen
   Sie wie in Abschnitt 8 beschrieben von Hand zurück, solange `wiederherstellen` fehlt.
@@ -383,8 +432,9 @@ neben der alten den Anhang `_1`.
 - `fotosort wiederherstellen` (Datenbank aus der Sicherungskopie holen) und
   `fotosort ziel-index --neu-aufbauen` (das Archiv neu einlesen) melden sich mit
   „Er kommt in Phase 3" und tun noch nichts. Der Weg von Hand steht in Abschnitt 8.
-- Eine Oberfläche mit Knöpfen statt des schwarzen Fensters (Weboberfläche) und der
-  Betrieb auf dem TrueNAS-Server sind spätere Phasen.
+- Der Betrieb auf dem TrueNAS-Server (im Browser, mit eigenem Ordner-Browser statt des
+  Windows-Dialogs) ist eine spätere Phase. Die Oberfläche läuft dort schon jetzt mit
+  `fotosort fenster --ohne-fenster`; der Ordnerpfad wird dann eingetippt.
 
 ---
 

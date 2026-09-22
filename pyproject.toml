@@ -19,16 +19,23 @@ dependencies = [
     "rich",
     "tomli-w",
     "tzdata",
+    # Oberflaeche (Phase 7): Server fuer die Seite, Fenster
+    "fastapi",
+    "uvicorn",
+    "pywebview",
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "httpx"]
 
 [project.scripts]
 fotosort = "fotosort.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"fotosort.oberflaeche" = ["static/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fotosort.__version__" }

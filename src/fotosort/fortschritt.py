@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Callable
 
-from . import meldungen
+from . import meldungen, steuerung
 
 STILLE_SEKUNDEN = 5.0
 BALKEN_SEKUNDEN = 0.5
@@ -55,6 +55,7 @@ class Fortschritt:
     def weiter(self, dateien: int, bytes_: int) -> None:
         self.dateien += dateien
         self.bytes += bytes_
+        steuerung.melden(self.dateien, self.gesamt, self.bytes, self.gesamt_bytes)
         jetzt = time.monotonic()
         if jetzt - self._zuletzt < (BALKEN_SEKUNDEN if self.balken else STILLE_SEKUNDEN):
             return

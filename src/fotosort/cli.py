@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, steuerung, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -582,8 +582,20 @@ def befehl_pruefen(args, konsole) -> int:
         datenbank.schliessen()
 
 
+# Vom Arbeitsprozess der Oberflaeche gesetzt: das Wort, das der Nutzer im
+# Fenster getippt hat, je Bestaetigungsart ("dateien", "ordner"). Die
+# Pruefung selbst (Wort == erwartetes Wort) bleibt hier im Kern.
+bestaetigung_vorgabe: dict[str, str] | None = None
+
+
 def _bestaetigung_lesen(konsole, frage: str, wort: str) -> bool:
     """Ein Wort abfragen - nicht nur Enter. Ohne Eingabemoeglichkeit: nein."""
+    if bestaetigung_vorgabe is not None:
+        konsole.print(frage)
+        art = "ordner" if wort == meldungen.BESTAETIGUNGSWORT["ordner"] else "dateien"
+        antwort = str(bestaetigung_vorgabe.get(art, ""))
+        konsole.print(antwort or "(keine Eingabe)")
+        return antwort.strip().lower() == wort
     if not sys.stdin or not sys.stdin.isatty() and os.environ.get("FOTOSORT_EINGABE_ERZWINGEN", "") != "1":
         # In einer Pipe oder ohne Terminal gibt es keine bewusste Bestaetigung.
         konsole.print(frage)
@@ -986,6 +998,83 @@ def befehl_start(args, konsole) -> int:
         return ABGEBROCHEN
 
 
+def befehl_arbeit(args, konsole) -> int:
+    """Ein Schritt im Auftrag der Oberflaeche (Phase 7): laeuft als eigener
+    Prozess, meldet seinen Stand in eine Datei und nimmt Pause/Abbruch
+    von dort entgegen. Sonst genau derselbe Weg wie der einzelne Befehl."""
+    global bestaetigung_vorgabe
+    auftrag = steuerung.json_lesen(Path(args.auftrag))
+    if not auftrag:
+        konsole.print(meldungen.arbeit_auftrag_fehlt(args.auftrag))
+        return FEHLENDE_ANGABE
+    schritt = str(auftrag.get("schritt", ""))
+    st = steuerung.Steuerung(Path(auftrag["status_datei"]), Path(auftrag["steuer_datei"]), schritt)
+    steuerung.AKTIV = st
+    st.schreiben()
+    st.herzschlag_starten()
+    ns = argparse.Namespace(befehl=schritt, ziel=auftrag.get("ziel"), config=auftrag.get("config"))
+    try:
+        if schritt == "scan":
+            ns.quelle = list(auftrag.get("quellen") or []) or None
+            ns.ziel_anlegen = bool(auftrag.get("ziel_anlegen"))
+            rc = befehl_scan(ns, konsole)
+        elif schritt == "analyse":
+            rc = befehl_analyse(ns, konsole)
+        elif schritt == "kopieren":
+            ns.verschieben = bool(auftrag.get("verschieben"))
+            ns.dry_run = False
+            ns.profil = auftrag.get("profil")
+            ns.kopier_worker = None
+            ns.hash_worker = None
+            rc = befehl_kopieren(ns, konsole)
+        elif schritt == "pruefen":
+            ns.profil = auftrag.get("profil")
+            ns.hash_worker = None
+            rc = befehl_pruefen(ns, konsole)
+        elif schritt == "aufraeumen":
+            ns.quelle = list(auftrag.get("quellen") or []) or None
+            ns.leere_ordner = bool(auftrag.get("leere_ordner"))
+            ns.dry_run = False
+            ns.endgueltig = auftrag.get("weise") == loeschen.WEISE_ENDGUELTIG
+            ns.profil = auftrag.get("profil")
+            ns.hash_worker = None
+            bestaetigung_vorgabe = dict(auftrag.get("bestaetigung") or {})
+            rc = befehl_aufraeumen(ns, konsole)
+        else:
+            konsole.print(meldungen.arbeit_schritt_unbekannt(schritt))
+            rc = FEHLENDE_ANGABE
+    except KeyboardInterrupt:
+        st.beenden(steuerung.ZUSTAND_ABGEBROCHEN, ABGEBROCHEN, meldungen.abbruch_allgemein())
+        return ABGEBROCHEN
+    except FotosortFehler as fehler:
+        st.beenden(steuerung.ZUSTAND_FEHLER, FEHLER, str(fehler))
+        konsole.print(str(fehler))
+        return FEHLER
+    except Exception as fehler:  # noqa: BLE001 - der Stand muss die Oberflaeche erreichen
+        st.beenden(steuerung.ZUSTAND_FEHLER, FEHLER, f"{type(fehler).__name__}: {fehler}")
+        raise
+    finally:
+        bestaetigung_vorgabe = None
+        steuerung.AKTIV = None
+    if rc == ABGEBROCHEN:
+        st.beenden(steuerung.ZUSTAND_ABGEBROCHEN, rc, meldungen.abbruch_allgemein())
+    elif rc == OK:
+        st.beenden(steuerung.ZUSTAND_FERTIG, rc)
+    else:
+        st.beenden(steuerung.ZUSTAND_FEHLER, rc, meldungen.arbeit_mit_fehlern(schritt))
+    return rc
+
+
+def befehl_fenster(args, konsole) -> int:
+    """Phase 7: die Oberflaeche - eigenes Fenster (pywebview) oder nur der
+    Server fuer den Browser (--ohne-fenster)."""
+    from .oberflaeche import fenster
+    return fenster.starten(
+        ohne_fenster=bool(args.ohne_fenster), port=args.port, selbsttest=bool(args.selbsttest),
+        ziel=args.ziel, konsole=konsole,
+    )
+
+
 def befehl_messen(args, konsole) -> int:
     """Lese- und Schreibtempo messen (Phase 6). Kein Archiv, kein Lauf."""
     quelle = Path(args.quelle)
@@ -1117,6 +1206,16 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen (sonst wird gefragt)")
     _gemeinsam(p)
 
+    p = unterbefehle.add_parser("fenster", help="die Oberflaeche mit Fenster und Knoepfen oeffnen")
+    p.add_argument("--ohne-fenster", action="store_true", help="nur den Server starten und die Adresse fuer den Browser nennen")
+    p.add_argument("--port", type=int, default=0, help="Anschluss fuer den Server (0 = frei waehlen)")
+    p.add_argument("--selbsttest", action="store_true", help="Fenster oeffnen, Seite laden, wieder schliessen (fuer die CI)")
+    _gemeinsam(p)
+
+    p = unterbefehle.add_parser("arbeit", help="ein Schritt im Auftrag der Oberflaeche (intern)")
+    p.add_argument("--auftrag", metavar="DATEI", required=True, help="JSON-Datei mit dem Auftrag")
+    _gemeinsam(p)
+
     p = unterbefehle.add_parser("messen", help="Lese- und Schreibtempo von Quelle und Ziel messen")
     p.add_argument("--quelle", metavar="PFAD", required=True, help="Quellordner, aus dem gelesen wird")
     p.add_argument("--mb", type=int, default=256, metavar="N", help="Datenmenge je Stufe in MB (Standard 256)")
@@ -1141,12 +1240,31 @@ def _konsole(fehlerausgabe: bool = False):
     )
 
 
+def _ohne_konsole_umleiten() -> None:
+    """Gepacktes Fensterprogramm: Es gibt keine Konsole, sys.stdout ist None.
+    Alles, was das Programm sagt, landet dann in einer Protokolldatei."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    from .oberflaeche import ablauf
+    protokoll = open(ablauf.oberflaeche_ordner() / "fenster.log", "a", encoding="utf-8", errors="replace")
+    if sys.stdout is None:
+        sys.stdout = protokoll
+    if sys.stderr is None:
+        sys.stderr = protokoll
+
+
 def main(argv: list[str] | None = None) -> int:
     global _argumente
+    _ohne_konsole_umleiten()
+    argumente = list(sys.argv[1:] if argv is None else argv)
+    # Das Fensterprogramm (fotosort-fenster.exe) und fotosort.exe per
+    # Doppelklick, beide ohne Angaben: das Fenster oeffnen.
+    if not argumente and getattr(sys, "frozen", False):
+        argumente = ["fenster"]
     eltern = parser_bauen()
     _exiftool_startbar_gemerkt.clear()
-    _argumente = list(sys.argv[1:] if argv is None else argv)
-    args = eltern.parse_args(argv)
+    _argumente = argumente
+    args = eltern.parse_args(argumente)
     if not args.befehl:
         eltern.print_help()
         return FEHLENDE_ANGABE
@@ -1156,8 +1274,9 @@ def main(argv: list[str] | None = None) -> int:
     # Jeder Befehl ausser --help braucht ein Ziel (SPEC Abschnitt 8).
     if not getattr(args, "ziel", None):
         args.ziel = os.environ.get("FOTOSORT_ZIEL", "").strip() or None
-    # Ausnahme: der gefuehrte Modus fragt nach dem Ziel, statt abzubrechen.
-    if not args.ziel and args.befehl != "start":
+    # Ausnahmen: der gefuehrte Modus und das Fenster fragen nach dem Ziel,
+    # statt abzubrechen; der Arbeitsprozess bekommt es aus dem Auftrag.
+    if not args.ziel and args.befehl not in ("start", "fenster", "arbeit"):
         konsole.print(meldungen.ziel_fehlt())
         return FEHLENDE_ANGABE
 
@@ -1167,7 +1286,7 @@ def main(argv: list[str] | None = None) -> int:
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
     # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
     # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen", "start", "messen"):
+    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen", "start", "messen", "fenster", "arbeit"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -1197,6 +1316,10 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_start(args, konsole)
         if args.befehl == "messen":
             return befehl_messen(args, konsole)
+        if args.befehl == "fenster":
+            return befehl_fenster(args, konsole)
+        if args.befehl == "arbeit":
+            return befehl_arbeit(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))
