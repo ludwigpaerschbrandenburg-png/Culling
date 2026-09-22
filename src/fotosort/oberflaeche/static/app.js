@@ -1,19 +1,38 @@
-/* Die Seite der Oberflaeche (Phase 7). Kein Rahmenwerk, keine fremde Bibliothek.
-   Alle Zahlen und Zusammenfassungen kommen fertig formatiert vom Server. */
+/* fotosort - die Seite der Oberflaeche (Phase 7). Kein Rahmenwerk.
+   Aufbau und Zustaende: docs/design/DESIGN.md. Alle Zahlen und Texte kommen
+   fertig formatiert vom Server; hier wird nur gezeigt und geklickt. */
 (function () {
   "use strict";
 
-  var Z = { zustand: null, seite: "start", vorher: "start", schritt: "", poll: null, abbruchZeit: 0, liste: { art: "", seite: 1 }, naechster: null };
+  var SCHRITTE = ["scan", "analyse", "kopieren", "pruefen", "aufraeumen"];
   var ENDE = { fertig: 1, abgebrochen: 1, fehler: 1, abgestuerzt: 1 };
+  var Z = {
+    zustand: null,        // /api/zustand
+    ansicht: "start",     // start | haupt | liste
+    vorher: "start",
+    poll: null,
+    letzterSchritt: "",   // zuletzt gelaufener Schritt (fuer die Zusammenfassung)
+    naechster: null,      // /api/naechster
+    zf: null,             // /api/zusammenfassung
+    liste: { art: "", seite: 1 },
+    abbruchZeit: 0,
+    lauf: null
+  };
 
   function $(id) { return document.getElementById(id); }
-  function alle(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function alle(sel, wurzel) { return Array.prototype.slice.call((wurzel || document).querySelectorAll(sel)); }
   function leer(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function el(tag, text, klasse) {
     var e = document.createElement(tag);
     if (text !== undefined && text !== null) e.textContent = text;
     if (klasse) e.className = klasse;
     return e;
+  }
+  function knopf(text, klasse, klick) {
+    var k = el("button", text, "btn " + klasse);
+    k.type = "button";
+    if (klick) k.onclick = klick;
+    return k;
   }
 
   // ---------------------------------------------------------------- Server --
@@ -33,119 +52,145 @@
     var m = $("meldung");
     if (!text) { m.classList.add("versteckt"); m.textContent = ""; return; }
     m.textContent = text;
-    m.className = "meldung" + (gut ? " gut" : "");
-    window.scrollTo(0, 0);
+    m.className = "meldung" + (gut ? "" : " fehler");
+    $("meldung").scrollIntoView({ block: "nearest" });
   }
   function fehlerZeigen(f) { meldung(f && f.message ? f.message : String(f)); }
 
-  function frage(text) {
+  // Dialog: Frage mit Ja/Nein; mit eingabe=true ein Feld (z. B. Bestaetigungswort).
+  function dialog(titel, text, opt) {
+    opt = opt || {};
     return new Promise(function (loesen) {
-      $("frage-text").textContent = text;
-      $("frage").classList.remove("versteckt");
-      function ende(antwort) {
-        $("frage").classList.add("versteckt");
-        $("frage-ja").onclick = null; $("frage-nein").onclick = null;
-        loesen(antwort);
+      $("dialog-titel").textContent = titel;
+      $("dialog-text").textContent = text || "";
+      var eingabe = $("dialog-eingabe");
+      eingabe.value = "";
+      eingabe.classList.toggle("versteckt", !opt.eingabe);
+      $("dialog-ja").textContent = opt.ja || "Ja";
+      $("dialog-nein").textContent = opt.nein || "Abbrechen";
+      $("dialog").classList.remove("versteckt");
+      function ende(ja) {
+        $("dialog").classList.add("versteckt");
+        $("dialog-ja").onclick = null; $("dialog-nein").onclick = null; eingabe.onkeydown = null;
+        loesen({ ja: ja, wert: eingabe.value });
       }
-      $("frage-ja").onclick = function () { ende(true); };
-      $("frage-nein").onclick = function () { ende(false); };
+      $("dialog-ja").onclick = function () { ende(true); };
+      $("dialog-nein").onclick = function () { ende(false); };
+      eingabe.onkeydown = function (e) { if (e.key === "Enter") ende(true); };
+      if (opt.eingabe) eingabe.focus(); else $("dialog-ja").focus();
     });
   }
 
   function zeige(name) {
-    if (Z.seite !== name) Z.vorher = Z.seite;
-    Z.seite = name;
-    alle(".seite").forEach(function (s) { s.classList.toggle("versteckt", s.id !== "seite-" + name); });
+    if (Z.ansicht !== name) Z.vorher = Z.ansicht;
+    Z.ansicht = name;
+    alle(".ansicht").forEach(function (s) { s.classList.toggle("versteckt", s.id !== "seite-" + name); });
+    leer($("aktionen"));   // nie Knoepfe der vorigen Ansicht stehen lassen
     meldung("");
-    window.scrollTo(0, 0);
+    $("meldung").parentNode.scrollTop = 0;
   }
 
-  // ------------------------------------------------------------ Startseite --
-  function startseiteFuellen(z) {
-    Z.zustand = z;
-    $("version").textContent = "Version " + z.version;
-    document.body.classList.toggle("ohne-fenster", !z.fenster);
+  function radio(name) {
+    var r = alle("input[name=" + name + "]").filter(function (x) { return x.checked; })[0];
+    return r ? r.value : "";
+  }
+  function radioSetzen(name, wert) {
+    alle("input[name=" + name + "]").forEach(function (r) { r.checked = r.value === wert; });
+  }
+
+  // ---------------------------------------------------- Titel und Statusleiste --
+  function rahmen() {
+    var z = Z.zustand; if (!z) return;
+    $("titel-ziel").textContent = z.ziel || "kein Zielordner";
+    var laeuft = Z.lauf && !ENDE[Z.lauf.zustand] && Z.lauf.zustand;
+    var nr = (laeuft && Z.lauf.lauf) || (z.archiv && z.archiv.lauf_nr) || 0;
+    $("titel-lauf").textContent = nr ? "Lauf " + nr : "Lauf –";
+    $("leiste-db").textContent = z.archiv && z.archiv.da ? "lokal" : "–";
+    $("leiste-sicherung").textContent = (z.archiv && z.archiv.sicherung) || "–";
+    $("leiste-sperre").textContent = laeuft ? "Archiv gesperrt · dieser Lauf" : (z.archiv && z.archiv.da ? "Archiv frei" : "");
+    var b = (z.archiv && z.archiv.bericht) || {};
+    $("bericht-name").textContent = b.name || "noch keiner";
+    $("bericht-oeffnen").disabled = !b.txt;
+    $("bericht-csv").disabled = !b.csv;
+  }
+
+  // -------------------------------------------------------------- Startseite --
+  function startFuellen(z) {
     $("ziel").value = z.ziel || "";
-    var sel = $("profil");
-    leer(sel);
-    z.profile.forEach(function (p) {
-      var o = el("option", p.name === "hdd" ? "Festplatte" : p.name === "ssd" ? "SSD" : "Netzlaufwerk");
-      o.value = p.name;
-      sel.appendChild(o);
-    });
-    sel.value = z.profil;
-    profilText();
-    alle("input[name=modus]").forEach(function (r) { r.checked = (r.value === "verschieben") === !!z.verschieben; });
-    quellenZeigen(z.quellen_neu, z.archiv);
+    radioSetzen("modus", z.verschieben ? "verschieben" : "kopieren");
+    radioSetzen("profil", z.profil);
+    modusText(); profilText();
+    quellenZeigen(z.quellen_neu);
     archivZeigen(z.archiv);
   }
 
+  function modusText() {
+    $("modus-text").textContent = radio("modus") === "verschieben"
+      ? "Jede Datei wird erst nach geprüfter Kopie in der Quelle gelöscht."
+      : "Die Quelle bleibt unverändert · aufräumen später.";
+  }
   function profilText() {
     var z = Z.zustand; if (!z) return;
-    var p = z.profile.filter(function (x) { return x.name === $("profil").value; })[0];
+    var p = z.profile.filter(function (x) { return x.name === radio("profil"); })[0];
     $("profil-text").textContent = p ? p.text : "";
   }
 
-  function quellenZeigen(neu, archiv) {
-    var ul = $("quellen");
-    leer(ul);
-    var bekannt = (archiv && archiv.quellen) || [];
-    bekannt.forEach(function (q) {
-      var li = el("li");
-      li.appendChild(el("span", q, "pfad"));
-      li.appendChild(el("span", "bereits erfasst", "bekannt"));
-      ul.appendChild(li);
-    });
+  function quellenZeigen(neu) {
+    var box = $("quellen");
+    leer(box);
     (neu || []).forEach(function (q) {
-      var li = el("li");
-      li.appendChild(el("span", q, "pfad"));
-      var k = el("button", "Entfernen", "knopf klein");
-      k.onclick = function () {
-        api("/api/quelle", { pfad: q, entfernen: true }).then(function (a) { quellenZeigen(a.quellen_neu, Z.zustand.archiv); }).catch(fehlerZeigen);
+      var t = el("span", null, "tag tag-neutral mono");
+      t.appendChild(el("span", q, "ellipse"));
+      var weg = el("span", "×", "weg");
+      weg.title = "Entfernen";
+      weg.onclick = function () {
+        api("/api/quelle", { pfad: q, entfernen: true }).then(function (a) { Z.zustand.quellen_neu = a.quellen_neu; quellenZeigen(a.quellen_neu); }).catch(fehlerZeigen);
       };
-      li.appendChild(k);
-      ul.appendChild(li);
+      t.appendChild(weg);
+      box.appendChild(t);
     });
-    if (!bekannt.length && !(neu || []).length) {
-      var li0 = el("li", "Noch kein Quellordner. Bitte unten einen eintragen.");
-      li0.style.color = "#5a6270";
-      ul.appendChild(li0);
+    if (!(neu || []).length && !((Z.zustand && Z.zustand.archiv && Z.zustand.archiv.quellen) || []).length) {
+      box.appendChild(el("span", "noch keine Quelle", "hinweis"));
     }
   }
 
   function archivZeigen(archiv) {
-    var box = $("archiv-info"), wm = $("weitermachen-box"), wz = $("werkzeuge");
-    box.classList.add("versteckt"); wm.classList.add("versteckt"); wz.classList.add("versteckt");
+    var kicker = $("archiv-kicker"), text = $("archiv-text"), tags = $("archiv-quellen"), wm = $("weitermachen");
+    leer(tags);
+    wm.disabled = true;
+    wm.textContent = "Weitermachen";
+    if (!$("ziel").value.trim()) {
+      kicker.textContent = "Zielordner"; text.textContent = "Noch kein Zielordner gewählt."; return;
+    }
     if (!archiv || !archiv.da) {
-      if (archiv && archiv.ziel_existiert === false && $("ziel").value) {
-        box.textContent = "Diesen Ordner gibt es noch nicht. Er wird bei „Los geht's“ nach Rückfrage angelegt.";
-        box.className = "hinweis";
-      }
+      kicker.textContent = "Neues Archiv";
+      text.textContent = archiv && archiv.ziel_existiert === false ? "Ordner wird bei „Los geht's“ nach Rückfrage angelegt." : "Ordner ist da · noch kein Archiv darin.";
       return;
     }
-    box.className = "hinweis gut";
-    if (archiv.laeuft) {
-      box.textContent = "In diesem Ordner liegt ein Archiv; gerade läuft ein Schritt.";
-    } else if (archiv.fehler) {
-      box.className = "hinweis";
-      box.textContent = archiv.fehler;
+    kicker.textContent = "Angefangenes Archiv";
+    if (archiv.laeuft) { text.textContent = "Gerade läuft ein Schritt."; return; }
+    if (archiv.fehler) { text.textContent = archiv.fehler; return; }
+    text.textContent = archiv.phase || "";
+    (archiv.quellen || []).forEach(function (q) {
+      var t = el("span", q, "tag tag-neutral mono bekannt"); t.title = "bereits erfasst"; tags.appendChild(t);
+    });
+    if (archiv.naechster && archiv.naechster !== "fertig") {
+      wm.disabled = false;
+      wm.textContent = "Weitermachen: " + kurzName(archiv.naechster);
     } else {
-      box.textContent = "In diesem Ordner liegt bereits ein angefangenes Archiv. " + (archiv.phase || "");
-      wz.classList.remove("versteckt");
-      if (archiv.naechster && archiv.naechster !== "fertig") {
-        $("weitermachen-text").textContent = "Offener Schritt: " + archiv.naechster_name;
-        wm.classList.remove("versteckt");
-      }
+      wm.textContent = "Alles erledigt";
     }
-    box.classList.remove("versteckt");
+  }
+
+  function kurzName(schritt) {
+    return { scan: "Scan", analyse: "Analyse", kopieren: Z.zustand && Z.zustand.verschieben ? "Verschieben" : "Kopieren", pruefen: "Prüfen", aufraeumen: "Aufräumen" }[schritt] || schritt;
   }
 
   function zielUebernehmen() {
     return api("/api/ziel", { ziel: $("ziel").value.trim() }).then(function (a) {
       Z.zustand.ziel = a.ziel; Z.zustand.archiv = a.archiv;
-      archivZeigen(a.archiv);
-      quellenZeigen(Z.zustand.quellen_neu, a.archiv);
-      if (a.archiv && a.archiv.profil && !Z.profilGewaehlt) { $("profil").value = a.archiv.profil; profilText(); einstellungenSenden(); }
+      archivZeigen(a.archiv); quellenZeigen(Z.zustand.quellen_neu); rahmen();
+      if (a.archiv && a.archiv.profil && !Z.profilGewaehlt) { radioSetzen("profil", a.archiv.profil); profilText(); einstellungenSenden(); }
     }).catch(fehlerZeigen);
   }
 
@@ -155,8 +200,7 @@
   }
 
   function einstellungenSenden() {
-    var verschieben = alle("input[name=modus]").filter(function (r) { return r.checked; })[0].value === "verschieben";
-    return api("/api/einstellungen", { verschieben: verschieben, profil: $("profil").value }).then(function (a) {
+    return api("/api/einstellungen", { verschieben: radio("modus") === "verschieben", profil: radio("profil") }).then(function (a) {
       Z.zustand.verschieben = a.verschieben; Z.zustand.profil = a.profil;
     }).catch(fehlerZeigen);
   }
@@ -167,33 +211,100 @@
     api("/api/quelle", { pfad: pfad }).then(function (a) {
       $("quelle-neu").value = "";
       Z.zustand.quellen_neu = a.quellen_neu;
-      quellenZeigen(a.quellen_neu, Z.zustand.archiv);
+      quellenZeigen(a.quellen_neu);
       meldung("");
     }).catch(fehlerZeigen);
   }
 
   function los(zielAnlegen) {
-    $("los").disabled = true;
     zielUebernehmen().then(function () {
       return api("/api/los", { ziel_anlegen: !!zielAnlegen });
     }).then(function (a) {
       if (a && a.frage === "ziel_anlegen") {
-        return frage(a.text).then(function (ja) { if (ja) los(true); });
+        return dialog("Ordner anlegen?", a.text, { ja: "Anlegen" }).then(function (r) { if (r.ja) los(true); });
       }
-      if (a && a.gestartet) laufZeigen(a.gestartet);
-    }).catch(fehlerZeigen).then(function () { $("los").disabled = false; });
+      if (a && a.gestartet) { hauptZeigen(); laufStarten(a.gestartet); }
+    }).catch(fehlerZeigen);
   }
 
-  // -------------------------------------------------------------- Laufseite --
-  function laufZeigen(schritt) {
-    zeige("lauf");
-    if (schritt && Z.zustand) {
-      $("lauf-titel").textContent = Z.zustand.schritte[schritt] || "";
-      $("lauf-zustand").textContent = "Wird gestartet …";
+  function startAktionen() {
+    var a = $("aktionen"); leer(a);
+    a.appendChild(knopf("Los geht's", "btn-primary", function () { los(false); }));
+    if (Z.zustand.archiv && Z.zustand.archiv.da) {
+      a.appendChild(knopf("Übersicht", "btn-secondary", function () { hauptZeigen(); ruheZeigen(); }));
+      a.appendChild(knopf("Einstellungen", "btn-secondary", einstellungenOeffnen));
     }
-    $("lauf-log").classList.add("versteckt");
-    $("sofort").classList.add("versteckt");
+  }
+
+  // ------------------------------------------------------------ Hauptansicht --
+  function hauptZeigen() {
+    zeige("haupt");
+    pfadeZeigen();
+  }
+
+  function pfadeZeigen() {
+    var z = Z.zustand, box = $("pfade");
+    leer(box);
+    var quellen = ((z.archiv && z.archiv.quellen) || []).concat(z.quellen_neu || []);
+    quellen.forEach(function (q) { box.appendChild(el("span", q, "tag tag-neutral mono")); });
+    box.appendChild(el("span", "→", "pfeil"));
+    box.appendChild(el("span", z.ziel || "–", "tag tag-outline mono"));
+    var rechts = el("span", null, "push flex-gap");
+    rechts.appendChild(el("span", z.profil, "tag tag-neutral"));
+    rechts.appendChild(el("span", z.verschieben ? "verschieben" : "kopieren", "tag tag-neutral"));
+    box.appendChild(rechts);
+  }
+
+  function phasenSetzen(aktiv, anteil) {
+    var idx = SCHRITTE.indexOf(aktiv);
+    alle("#phasen-liste li").forEach(function (li, i) {
+      li.className = idx < 0 ? "ist-fertig" : (i < idx ? "ist-fertig" : (i === idx ? "ist-aktiv" : ""));
+      if (i === idx) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
+    });
+    var fuellung = idx < 0 ? 1 : (idx + (anteil || 0)) / SCHRITTE.length;
+    $("phasen-fill").style.width = Math.round(fuellung * 100) + "%";
+  }
+
+  function kennzahlen(l) {
+    var box = $("kennzahlen"); leer(box);
+    function paar(text, einheit) {
+      var s = el("span");
+      var teile = String(text).split(" von ");
+      s.appendChild(el("b", teile[0]));
+      s.appendChild(document.createTextNode(teile.length > 1 ? " / " + teile[1] + " " + einheit : " " + einheit));
+      return s;
+    }
+    if (!l || !l.text) return;
+    box.appendChild(paar(l.text.dateien || "0", "Dateien"));
+    if (l.bytes || l.gesamt_bytes) box.appendChild(paar(l.text.bytes, ""));
+    if (l.text.rate) { var r = el("span"); r.appendChild(el("b", l.text.rate.replace(" MB/s", ""))); r.appendChild(document.createTextNode(" MB/s")); box.appendChild(r); }
+    if (l.text.restzeit) { var t = el("span"); t.appendChild(document.createTextNode("Rest ")); t.appendChild(el("b", l.text.restzeit)); box.appendChild(t); }
+    if (l.text.dauer && !ENDE[l.zustand]) { var d = el("span"); d.appendChild(document.createTextNode("bisher ")); d.appendChild(el("b", l.text.dauer)); box.appendChild(d); }
+  }
+
+  function zaehlerZeigen(zeilen) {
+    var dl = $("zaehler"); leer(dl);
+    (zeilen || []).forEach(function (z) {
+      var div = el("div");
+      div.appendChild(el("dt", z[0]));
+      var wert = String(z[1]);
+      div.appendChild(el("dd", wert, wert === "0" ? "null" : ""));
+      dl.appendChild(div);
+    });
+  }
+
+  // -- laufender Schritt ----------------------------------------------------
+  function laufStarten(schritt) {
+    Z.letzterSchritt = schritt || Z.letzterSchritt;
     Z.abbruchZeit = 0;
+    $("kameras").classList.add("versteckt");
+    $("log").classList.add("versteckt");
+    zaehlerZeigen([]);
+    $("aktuell").textContent = "Wird gestartet …";
+    $("aktuell").classList.add("pulse");
+    phasenSetzen(Z.letzterSchritt, 0);
+    kartenSperren(true);
+    laufAktionen({ zustand: "startet", schritt: Z.letzterSchritt });
     if (Z.poll) clearInterval(Z.poll);
     Z.poll = setInterval(laufAbfragen, 500);
     laufAbfragen();
@@ -201,41 +312,47 @@
 
   function laufAbfragen() {
     api("/api/lauf").then(function (l) {
+      Z.lauf = l;
+      if (l.schritt) Z.letzterSchritt = l.schritt;
       laufFuellen(l);
+      rahmen();
       if (ENDE[l.zustand]) {
         clearInterval(Z.poll); Z.poll = null;
-        Z.schritt = l.schritt;
-        zusammenfassungZeigen(l);
+        ruheZeigen(l);
       }
-    }).catch(function (f) { $("lauf-zustand").textContent = "Keine Verbindung: " + f.message; });
+    }).catch(function (f) { $("aktuell").textContent = "Keine Verbindung: " + f.message; });
   }
 
   function laufFuellen(l) {
-    $("lauf-titel").textContent = l.schritt_name || "";
-    var erkl = Z.zustand && Z.zustand.erklaerungen ? Z.zustand.erklaerungen[l.schritt === "kopieren" && Z.zustand.verschieben ? "verschieben" : l.schritt] : "";
-    $("lauf-erklaerung").textContent = erkl || "";
-    var f = $("balken-fuellung");
-    if (l.anteil === null || l.anteil === undefined) {
-      f.classList.add("unbestimmt"); f.style.width = "";
-      $("balken-text").textContent = l.zustand === "startet" ? "" : "wird gezählt …";
-    } else {
-      f.classList.remove("unbestimmt");
-      f.style.width = Math.round(l.anteil * 100) + "%";
-      $("balken-text").textContent = Math.round(l.anteil * 100) + " %";
+    var f = $("balken-fill");
+    f.style.width = (l.anteil === null || l.anteil === undefined ? (ENDE[l.zustand] ? 100 : 0) : Math.round(l.anteil * 100)) + "%";
+    kennzahlen(l);
+    var text = (l.schritt_name || "") + " · " + (l.zustand_text || "");
+    $("aktuell").textContent = text;
+    $("aktuell").style.animationPlayState = ENDE[l.zustand] || l.zustand === "pause" ? "paused" : "running";
+    $("aktuell").style.opacity = ENDE[l.zustand] ? "1" : "";
+    phasenSetzen(l.schritt, l.anteil || 0);
+    if (!ENDE[l.zustand]) laufAktionen(l);
+    if (l.log) { $("log").textContent = l.log; $("log").classList.remove("versteckt"); }
+  }
+
+  function laufAktionen(l) {
+    var a = $("aktionen"); leer(a);
+    var weiter = knopf(Z.letzterSchritt ? kurzName(Z.letzterSchritt) + " läuft …" : "läuft …", "btn-primary");
+    weiter.disabled = true;
+    a.appendChild(weiter);
+    if (l.zustand === "pause") a.appendChild(knopf("Fortsetzen", "btn-secondary", function () { steuern("weiter"); }));
+    else a.appendChild(knopf("Pause", "btn-secondary", function () { steuern("pause"); }));
+    a.appendChild(knopf("Abbrechen", "btn-secondary", function () {
+      dialog("Schritt abbrechen?", "Das Bisherige bleibt gespeichert; der nächste Lauf macht dort weiter.", { ja: "Abbrechen", nein: "Weiterlaufen lassen" })
+        .then(function (r) { if (r.ja) steuern("abbrechen"); });
+    }));
+    if (Z.abbruchZeit && Date.now() - Z.abbruchZeit > 20000) {
+      a.appendChild(knopf("Sofort beenden", "btn-secondary", function () {
+        dialog("Sofort beenden?", "Der Schritt reagiert nicht. Angefangene Kopien räumt der nächste Lauf auf.", { ja: "Sofort beenden" })
+          .then(function (r) { if (r.ja) steuern("sofort"); });
+      }));
     }
-    if (ENDE[l.zustand]) { f.classList.remove("unbestimmt"); if (l.zustand === "fertig") { f.style.width = "100%"; $("balken-text").textContent = "100 %"; } }
-    $("lauf-dateien").textContent = l.text ? l.text.dateien : "–";
-    $("lauf-bytes").textContent = l.text && l.text.bytes !== "0 B" ? l.text.bytes : "–";
-    $("lauf-rate").textContent = l.text && l.text.rate ? l.text.rate : "–";
-    $("lauf-rest").textContent = l.text && l.text.restzeit ? l.text.restzeit : "–";
-    $("lauf-dauer").textContent = l.text ? l.text.dauer : "–";
-    $("lauf-zustand").textContent = (l.zustand_text || "") + (l.hinweis && l.zustand !== "abgestuerzt" ? " – " + l.hinweis : "");
-    var pause = l.zustand === "pause";
-    $("pause").classList.toggle("versteckt", pause || !!ENDE[l.zustand]);
-    $("fortsetzen").classList.toggle("versteckt", !pause);
-    $("abbrechen").classList.toggle("versteckt", !!ENDE[l.zustand]);
-    if (Z.abbruchZeit && !ENDE[l.zustand] && Date.now() - Z.abbruchZeit > 20000) $("sofort").classList.remove("versteckt");
-    if (l.log) { $("lauf-log").textContent = l.log; $("lauf-log").classList.remove("versteckt"); }
   }
 
   function steuern(wunsch) {
@@ -246,247 +363,216 @@
     }).catch(fehlerZeigen);
   }
 
-  // -------------------------------------------------------- Zusammenfassung --
-  function zusammenfassungZeigen(l) {
-    zeige("zusammenfassung");
-    $("zf-titel").textContent = "Erledigt: " + (l.schritt_name || l.schritt);
-    $("zf-zustand").textContent = (l.zustand_text || "") + (l.hinweis && l.zustand !== "abgestuerzt" ? " – " + l.hinweis : "");
-    leer($("zf-tabelle")); leer($("zf-extra"));
-    $("zf-karte").classList.add("versteckt");
-    $("zf-weiter").classList.remove("versteckt");
-    $("zf-weiter").disabled = true;
-    $("zf-weiter").textContent = "Weiter";
-    $("zf-fehler").classList.add("versteckt"); $("zf-duplikate").classList.add("versteckt");
-    Z.naechster = null;
-    api("/api/zusammenfassung?schritt=" + encodeURIComponent(l.schritt)).then(function (zf) {
-      var t = $("zf-tabelle");
-      zf.zeilen.forEach(function (z) {
-        var tr = el("tr");
-        tr.appendChild(el("td", z[0]));
-        var td = el("td", z[1], "zahl");
-        tr.appendChild(td);
-        t.appendChild(tr);
+  // -- Ruhe: Zusammenfassung des letzten Schritts, naechster Schritt --------
+  function ruheZeigen(l) {
+    kartenSperren(true);
+    api("/api/zustand").then(function (z) {
+      Z.zustand = z; rahmen(); pfadeZeigen();
+      var lauf = l || z.lauf || {};
+      Z.lauf = lauf;
+      if (lauf.zustand && !ENDE[lauf.zustand] && lauf.zustand !== "") { laufStarten(lauf.schritt); return; }
+      return api("/api/naechster").then(function (n) {
+        Z.naechster = n;
+        var letzter = Z.letzterSchritt || (ENDE[lauf.zustand] && lauf.schritt) || vorherigerSchritt(n.schritt, z.archiv && z.archiv.zaehler);
+        Z.letzterSchritt = letzter;
+        return api("/api/zusammenfassung?schritt=" + encodeURIComponent(letzter)).then(function (zf) {
+          Z.zf = zf;
+          $("balken-fill").style.width = "100%";
+          kennzahlen(ENDE[lauf.zustand] ? lauf : null);
+          $("aktuell").textContent = (zf.name || "") + " · " + (ENDE[lauf.zustand] && lauf.schritt === letzter ? lauf.zustand_text : "erledigt");
+          $("aktuell").style.animationPlayState = "paused";
+          $("aktuell").style.opacity = "1";
+          zaehlerZeigen(zf.zeilen);
+          if (lauf.log && lauf.schritt === letzter) { $("log").textContent = lauf.log; $("log").classList.remove("versteckt"); }
+          else $("log").classList.add("versteckt");
+          kamerasZeigen(letzter === "analyse" ? zf.modelle : null, zf.ohne_modell);
+          phasenSetzen(n.schritt === "fertig" ? "" : n.schritt, 0);
+          if (n.schritt === "fertig") { alle("#phasen-liste li").forEach(function (li) { li.className = "ist-fertig"; }); $("phasen-fill").style.width = "100%"; }
+          kartenFuellen(n, z);
+          ruheAktionen(n, zf);
+        });
       });
-      if (zf.fehler) $("zf-fehler").classList.remove("versteckt");
-      if (zf.duplikate) $("zf-duplikate").classList.remove("versteckt");
-      if (l.schritt === "scan" && zf.quellen) quellenTabelle(zf.quellen);
-      if (l.schritt === "analyse") { jahreTabelle(zf.je_jahr || []); modelleTabelle(zf.modelle || [], zf.ohne_modell || 0); }
-      if (l.log) { var pre = el("pre", l.log, "log"); $("zf-extra").appendChild(pre); }
-      return api("/api/naechster");
-    }).then(function (n) {
-      Z.naechster = n;
-      $("zf-weiter").disabled = false;
-      $("zf-weiter").textContent = n.schritt === "fertig" ? "Weiter: Abschluss" : "Weiter: " + n.name;
-    }).catch(function (f) { fehlerZeigen(f); $("zf-weiter").disabled = false; $("zf-weiter").textContent = "Weiter"; });
+    }).catch(fehlerZeigen);
   }
 
-  function quellenTabelle(quellen) {
-    var box = $("zf-extra");
-    box.appendChild(el("h3", "Je Quellordner"));
-    var t = el("table", null, "tabelle klein");
-    var kopf = el("tr");
-    ["Quellordner", "Fotos", "RAW", "Videos", "Begleitdateien", "Andere", "Datenmenge"].forEach(function (k) { kopf.appendChild(el("th", k)); });
-    t.appendChild(kopf);
-    quellen.forEach(function (q) {
-      var tr = el("tr");
-      tr.appendChild(el("td", q.wurzel));
-      [q.foto, q.raw, q.video, q.sidecar, q.sonstiges].forEach(function (n) { tr.appendChild(el("td", String(n), "zahl")); });
-      tr.appendChild(el("td", q.groesse, "zahl"));
-      t.appendChild(tr);
-    });
-    box.appendChild(t);
+  function vorherigerSchritt(naechster, zaehler) {
+    if (naechster === "fertig") return (zaehler && zaehler.quelle_geloescht) ? "aufraeumen" : "pruefen";
+    var i = SCHRITTE.indexOf(naechster);
+    return i > 0 ? SCHRITTE[i - 1] : "scan";
   }
 
-  function jahreTabelle(jahre) {
-    if (!jahre.length) return;
-    var box = $("zf-extra");
-    box.appendChild(el("h3", "Dateien je Jahr"));
-    var t = el("table", null, "tabelle klein");
-    jahre.forEach(function (j) {
-      var tr = el("tr");
-      tr.appendChild(el("td", j.jahr));
-      tr.appendChild(el("td", j.n_text, "zahl"));
-      t.appendChild(tr);
-    });
-    box.appendChild(t);
+  function ruheAktionen(n, zf) {
+    var a = $("aktionen"); leer(a);
+    var v = Z.zustand.verschieben;
+    if (n.schritt === "analyse") a.appendChild(knopf("Analyse starten", "btn-primary", function () { schrittStarten("analyse"); }));
+    else if (n.schritt === "pruefen") a.appendChild(knopf("Prüfen starten", "btn-primary", function () { schrittStarten("pruefen"); }));
+    else if (n.schritt === "kopieren") a.appendChild(knopf((v ? "Verschieben" : "Kopieren") + " starten · " + n.n + " Dateien", "btn-primary", function () { kopierenStarten(n); }));
+    else if (n.schritt === "aufraeumen") a.appendChild(knopf("Aufräumen · Wort rechts eintippen", "btn-primary", function () { $("auf-wort").focus(); }));
+    else a.appendChild(knopf("Bericht öffnen", "btn-primary", function () { berichtOeffnen("neu"); }));
+    if (zf && zf.fehler) a.appendChild(knopf("Fehler " + zf.fehler, "btn-ghost", function () { listeZeigen("fehler", 1); }));
+    if (zf && zf.duplikate) a.appendChild(knopf("Duplikate " + zf.duplikate, "btn-ghost", function () { listeZeigen("duplikate", 1); }));
+    a.appendChild(knopf("Ohne Datum", "btn-ghost", function () { listeZeigen("ohne_datum", 1); }));
+    a.appendChild(knopf("Einstellungen", "btn-secondary", einstellungenOeffnen));
+    a.appendChild(knopf("Startseite", "btn-secondary", function () { laden("start"); }));
   }
 
-  function modelleTabelle(modelle, ohneModell) {
-    var box = $("zf-extra");
-    box.appendChild(el("h3", "Kameras und ihre Ordnernamen"));
-    box.appendChild(el("p", "Für jede Kamera entsteht im Archiv ein eigener Ordner. Sie können den Ordnernamen hier ändern, zum Beispiel „ILCE-7CM2“ in „Sony A7C“. Nach „Weiter“ werden die betroffenen Dateien noch einmal analysiert.", "erklaerung"));
-    if (!modelle.length) { box.appendChild(el("p", "Es wurde kein Kameramodell gefunden.", "erklaerung")); return; }
-    var t = el("table", null, "tabelle");
-    var kopf = el("tr");
-    ["Kameramodell (aus den Dateien)", "Dateien", "Ordnername im Archiv"].forEach(function (k) { kopf.appendChild(el("th", k)); });
-    t.appendChild(kopf);
+  function schrittStarten(schritt, extra) {
+    var daten = { schritt: schritt };
+    Object.keys(extra || {}).forEach(function (k) { daten[k] = extra[k]; });
+    api("/api/schritt", daten).then(function (a) { laufStarten(a.gestartet); }).catch(fehlerZeigen);
+  }
+
+  function kopierenStarten(n) {
+    if (!n.wort) { schrittStarten("kopieren"); return; }
+    dialog("Verschieben bestätigen", n.text + " Zum Bestätigen „" + n.wort + "“ tippen:", { eingabe: true, ja: "Verschieben" })
+      .then(function (r) { if (r.ja) schrittStarten("kopieren", { wort: r.wert }); });
+  }
+
+  // -- Kamera-Tabelle ---------------------------------------------------------
+  function kamerasZeigen(modelle, ohne) {
+    var box = $("kameras"); leer(box);
+    if (!modelle || !modelle.length) { box.classList.add("versteckt"); return; }
+    box.classList.remove("versteckt");
+    var t = el("table", null, "table");
+    var thead = el("thead"), kopf = el("tr");
+    ["Kameramodell", "Dateien", "Ordnername im Archiv"].forEach(function (k, i) { kopf.appendChild(el("th", k, i === 1 ? "zahl" : "")); });
+    thead.appendChild(kopf); t.appendChild(thead);
+    var tbody = el("tbody");
     modelle.forEach(function (m) {
       var tr = el("tr");
-      tr.appendChild(el("td", m.modell));
+      tr.appendChild(el("td", m.modell, "mono"));
       tr.appendChild(el("td", m.n_text, "zahl"));
       var td = el("td");
-      var inp = el("input"); inp.type = "text"; inp.className = "alias"; inp.value = m.ordner; inp.setAttribute("data-modell", m.modell); inp.setAttribute("data-alt", m.ordner);
+      var inp = el("input"); inp.type = "text"; inp.className = "input alias"; inp.value = m.ordner;
+      inp.setAttribute("data-modell", m.modell); inp.setAttribute("data-alt", m.ordner); inp.setAttribute("spellcheck", "false");
       td.appendChild(inp); tr.appendChild(td);
-      t.appendChild(tr);
+      tbody.appendChild(tr);
     });
+    t.appendChild(tbody);
     box.appendChild(t);
-    if (ohneModell) box.appendChild(el("p", "Dateien ohne Kameramodell: " + ohneModell + " (landen im Ordner „Unbekannt“).", "erklaerung"));
+    var zeile = el("div", null, "zeile");
+    zeile.appendChild(knopf("Ordnernamen übernehmen", "btn-ghost", aliaseSenden));
+    if (ohne) zeile.appendChild(el("span", "ohne Modell: " + ohne + " → Ordner „Unbekannt“", "hinweis"));
+    box.appendChild(zeile);
   }
 
-  function aliaseGeaendert() {
+  function aliaseSenden() {
     var neue = {};
     alle("input.alias").forEach(function (i) {
       var v = i.value.trim();
       if (v && v !== i.getAttribute("data-alt")) neue[i.getAttribute("data-modell")] = v;
     });
-    return neue;
+    if (!Object.keys(neue).length) { meldung("Kein Ordnername geändert.", true); return; }
+    api("/api/aliase", { aliase: neue }).then(function (a) {
+      meldung(a.text, true);
+      if (a.gestartet) laufStarten(a.gestartet);
+    }).catch(fehlerZeigen);
   }
 
-  function weiter() {
-    var neue = aliaseGeaendert();
-    if (Z.schritt === "analyse" && Object.keys(neue).length) {
-      $("zf-weiter").disabled = true;
-      api("/api/aliase", { aliase: neue }).then(function (a) {
-        if (a.gestartet) { meldung(a.text, true); laufZeigen(a.gestartet); } else { meldung(a.text, true); naechsterSchritt(); }
-      }).catch(fehlerZeigen).then(function () { $("zf-weiter").disabled = false; });
-      return;
-    }
-    naechsterSchritt();
+  // -- Karten rechts ------------------------------------------------------------
+  function kartenSperren(gesperrt) {
+    ["auf-wort", "auf-los", "ordner-wort", "ordner-los"].forEach(function (id) { $(id).disabled = true; });
+    $("karte-aufraeumen").classList.toggle("inaktiv", gesperrt);
+    $("karte-ordner").classList.toggle("inaktiv", gesperrt);
   }
 
-  function naechsterSchritt() {
-    var n = Z.naechster;
-    var weiterMit = function (n2) {
-      if (n2.schritt === "fertig") { fertigZeigen(n2); return; }
-      if (n2.schritt === "analyse" || n2.schritt === "pruefen") {
-        api("/api/schritt", { schritt: n2.schritt }).then(function (a) { laufZeigen(a.gestartet); }).catch(fehlerZeigen);
-        return;
-      }
-      if (n2.schritt === "kopieren") { kopierKarte(n2); return; }
-      if (n2.schritt === "aufraeumen") { aufraeumenZeigen(n2.plan); return; }
-    };
-    if (n) weiterMit(n); else api("/api/naechster").then(weiterMit).catch(fehlerZeigen);
-  }
-
-  function kopierKarte(n) {
-    zeige("zusammenfassung");
-    var k = $("zf-karte");
-    leer(k);
-    k.appendChild(el("h3", "Als Nächstes: " + n.name));
-    k.appendChild(el("p", n.text));
-    if (n.erklaerung) k.appendChild(el("p", n.erklaerung, "erklaerung"));
-    var wort = null;
-    if (n.wort) {
-      var zeile = el("div", null, "feldzeile");
-      zeile.appendChild(el("label", "Zur Bestätigung „" + n.wort + "“ eintippen:", "bez"));
-      wort = el("input"); wort.type = "text"; wort.className = "feld"; wort.setAttribute("autocomplete", "off");
-      zeile.appendChild(wort); k.appendChild(zeile);
-    }
-    var knopf = el("button", n.verschieben ? "Jetzt verschieben" : "Jetzt kopieren", "knopf gross" + (n.verschieben ? " warn" : ""));
-    knopf.onclick = function () {
-      knopf.disabled = true;
-      api("/api/schritt", { schritt: "kopieren", wort: wort ? wort.value : "" }).then(function (a) { laufZeigen(a.gestartet); })
-        .catch(function (f) { fehlerZeigen(f); knopf.disabled = false; });
-    };
-    k.appendChild(knopf);
-    k.classList.remove("versteckt");
-    $("zf-weiter").classList.add("versteckt");
-    k.scrollIntoView({ behavior: "smooth" });
-    if (wort) wort.focus();
-  }
-
-  // ---------------------------------------------------------------- Fertig --
-  function fertigZeigen(n) {
-    zeige("fertig");
-    $("fertig-text").textContent = n.text || "Alle Schritte sind erledigt.";
-    var t = $("fertig-tabelle"); leer(t);
-    var namen = { geprueft: "Kopiert und geprüft", quelle_geloescht: "Aus der Quelle entfernt", duplikat_bestaetigt: "Doppelte Dateien (nicht kopiert)", duplikat: "Doppelte Dateien (nicht kopiert)", verschoben: "Verschoben", fehler: "Fehler", uebersprungen: "Übersprungen", kopiert: "Kopiert, noch nicht geprüft", analysiert: "Noch nicht kopiert", gefunden: "Noch nicht analysiert" };
-    Object.keys(n.zaehler || {}).forEach(function (k) {
-      if (!n.zaehler[k] || !namen[k]) return;
-      var tr = el("tr"); tr.appendChild(el("td", namen[k])); tr.appendChild(el("td", String(n.zaehler[k]).replace(/\B(?=(\d{3})+(?!\d))/g, "."), "zahl")); t.appendChild(tr);
-    });
-  }
-
-  // ------------------------------------------------------------- Aufraeumen --
-  function aufraeumenZeigen(plan) {
-    var zeigen = function (p) {
-      zeige("aufraeumen");
-      var t = $("auf-tabelle"); leer(t);
-      var kopf = el("tr");
-      ["Quellordner", "Dateien mit geprüfter Kopie", "Datenmenge"].forEach(function (k) { kopf.appendChild(el("th", k)); });
-      t.appendChild(kopf);
-      (p.je_quelle || []).forEach(function (q) {
-        var tr = el("tr");
-        tr.appendChild(el("td", q.wurzel)); tr.appendChild(el("td", q.n_text, "zahl")); tr.appendChild(el("td", q.groesse, "zahl"));
-        t.appendChild(tr);
+  function kartenFuellen(n, z) {
+    var plan = n.plan || null;
+    var box = $("auf-quellen"); leer(box);
+    if (plan) {
+      plan.je_quelle.forEach(function (q) {
+        var d = el("div");
+        d.appendChild(el("span", q.wurzel, "pfad mono"));
+        d.appendChild(el("span", q.n_text + " · " + q.groesse, "zahl"));
+        box.appendChild(d);
       });
-      if (!(p.je_quelle || []).length) {
-        var tr0 = el("tr"); var td0 = el("td", "Zurzeit gibt es keine Datei, die entfernt werden dürfte."); td0.colSpan = 3; tr0.appendChild(td0); t.appendChild(tr0);
-      }
-      $("auf-summe").textContent = p.n ? "Insgesamt " + p.n_text + " Dateien (" + p.groesse + ")." : "";
-      $("auf-wort").value = ""; $("auf-wort-ordner").value = ""; $("auf-ordner").checked = false;
-      $("auf-ordner-box").classList.add("versteckt");
-      Z.woerter = p.woerter;
-      aufWortText();
-      $("auf-wort-ordner-text").textContent = "Zur Bestätigung „" + p.woerter.ordner + "“ eintippen:";
-    };
-    if (plan) zeigen(plan); else api("/api/aufraeumen_plan").then(zeigen).catch(fehlerZeigen);
+      Z.woerter = plan.woerter;
+    } else {
+      box.appendChild(el("span", n.schritt === "fertig" ? "nichts mehr zu entfernen" : "erst nach dem Prüfen", "hinweis"));
+    }
+    var darf = !!(plan && plan.n > 0);
+    $("karte-aufraeumen").classList.toggle("inaktiv", !darf);
+    $("auf-wort").disabled = !darf;
+    $("auf-wort").value = "";
+    aufWortPruefen();
+    var archivDa = !!(z.archiv && z.archiv.da);
+    $("karte-ordner").classList.toggle("inaktiv", !archivDa);
+    $("ordner-wort").disabled = !archivDa;
+    $("ordner-wort").value = "";
+    ordnerWortPruefen();
   }
 
-  function aufWeise() { return alle("input[name=weise]").filter(function (r) { return r.checked; })[0].value; }
-  function aufWortText() {
-    if (!Z.woerter) return;
-    $("auf-wort-text").textContent = "Dateien entfernen? Dann „" + Z.woerter[aufWeise()] + "“ eintippen:";
+  function aufWortSoll() { return (Z.woerter || { papierkorb: "verschieben", endgueltig: "loeschen" })[radio("weise")]; }
+  function aufWortPruefen() {
+    var soll = aufWortSoll();
+    $("auf-wort-soll").textContent = soll;
+    $("auf-los").textContent = radio("weise") === "endgueltig" ? "Endgültig löschen" : "Nach _geloescht_ verschieben";
+    $("auf-los").disabled = $("auf-wort").disabled || $("auf-wort").value.trim().toLowerCase() !== soll;
+  }
+  function ordnerWortPruefen() {
+    $("ordner-los").disabled = $("ordner-wort").disabled || $("ordner-wort").value.trim().toLowerCase() !== "entfernen";
   }
 
-  function aufraeumenStarten() {
-    $("auf-los").disabled = true;
-    api("/api/schritt", {
-      schritt: "aufraeumen", weise: aufWeise(), wort: $("auf-wort").value,
-      leere_ordner: $("auf-ordner").checked, wort_ordner: $("auf-wort-ordner").value
-    }).then(function (a) { laufZeigen(a.gestartet); }).catch(fehlerZeigen).then(function () { $("auf-los").disabled = false; });
+  // -- Bericht, Einstellungen ------------------------------------------------------
+  function berichtOeffnen(art) {
+    api("/api/bericht", { art: art }).then(function (a) {
+      meldung(a.text, true);
+      if (Z.zustand && Z.zustand.archiv) { Z.zustand.archiv.bericht = a.bericht; rahmen(); }
+    }).catch(fehlerZeigen);
+  }
+  function einstellungenOeffnen() {
+    api("/api/einstellungen_oeffnen", {}).then(function (a) { meldung(a.text, true); }).catch(fehlerZeigen);
   }
 
-  // ----------------------------------------------------------------- Listen --
+  // ------------------------------------------------------------------ Listen --
   var LISTEN = {
-    fehler: ["Fehler", "Dateien, bei denen etwas nicht geklappt hat – mit dem Grund. Sie werden beim nächsten Lauf erneut versucht, wenn der Grund behoben ist.", ["Datei", "Grund", "Größe"]],
-    duplikate: ["Doppelte Dateien", "Dateien, die inhaltlich schon im Archiv lagen. Sie wurden nicht noch einmal kopiert; rechts steht die Datei im Archiv, die denselben Inhalt hat.", ["Datei in der Quelle", "Gleiche Datei im Archiv", "Größe"]],
-    ohne_datum: ["Dateien ohne Aufnahmedatum", "Für diese Dateien war kein Aufnahmedatum zu finden. Sie werden nach dem Änderungsdatum oder in den Ordner „_Ohne_Datum“ einsortiert.", ["Datei", "Zielordner", "Größe"]]
+    fehler: ["Fehler", ["Datei", "Grund", "Größe"], function (z) { return [z.quellpfad, z.grund, z.groesse]; }],
+    duplikate: ["Duplikate", ["Datei in der Quelle", "gleiche Datei im Archiv", "Größe"], function (z) { return [z.quellpfad, z.partner, z.groesse]; }],
+    ohne_datum: ["Ohne Aufnahmedatum", ["Datei", "Zielordner", "Größe"], function (z) { return [z.quellpfad, z.zielpfad, z.groesse]; }]
   };
 
   function listeZeigen(art, seite) {
     Z.liste = { art: art, seite: seite || 1 };
     api("/api/liste?art=" + encodeURIComponent(art) + "&seite=" + Z.liste.seite).then(function (l) {
-      if (Z.seite !== "liste") zeige("liste");
+      if (Z.ansicht !== "liste") zeige("liste");
       var info = LISTEN[art];
-      $("liste-titel").textContent = info[0] + " (" + l.gesamt_text + ")";
-      $("liste-erklaerung").textContent = info[1];
-      $("liste-stand").textContent = "Seite " + l.seite + " von " + l.seiten;
+      $("liste-titel").textContent = info[0];
+      $("liste-gesamt").textContent = l.gesamt_text + (l.gesamt === 1 ? " Eintrag" : " Einträge") + " · 100 je Seite";
+      $("liste-stand").textContent = l.seite + " / " + l.seiten;
       $("liste-zurueck").disabled = l.seite <= 1;
       $("liste-vor").disabled = l.seite >= l.seiten;
       var t = $("liste-tabelle"); leer(t);
-      var kopf = el("tr");
-      info[2].forEach(function (k) { kopf.appendChild(el("th", k)); });
-      t.appendChild(kopf);
+      var thead = el("thead"), kopf = el("tr");
+      info[1].forEach(function (k, i) { kopf.appendChild(el("th", k, i === 2 ? "zahl" : "")); });
+      thead.appendChild(kopf); t.appendChild(thead);
+      var tbody = el("tbody");
       l.zeilen.forEach(function (z) {
         var tr = el("tr");
-        tr.appendChild(el("td", z.quellpfad));
-        tr.appendChild(el("td", art === "fehler" ? z.grund : art === "duplikate" ? z.partner : z.zielpfad));
-        tr.appendChild(el("td", z.groesse, "zahl"));
-        t.appendChild(tr);
+        info[2](z).forEach(function (w, i) { tr.appendChild(el("td", w, i === 2 ? "zahl" : (i === 0 || art === "duplikate" || art === "ohne_datum" ? "mono" : ""))); });
+        tbody.appendChild(tr);
       });
-      if (!l.zeilen.length) { var tr0 = el("tr"); var td0 = el("td", "Keine Einträge."); td0.colSpan = 3; tr0.appendChild(td0); t.appendChild(tr0); }
+      if (!l.zeilen.length) { var tr0 = el("tr"); var td0 = el("td", "keine Einträge", "hinweis"); td0.colSpan = 3; tr0.appendChild(td0); tbody.appendChild(tr0); }
+      t.appendChild(tbody);
       Z.liste.seite = l.seite;
+      var a = $("aktionen"); leer(a);
+      a.appendChild(knopf("Zurück", "btn-primary", function () { if (Z.vorher === "haupt") { hauptZeigen(); ruheZeigen(); } else laden("start"); }));
+      Object.keys(LISTEN).forEach(function (k) { if (k !== art) a.appendChild(knopf(LISTEN[k][0], "btn-ghost", function () { listeZeigen(k, 1); })); });
     }).catch(fehlerZeigen);
   }
 
   // ------------------------------------------------------------------ Start --
-  function laden() {
+  function laden(ansicht) {
     api("/api/zustand").then(function (z) {
-      startseiteFuellen(z);
+      Z.zustand = z;
+      Z.lauf = z.lauf || {};
+      document.body.classList.toggle("ohne-fenster", !z.fenster);
+      rahmen();
+      startFuellen(z);
       var l = z.lauf || {};
-      if (l.aktiv || (l.zustand && !ENDE[l.zustand] && l.zustand !== "")) laufZeigen();
-      else zeige("start");
+      if (l.zustand && !ENDE[l.zustand] && l.zustand !== "") { hauptZeigen(); laufStarten(l.schritt); return; }
+      if (ansicht === "haupt") { hauptZeigen(); ruheZeigen(); return; }
+      zeige("start");
+      startAktionen();
     }).catch(fehlerZeigen);
   }
 
@@ -498,38 +584,21 @@
     $("quelle-hinzu").onclick = function () { quelleHinzu($("quelle-neu").value); };
     $("quelle-neu").addEventListener("keydown", function (e) { if (e.key === "Enter") quelleHinzu($("quelle-neu").value); });
     $("quelle-waehlen").onclick = function () { ordnerWaehlen("").then(function (p) { if (p) quelleHinzu(p); }); };
-    alle("input[name=modus]").forEach(function (r) { r.addEventListener("change", einstellungenSenden); });
-    $("profil").addEventListener("change", function () { Z.profilGewaehlt = true; profilText(); einstellungenSenden(); });
-    $("los").onclick = function () { los(false); };
-    $("weitermachen").onclick = function () { Z.naechster = null; naechsterSchritt(); };
-    alle("[data-liste]").forEach(function (k) { k.onclick = function () { listeZeigen(k.getAttribute("data-liste"), 1); }; });
-    $("bericht").onclick = $("fertig-bericht").onclick = function () {
-      api("/api/bericht", {}).then(function (a) { meldung(a.text, true); }).catch(fehlerZeigen);
-    };
-    $("einstellungen").onclick = function () {
-      api("/api/einstellungen_oeffnen", {}).then(function (a) { meldung(a.text, true); }).catch(fehlerZeigen);
-    };
-    $("zum-aufraeumen").onclick = $("fertig-aufraeumen").onclick = function () { aufraeumenZeigen(null); };
-    $("pause").onclick = function () { steuern("pause"); };
-    $("fortsetzen").onclick = function () { steuern("weiter"); };
-    $("abbrechen").onclick = function () {
-      frage("Diesen Schritt abbrechen? Das Bisherige bleibt gespeichert; der nächste Lauf macht dort weiter.").then(function (ja) { if (ja) steuern("abbrechen"); });
-    };
-    $("sofort").onclick = function () {
-      frage("Der Schritt reagiert nicht auf „Abbrechen“. Sofort beenden? Angefangene Kopien räumt der nächste Lauf auf.").then(function (ja) { if (ja) steuern("sofort"); });
-    };
-    $("zf-weiter").onclick = weiter;
-    $("zf-fehler").onclick = function () { listeZeigen("fehler", 1); };
-    $("zf-duplikate").onclick = function () { listeZeigen("duplikate", 1); };
-    $("zf-start").onclick = $("fertig-start").onclick = function () { laden(); };
-    alle("input[name=weise]").forEach(function (r) { r.addEventListener("change", aufWortText); });
-    $("auf-ordner").addEventListener("change", function () { $("auf-ordner-box").classList.toggle("versteckt", !$("auf-ordner").checked); });
-    $("auf-los").onclick = aufraeumenStarten;
-    $("auf-nicht").onclick = function () { api("/api/naechster").then(function (n) { fertigZeigen({ text: "Nichts gelöscht. " + (n.phase || ""), zaehler: n.zaehler }); }).catch(fehlerZeigen); };
+    alle("input[name=modus]").forEach(function (r) { r.addEventListener("change", function () { modusText(); einstellungenSenden(); }); });
+    alle("input[name=profil]").forEach(function (r) { r.addEventListener("change", function () { Z.profilGewaehlt = true; profilText(); einstellungenSenden(); }); });
+    $("weitermachen").onclick = function () { zielUebernehmen().then(function () { Z.letzterSchritt = ""; hauptZeigen(); ruheZeigen(); }); };
+    alle("input[name=weise]").forEach(function (r) { r.addEventListener("change", aufWortPruefen); });
+    $("auf-wort").addEventListener("input", aufWortPruefen);
+    $("auf-wort").addEventListener("keydown", function (e) { if (e.key === "Enter" && !$("auf-los").disabled) $("auf-los").click(); });
+    $("auf-los").onclick = function () { schrittStarten("aufraeumen", { weise: radio("weise"), wort: $("auf-wort").value }); };
+    $("ordner-wort").addEventListener("input", ordnerWortPruefen);
+    $("ordner-los").onclick = function () { schrittStarten("aufraeumen", { leere_ordner: true, wort_ordner: $("ordner-wort").value, wort: "" }); };
+    $("bericht-oeffnen").onclick = function () { berichtOeffnen("txt"); };
+    $("bericht-csv").onclick = function () { berichtOeffnen("csv"); };
+    $("bericht-neu").onclick = function () { berichtOeffnen("neu"); };
     $("liste-zurueck").onclick = function () { listeZeigen(Z.liste.art, Z.liste.seite - 1); };
     $("liste-vor").onclick = function () { listeZeigen(Z.liste.art, Z.liste.seite + 1); };
-    $("liste-schliessen").onclick = function () { var z = Z.vorher === "liste" ? "start" : Z.vorher; if (z === "start") laden(); else zeige(z); };
   }
 
-  document.addEventListener("DOMContentLoaded", function () { verdrahten(); laden(); });
+  document.addEventListener("DOMContentLoaded", function () { verdrahten(); laden("start"); });
 })();

@@ -40,8 +40,9 @@ def bauen(ausgabe: Path, exiftool: Path | None) -> Path:
         exe = paket / (name + endung)
         if not exe.is_file():
             raise SystemExit(f"PyInstaller hat {exe} nicht erzeugt.")
-    if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / "index.html").is_file():
-        raise SystemExit("Die Seite der Oberflaeche (static/index.html) fehlt im Paket.")
+    for name in ("index.html", "fonts.css", "fonts/Inter-latin.woff2"):
+        if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / name).is_file():
+            raise SystemExit(f"Die Seite der Oberflaeche (static/{name}) fehlt im Paket.")
 
     if exiftool is not None:
         ziel = paket / "exiftool"

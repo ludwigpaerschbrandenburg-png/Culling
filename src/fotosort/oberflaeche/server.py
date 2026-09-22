@@ -27,7 +27,9 @@ STATIC = Path(__file__).resolve().parent / "static"
 STATISCHE_DATEIEN = {
     "index.html": "text/html; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
-    "stil.css": "text/css; charset=utf-8",
+    "app.css": "text/css; charset=utf-8",
+    "styles.css": "text/css; charset=utf-8",
+    "fonts.css": "text/css; charset=utf-8",
 }
 
 
@@ -57,6 +59,13 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
         if name not in STATISCHE_DATEIEN:
             return JSONResponse({"fehler": "unbekannt"}, status_code=404)
         return FileResponse(STATIC / name, media_type=STATISCHE_DATEIEN[name])
+
+    @app.get("/static/fonts/{name}")
+    def schrift(name: str):
+        # Nur die mitgelieferten Schriftdateien, keine Pfadbestandteile.
+        if "/" in name or "\\" in name or not name.endswith(".woff2") or not (STATIC / "fonts" / name).is_file():
+            return JSONResponse({"fehler": "unbekannt"}, status_code=404)
+        return FileResponse(STATIC / "fonts" / name, media_type="font/woff2")
 
     @app.get("/api/zustand")
     def zustand():
@@ -118,8 +127,8 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
         return ab.liste(art, seite)
 
     @app.post("/api/bericht")
-    def bericht():
-        return ab.bericht_oeffnen()
+    def bericht(daten: dict = Body(default={})):
+        return ab.bericht_oeffnen(str(daten.get("art", "neu")))
 
     @app.post("/api/einstellungen_oeffnen")
     def einstellungen_oeffnen():

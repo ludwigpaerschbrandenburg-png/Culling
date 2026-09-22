@@ -52,7 +52,10 @@ Culling/ (Repository-Wurzel)
 │     ├─ ablauf.py           Zustand, Arbeitsprozess (fotosort arbeit), Zusammenfassungen und Listen
 │     ├─ server.py           FastAPI-Schnittstelle (nur 127.0.0.1, Origin-Prüfung), uvicorn im Strang
 │     ├─ fenster.py          Server starten, pywebview-Fenster, Ordnerdialog, Selbsttest
-│     └─ static/             index.html, app.js, stil.css — eine Seite, kein Rahmenwerk
+│     └─ static/             index.html, app.js, app.css (Layout), styles.css (Design-Tokens, docs/design/),
+│                             fonts.css + fonts/ (Inter als woff2, offline) — eine Seite, kein Rahmenwerk
+├─ docs/design/             Design-Uebergabe der Oberflaeche: DESIGN.md, index.html, app.css, styles.css
+├─ docs/oberflaeche/         Bildschirmfotos jeder Ansicht (Playwright, kuenstlicher Testbaum)
 ├─ paket/
 │  ├─ fotosort_start.py      Einstieg fuer PyInstaller
 │  ├─ fotosort.spec          PyInstaller-Spec: fotosort.exe (Konsole) und fotosort-fenster.exe auf einem _internal

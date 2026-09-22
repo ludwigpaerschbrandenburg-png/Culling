@@ -57,29 +57,33 @@ bevor es um Ihre Bilder geht.
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
-3. `start.bat` doppelklicken. Es öffnet sich das Fenster des Foto-Sortierers.
+3. `start.bat` doppelklicken. Es öffnet sich das Fenster (dunkel, oben die Titelzeile mit
+   dem Zielordner, unten eine Statusleiste). Bilder jeder Ansicht liegen im Ordner
+   `docs/oberflaeche` des Projekts.
 
 Auf der Startseite tragen Sie ein:
 
 | Feld | Was Sie tun |
 |---|---|
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` wählen (oder den Pfad eintippen). Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
-| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Mehrere Quellen sind möglich; „Entfernen" nimmt eine wieder heraus. |
-| **Kopieren oder verschieben?** | „Kopieren" lassen – die Quelle bleibt unverändert. |
-| **Art des Laufwerks** | „Festplatte" lassen; bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
+| **Quellordner** | „Auswählen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Mehrere Quellen sind möglich. |
+| **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
+| **Zielordner liegt auf** | „hdd" lassen (Festplatte); bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
 
-Dann den großen grünen Knopf **„Los geht's"** drücken. Danach laufen die Schritte
-nacheinander. Während eines Schritts sehen Sie einen Balken, die erledigten Dateien und die
-Datenmenge, die Geschwindigkeit und die geschätzte Restzeit, dazu die Knöpfe **Pause**,
-**Fortsetzen** und **Abbrechen**. **Nach jedem Schritt zeigt das Fenster eine Zusammenfassung**
-und einen Knopf „Weiter: …", der sagt, was als Nächstes kommt. Nichts läuft ohne diesen Knopf.
-Alles Bisherige bleibt gespeichert; wer das Fenster schließt, hält den laufenden Schritt nicht
-an, und beim nächsten `start.bat` zeigt die Startseite den Stand und bietet **„Weitermachen"**
-an.
+Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
+dessen Stand und die bekannten Quellen, und **„Weitermachen"** springt zum offenen Schritt, ohne
+die Quellen erneut zu durchsuchen. **„Los geht's"** unten links durchsucht immer zuerst – das ist
+der richtige Knopf, wenn neue Dateien in der Quelle liegen.
 
-Liegt im Zielordner schon ein angefangenes Archiv, sagt die Startseite das in einem Satz.
-„Weitermachen" springt zum offenen Schritt, ohne die Quellen erneut zu durchsuchen; „Los geht's"
-durchsucht immer zuerst – das ist der richtige Knopf, wenn neue Dateien in der Quelle liegen.
+Danach zeigt das Fenster die **Übersicht**: oben die Pfade (Quellen → Ziel) und die
+Phasenleiste **Scan · Analyse · Kopieren · Prüfen · Aufräumen** (die violette Linie zeigt, wie
+weit es ist), links der Balken mit erledigten Dateien, Datenmenge, MB/s und Restzeit, darunter
+die Zähler des letzten Schritts, rechts die Karten **Aufräumen**, **Leere Ordner** und **Letzter
+Bericht**. Unten stehen die Knöpfe: Der umrandete Hauptknopf ist immer der nächste sinnvolle
+Schritt („Analyse starten", „Kopieren starten · 3.912 Dateien", „Prüfen starten"); solange ein
+Schritt läuft, ist er gesperrt, und daneben stehen **Pause** und **Abbrechen**. Nichts läuft
+ohne Ihren Klick. Alles Bisherige bleibt gespeichert; wer das Fenster schließt, hält den
+laufenden Schritt nicht an, und beim nächsten `start.bat` zeigt die Startseite den Stand.
 
 ### Schritt 1: Quellen durchsuchen (Scan)
 
@@ -112,18 +116,18 @@ das Programm berechnet für jede Datei den Zielordner. Ausgabe:
 - **Mögliche Duplikate (Schätzung)** – gleiche Größe und Aufnahmezeit; sicher weiß es
   das Programm erst beim Kopieren.
 
-Die Zusammenfassung im Fenster zeigt die Kameras als Tabelle: links das Modell, wie es in den
-Dateien steht, rechts ein Feld mit dem Ordnernamen. **Tippen Sie dort einfach den gewünschten
-Namen hinein** (etwa `Sony A7C` statt `ILCE-7CM2`) und drücken Sie „Weiter". Der Eintrag wird
-dauerhaft in die Einstellungen geschrieben (siehe Abschnitt 6), und die betroffenen Dateien
-werden noch einmal analysiert. Im schwarzen Fenster fragt der geführte Ablauf stattdessen:
+Die Übersicht im Fenster zeigt nach der Analyse die Kameras als Tabelle: links das Modell,
+wie es in den Dateien steht, rechts ein Feld mit dem Ordnernamen. **Tippen Sie dort einfach den
+gewünschten Namen hinein** (etwa `Sony A7C` statt `ILCE-7CM2`) und drücken Sie „Ordnernamen
+übernehmen". Der Eintrag wird dauerhaft in die Einstellungen geschrieben (siehe Abschnitt 6),
+und die betroffenen Dateien werden noch einmal analysiert. Im schwarzen Fenster fragt der geführte Ablauf stattdessen:
 **Soll ein Kameramodell einen anderen Ordnernamen bekommen?** – Modell eintippen, dann den
 Ordnernamen; Enter allein heißt „nichts ändern".
 
 ### Schritt 3: Kopieren
 
-Zuerst sagt das Fenster, wie viele Dateien und wie viel Speicher kopiert werden (im
-schwarzen Fenster ist das der **Probelauf**). Nach „Jetzt kopieren" wird kopiert. Jede Datei wird zuerst unter einem Zwischennamen
+Der Hauptknopf sagt, wie viele Dateien anstehen („Kopieren starten · 3.912 Dateien"); im
+schwarzen Fenster ist das der **Probelauf**. Nach dem Klick wird kopiert. Jede Datei wird zuerst unter einem Zwischennamen
 (`.part`) geschrieben, dabei wird eine Prüfsumme berechnet (ein Fingerabdruck des
 Inhalts), und erst am Ende bekommt sie ihren richtigen Namen. Ausgabe:
 
@@ -144,24 +148,26 @@ oder überschrieben; ein erneutes Kopieren legt eine frische Kopie daneben.
 
 ### Schritt 5: Quelle aufräumen
 
-Das Aufräumen hat eine eigene Seite. Sie zeigt je Quellordner, wie viele Dateien eine
-geprüfte Kopie im Archiv haben und wie groß sie sind. **Beim ersten Mal: „Überspringen –
-nichts löschen" oder den sicheren Standard.** Der Standard verschiebt die Originale nicht ins
+Das Aufräumen ist die Karte rechts in der Übersicht. Sie zeigt je Quellordner, wie viele
+Dateien eine geprüfte Kopie im Archiv haben und wie groß sie sind; vor dem Prüfen ist die Karte
+abgeblendet. **Beim ersten Mal: die Karte einfach unbenutzt lassen oder den sicheren Standard
+„_geloescht_" nehmen.** Der Standard verschiebt die Originale nicht ins
 Nichts, sondern in einen Ordner `_geloescht_<Datum>` innerhalb der Quelle. Dort können Sie in
 Ruhe nachsehen und den Ordner später selbst löschen. Vor jeder einzelnen Datei werden
 Original und Archivkopie noch einmal vollständig gelesen und verglichen; stimmt etwas nicht,
 bleibt die Datei stehen und wird gemeldet.
 
-Zum Bestätigen tippen Sie ein ganzes Wort in das Feld (`verschieben` für den Ordner
-`_geloescht_`, `loeschen` für endgültiges Löschen). Ein leeres Feld oder ein anderes Wort
-heißt: keine Datei anfassen – das Programm sagt dann, dass nichts gestartet wurde. Wer das
-Häkchen **„Leere Ordner entfernen"** setzt, tippt dafür das Wort `entfernen`. Haben Sie auf
+Zum Bestätigen tippen Sie das angezeigte Wort in das Feld der Karte (`verschieben` für den
+Ordner `_geloescht_`, `loeschen` für endgültiges Löschen). Der Knopf darunter wird erst
+anklickbar, wenn das Wort genau stimmt. Die Karte **„Leere Ordner"** arbeitet genauso mit dem
+Wort `entfernen`. Haben Sie auf
 der Startseite **Verschieben** gewählt, verlangt das Fenster schon vor Schritt 3 das Wort
 `verschieben`, weil dort die Quelle geleert wird. Im schwarzen Fenster gelten dieselben
 Wörter.
 
-Am Ende steht **Alles erledigt** mit der Anzahl der Dateien je Status (Abschnitt 5 erklärt
-die Wörter), dazu die Knöpfe „Bericht öffnen" und „Quelle aufräumen…".
+Am Ende sind alle fünf Phasen in der Leiste erledigt, der Hauptknopf heißt „Bericht öffnen",
+und die Karte „Letzter Bericht" öffnet den Bericht oder die CSV-Tabelle (Abschnitt 5 erklärt
+die Statuswörter in den Zählern).
 
 ### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
 
@@ -242,9 +248,8 @@ Schritt nicht auf „Abbrechen", erscheint nach einer Weile „Sofort beenden". 
 Fenster zeigt beim Kopieren und Prüfen eine Zeile dasselbe. Am Ende jeder Phase stehen Dauer
 und Durchsatz.
 
-Die Listen **Fehler**, **Doppelte Dateien** und **Dateien ohne Datum** öffnen sich über die
-Knöpfe auf der Startseite und in den Zusammenfassungen – immer seitenweise mit 100 Zeilen,
-nie alles auf einmal.
+Die Listen **Fehler**, **Duplikate** und **Ohne Datum** öffnen sich über die Knöpfe unten in
+der Übersicht – immer seitenweise mit 100 Zeilen (‹ › blättert), nie alles auf einmal.
 
 Nach jeder Phase schreibt das Programm
 

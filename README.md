@@ -8,4 +8,4 @@ Alle Notizen, Ideen und sonstigen Infos liegen im Ordner [`docs/`](docs/).
 
 Unter **Releases** liegt `fotosort-windows.zip`: entpacken, `start.bat` doppelklicken — es öffnet
 sich ein Fenster mit Knöpfen und Ordnerauswahl. Nichts zu installieren, ExifTool ist enthalten.
-Anleitung: `LIESMICH.md` im entpackten Ordner.
+Anleitung: `LIESMICH.md` im entpackten Ordner. Bilder der Oberfläche: [`docs/oberflaeche/`](docs/oberflaeche/).

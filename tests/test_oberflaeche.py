@@ -74,9 +74,16 @@ def test_zustand_liefert_alles_fuer_die_startseite(ob):
     assert z["lauf"]["aktiv"] is False
     assert set(z["schritte"]) == set(ablauf_modul.SCHRITTE)
     seite = client.get("/").text
-    assert 'id="seite-start"' in seite and "Los geht's" in seite
-    assert client.get("/static/app.js").status_code == 200
-    assert client.get("/static/stil.css").status_code == 200
+    assert 'id="seite-start"' in seite and 'id="seite-haupt"' in seite and 'class="titlebar"' in seite
+    assert 'class="statusleiste' in seite and 'class="phasen-liste"' in seite
+    for name in ("app.js", "app.css", "styles.css", "fonts.css"):
+        assert client.get("/static/" + name).status_code == 200, name
+    css = client.get("/static/styles.css").text
+    assert "@import" not in css and "https://" not in css      # nichts aus dem Internet
+    assert "@font-face" in client.get("/static/fonts.css").text
+    schrift = client.get("/static/fonts/Inter-latin.woff2")
+    assert schrift.status_code == 200 and schrift.headers["content-type"].startswith("font/woff2")
+    assert client.get("/static/fonts/gibt-es-nicht.woff2").status_code == 404
     assert client.get("/static/geheim.txt").status_code == 404
 
 
@@ -182,7 +189,7 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     assert l["zustand"] == "fertig", l
     assert l["bytes"] > 0 and l["text"]["rate"].endswith("MB/s")
     zf = client.get("/api/zusammenfassung?schritt=kopieren").json()
-    assert zf["duplikate"] > 0 and any(z[0].startswith("Kopiert") for z in zf["zeilen"])
+    assert zf["duplikate"] > 0 and any(z[0].startswith("kopiert") for z in zf["zeilen"])
     assert any(p.is_dir() and p.name == "Sony A7C" for p in ziel.rglob("*"))
 
     n = client.get("/api/naechster").json()
@@ -222,12 +229,16 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     assert all(not Path(q).exists() for q in nachher)
     assert any(p.is_dir() and p.name.startswith("_geloescht_") for p in quelle.iterdir())
     zf = client.get("/api/zusammenfassung?schritt=aufraeumen").json()
-    assert any(z[0].startswith("Insgesamt aus der Quelle entfernt") for z in zf["zeilen"])
+    assert any(z[0].startswith("quelle_geloescht") for z in zf["zeilen"])
     assert client.get("/api/naechster").json()["schritt"] == "fertig"
 
-    # Bericht und Einstellungen per Knopf.
+    # Bericht und Einstellungen per Knopf: neu schreiben, zuletzt geschriebenen oeffnen, CSV.
     b = _post(client, "/api/bericht")
-    assert Path(b["pfad"]).is_file() and b["pfad"].endswith(".txt")
+    assert Path(b["pfad"]).is_file() and b["pfad"].endswith(".txt") and b["bericht"]["name"] == Path(b["pfad"]).name
+    assert _post(client, "/api/bericht", {"art": "txt"})["pfad"] == b["pfad"]
+    assert _post(client, "/api/bericht", {"art": "csv"})["pfad"].endswith("_dateien.csv")
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["bericht"]["name"] == b["bericht"]["name"] and z["archiv"]["lauf_nr"] >= 5 and z["archiv"]["sicherung"]
     e = _post(client, "/api/einstellungen_oeffnen")
     assert Path(e["pfad"]).name == "config.toml"
 

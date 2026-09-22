@@ -1,0 +1,49 @@
+/* fotosort – Layout der Hauptansicht. Alle Farben/Abstände kommen aus styles.css (Nocturne-Tokens). */
+:root { --regel: linear-gradient(to right, transparent, color-mix(in srgb, var(--color-text) 8%, transparent) 48px, color-mix(in srgb, var(--color-text) 8%, transparent) calc(100% - 48px), transparent) no-repeat bottom / 100% 1px; }
+html, body { height: 100%; }
+.app { min-height: 100vh; display: grid; grid-template-rows: 40px 1fr 40px; background: var(--color-bg); }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.push { margin-left: auto; }
+.flex-gap { display: flex; gap: 6px; }
+.hell { color: var(--color-neutral-300); }
+.klein { font-size: 12px; }
+.gedaempft { color: var(--color-neutral-500); }
+.hinweis { font-size: 12px; color: var(--color-neutral-500); }
+
+/* Titelzeile */
+.titlebar { display: flex; align-items: center; gap: 8px; padding: 0 14px; background: var(--color-surface); font-size: 12px; color: var(--color-neutral-500); }
+.titlebar .brand { color: var(--color-text); }
+
+/* Inhalt */
+.content { padding: 32px 40px; display: flex; flex-direction: column; gap: 28px; min-height: 0; }
+.pfade { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.pfeil { color: var(--color-neutral-600); }
+
+/* Phasenleiste */
+.phasen { display: flex; flex-direction: column; gap: 10px; }
+.phasen-linie { position: relative; height: 2px; background: linear-gradient(to right, transparent, var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent); }
+.phasen-fill { position: absolute; left: 0; top: 0; height: 2px; background: linear-gradient(to right, transparent, var(--color-accent) 48px); box-shadow: 0 0 10px var(--color-accent); }
+.phasen-liste { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); font-size: 13px; color: var(--color-neutral-600); }
+.phasen-liste .ist-fertig { color: var(--color-neutral-500); }
+.phasen-liste .ist-aktiv { color: var(--color-accent); }
+
+/* Tafel: Fortschritt links, Karten rechts */
+.tafel { display: grid; grid-template-columns: 1fr 300px; gap: 32px; min-height: 0; }
+.fortschritt { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.balken { height: 2px; background: var(--color-neutral-800); border-radius: 1px; position: relative; }
+.balken-fill { position: absolute; left: 0; top: 0; height: 2px; background: var(--color-accent); box-shadow: 0 0 10px var(--color-accent); border-radius: 1px; }
+.kennzahlen { display: flex; gap: 24px; font-size: 13px; color: var(--color-neutral-400); font-variant-numeric: tabular-nums; }
+.kennzahlen b { font-weight: 400; color: var(--color-text); }
+.aktuelle-datei { font-size: 12px; color: var(--color-neutral-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+.zaehler { margin: 12px 0 0; max-width: 420px; font-variant-numeric: tabular-nums; }
+.zaehler > div { display: flex; justify-content: space-between; padding: 9px 0; font-size: 14px; background: var(--regel); }
+.zaehler > div:last-child { background: none; }
+.zaehler dt { color: var(--color-neutral-400); }
+.zaehler dd { margin: 0; }
+.zaehler dd.null { color: var(--color-neutral-600); }
+.seite { display: flex; flex-direction: column; gap: 12px; }
+
+/* Aktionen + Statusleiste */
+.aktionen { margin-top: auto; display: flex; gap: 8px; align-items: center; }
+.statusleiste { display: flex; gap: 20px; align-items: center; padding: 0 24px; border-top: 1px solid var(--color-divider); font-size: 11px; color: var(--color-neutral-500); }

@@ -398,6 +398,11 @@ Version 0.2.0, Release v0.2.
 - [x] Zusammenfassung je Schritt mit „Weiter“, Alias-Tabelle nach der Analyse, Aufräumen-Seite mit Wort
 - [x] Listen Fehler/Duplikate/ohne Datum seitenweise (100 je Seite), Bericht und config.toml per Knopf
 - [x] Fenster schließen bricht den Lauf nicht ab; laufender Schritt wird beim Öffnen übernommen
+- [x] **Design übernommen** (v0.3): Übergabe in `docs/design/` (Nocturne-Tokens, Hauptansicht). Eine
+      Ansicht mit Titelzeile, Phasenleiste, Fortschrittstafel, Karten und Statusleiste; Startseite,
+      Kamera-Tabelle (`.table` mit tippbarem Alias), Aufräumen-Karte und geblätterte Listen im
+      selben Stil. Inter als woff2 im Paket (`fonts.css`), nichts aus dem Internet. Bildschirmfotos
+      jeder Ansicht (Playwright) unter `docs/oberflaeche/`.
 - [ ] **Ordner-Browser für den Server (Phase 8):** Im Browser (`--ohne-fenster`) wird der Pfad
       eingetippt; der einfache Ordner-Browser aus SPEC §8 kommt mit dem Container.
 
@@ -415,6 +420,16 @@ Version 0.2.0, Release v0.2.
 - [ ] **„Sofort beenden“** erscheint 20 s nach einem Abbruch, auf den der Schritt nicht reagiert.
       Es beendet den Prozess hart; die Datenbank übersteht das (WAL), angefangene `.part`-Dateien
       räumt der nächste Lauf auf. Ist der Knopf erwünscht, oder lieber nur der sanfte Abbruch?
+- [ ] **Probelauf-Knopf:** Der Entwurf zeigt „Probelauf“ neben dem Hauptknopf. Im Fenster steht die
+      Zahl der anstehenden Dateien und die Datenmenge schon im Hauptknopf („Kopieren starten · N
+      Dateien“); ein eigener Probelauf (`kopieren --dry-run`) ist deshalb nicht eingebaut. Gewünscht?
+- [ ] **Zusammenfassung ohne Fließtext:** Nach dem Entwurf („nur Beschriftungen, Zahlen, Pfade“) sind
+      die Zeilen der Zusammenfassung jetzt knappe Bezeichnungen (`ohne sicheres Datum`,
+      `Namenskonflikte`, `quelle_geloescht (gesamt)`). Die erklärenden Sätze aus Phase 7 (erster
+      Stand) stehen nur noch in der LIESMICH. Reicht das für die Bedienung ohne Fachkenntnis?
+- [ ] **styles.css und Internet:** Die Übergabe lädt Inter über eine `@import`-Zeile von Google. Im
+      Programm ist genau diese Zeile entfernt (sonst würde jeder Start mit Internet die Schrift von
+      Google holen); alles andere ist unverändert. `docs/design/styles.css` bleibt das Original.
 - [ ] **Ein Fenster, ein Archiv zugleich.** Die Oberfläche merkt sich ein Ziel und lässt einen
       Schritt zugleich laufen. Zwei Fenster für zwei Archive gleichzeitig sind nicht vorgesehen
       (das zweite sähe den Lauf des ersten). Reicht das?

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import FotosortFehler, __version__, bericht, cli, config, db, kopieren, loeschen, meldungen, pfade, steuerung
+from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
 ZUSTAND_STARTET = "startet"
@@ -267,6 +268,11 @@ class Ablauf:
                 return {"aktiv": False, "zustand": "", "schritt": ""}
             zustand = str(st.get("zustand") or ZUSTAND_STARTET)
             schritt = str(st.get("schritt") or (self.lauf.schritt if self.lauf else ""))
+            if self.lauf is None and zustand not in ENDZUSTAENDE and pid_lebt(int(st.get("pid") or 0)):
+                # Ein Arbeitsprozess, den dieses Fenster nicht gestartet hat (etwa
+                # ein zweites Fenster): uebernehmen statt fuer tot erklaeren.
+                self.lauf = Lauf(schritt, None, int(st.get("pid") or 0), float(st.get("beginn") or time.time()),
+                                 steuerung.json_lesen(self.auftrag_datei) or {})
             lebt = self.lauf_lebt()
             if not lebt and zustand not in ENDZUSTAENDE:
                 # Verschwunden, ohne sich abzumelden (Absturz, Stromausfall,
@@ -418,11 +424,38 @@ class Ablauf:
         except FotosortFehler as fehler:
             return {"da": True, "fehler": str(fehler)}
         naechster = self._naechster_aus(stand)
+        letzter = stand["letzter_lauf"] or {}
         return {
             "da": True, "quellen": stand["quellen"], "phase": stand["phase"], "naechster": naechster,
             "naechster_name": self._schritt_name(naechster) if naechster != "fertig" else "",
             "profil": stand["profil"], "zaehler": stand["zaehler"],
+            "lauf_nr": int(letzter.get("nummer") or 0),
+            "sicherung": self._sicherung_zeit(),
+            "bericht": self._letzter_bericht(),
         }
+
+    def _sicherung_zeit(self) -> str:
+        """Wann die Sicherungskopie im Ziel zuletzt geschrieben wurde (Statusleiste)."""
+        try:
+            st = db.sicherung_pfad(Path(self.ziel)).stat()
+        except OSError:
+            return ""
+        return datetime.fromtimestamp(st.st_mtime).strftime("%d.%m. %H:%M")
+
+    def _letzter_bericht(self) -> dict:
+        """Der neueste Bericht im Ziel: Name, Textdatei, CSV der Dateien."""
+        ordner = bericht.berichte_ordner(Path(self.ziel))
+        try:
+            # Der zuletzt geschriebene, nicht der alphabetisch letzte (Zeitstempel koennen gleich sein).
+            kandidaten = sorted((p for p in ordner.glob("bericht_*.txt") if p.is_file()),
+                                key=lambda p: (p.stat().st_mtime_ns, p.name))
+        except OSError:
+            kandidaten = []
+        if not kandidaten:
+            return {}
+        txt = kandidaten[-1]
+        csv = txt.with_name(txt.stem + "_dateien.csv")
+        return {"name": txt.name, "txt": str(txt), "csv": str(csv) if csv.is_file() else ""}
 
     def zustand(self) -> dict:
         return {
@@ -649,16 +682,16 @@ class Ablauf:
                             "sidecar": e.get("sidecar", 0), "sonstiges": e["gesamt"] - echte,
                         })
                     extra["quellen"] = quellen
-                    zeilen.append(["Fotos, RAW-Dateien, Videos und Begleitdateien gefunden", meldungen.anzahl(echte_gesamt)])
-                    zeilen.append(["Davon neu, noch nicht analysiert", meldungen.anzahl(zaehler.get("gefunden", 0))])
-                    zeilen.append(["Andere Dateien (werden nicht angefasst)", meldungen.anzahl(sum(q["sonstiges"] for q in quellen))])
-                    zeilen.append(["Datenmenge insgesamt", meldungen.groesse(d.gesamtgroesse())])
+                    zeilen.append(["gefunden (Fotos, RAW, Videos, Sidecars)", meldungen.anzahl(echte_gesamt)])
+                    zeilen.append(["neu, noch nicht analysiert", meldungen.anzahl(zaehler.get("gefunden", 0))])
+                    zeilen.append(["andere Dateien (unangetastet)", meldungen.anzahl(sum(q["sonstiges"] for q in quellen))])
+                    zeilen.append(["Datenmenge", meldungen.groesse(d.gesamtgroesse())])
                     for art, text in (
-                        ("quelle_nicht_erreichbar", "Quellordner nicht erreichbar"),
-                        ("quelle_nicht_mehr_vorhanden", "Dateien seit dem letzten Mal aus der Quelle verschwunden"),
-                        ("ordner_nicht_lesbar", "Ordner, die nicht gelesen werden konnten"),
-                        ("ausgeschlossen", "Dateien durch Ausschlussmuster übersprungen"),
-                        ("quelle_veraendert", "Dateien, die sich seit dem letzten Mal geändert haben"),
+                        ("quelle_nicht_erreichbar", "Quelle nicht erreichbar"),
+                        ("quelle_nicht_mehr_vorhanden", "seit letztem Mal verschwunden"),
+                        ("ordner_nicht_lesbar", "Ordner nicht lesbar"),
+                        ("ausgeschlossen", "nach Muster ausgeschlossen"),
+                        ("quelle_veraendert", "seit letztem Mal geändert"),
                     ):
                         n = ereignis(art)
                         if n:
@@ -675,63 +708,63 @@ class Ablauf:
                         for m, o, n in a["modelle"] if m
                     ]
                     extra["ohne_modell"] = sum(n for m, _o, n in a["modelle"] if not m)
-                    zeilen.append(["Analysierte Dateien", meldungen.anzahl(a["analysiert"])])
-                    zeilen.append(["Ohne sicheres Aufnahmedatum (landen im Ordner „_Ohne_Datum“ oder nach Änderungsdatum)", meldungen.anzahl(a["unsicher"])])
+                    zeilen.append(["analysiert", meldungen.anzahl(a["analysiert"])])
+                    zeilen.append(["ohne sicheres Datum", meldungen.anzahl(a["unsicher"])])
                     if a["zeitzone_angenommen"]:
-                        zeilen.append(["Videos, bei denen die Zeitzone angenommen wurde", meldungen.anzahl(a["zeitzone_angenommen"])])
+                        zeilen.append(["Zeitzone angenommen (Videos)", meldungen.anzahl(a["zeitzone_angenommen"])])
                     if a["sidecar_ohne_haupt"]:
-                        zeilen.append(["Begleitdateien ohne zugehöriges Foto (übersprungen)", meldungen.anzahl(a["sidecar_ohne_haupt"])])
+                        zeilen.append(["Sidecars ohne Hauptdatei", meldungen.anzahl(a["sidecar_ohne_haupt"])])
                     if a["namenskonflikte"]:
-                        zeilen.append(["Gleiche Dateinamen im selben Zielordner (bekommen beim Kopieren einen Anhang)", meldungen.anzahl(a["namenskonflikte"])])
+                        zeilen.append(["Namenskonflikte", meldungen.anzahl(a["namenskonflikte"])])
                     if a["moegliche_duplikate"]:
-                        zeilen.append(["Möglicherweise doppelte Dateien (wird beim Kopieren sicher geprüft)", meldungen.anzahl(a["moegliche_duplikate"])])
-                    zeilen.append(["Fehler (nicht lesbare Dateien)", meldungen.anzahl(a["fehler"])])
+                        zeilen.append(["mögliche Duplikate (Schätzung)", meldungen.anzahl(a["moegliche_duplikate"])])
+                    zeilen.append(["Fehler", meldungen.anzahl(a["fehler"])])
                     if a["offen"]:
-                        zeilen.append(["Noch nicht analysiert", meldungen.anzahl(a["offen"])])
+                        zeilen.append(["noch nicht analysiert", meldungen.anzahl(a["offen"])])
                 elif schritt == "kopieren":
                     k = d.kopier_zusammenfassung()
                     s = k["status"]
                     titel = "Verschoben" if self.verschieben else "Kopiert"
-                    zeilen.append([f"{titel} in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
+                    zeilen.append([f"{titel.lower()} in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
                     zeilen.append(["Datenmenge in diesem Durchgang", meldungen.groesse(int(zahlen.get("bytes", 0)))])
-                    zeilen.append(["Im Archiv (kopiert, noch nicht geprüft)", meldungen.anzahl(s.get("kopiert", 0))])
+                    zeilen.append(["kopiert, noch nicht geprüft", meldungen.anzahl(s.get("kopiert", 0))])
                     if s.get("verschoben", 0):
-                        zeilen.append(["Verschoben (auf demselben Laufwerk, Prüfung folgt)", meldungen.anzahl(s.get("verschoben", 0))])
-                    zeilen.append(["Doppelte Dateien (war inhaltsgleich schon im Archiv, nicht kopiert)", meldungen.anzahl(s.get("duplikat", 0) + s.get("duplikat_bestaetigt", 0))])
+                        zeilen.append(["verschoben, Prüfung folgt", meldungen.anzahl(s.get("verschoben", 0))])
+                    zeilen.append(["Duplikate (nicht kopiert)", meldungen.anzahl(s.get("duplikat", 0) + s.get("duplikat_bestaetigt", 0))])
                     n = ereignis("namenskonflikt")
                     if n:
-                        zeilen.append(["Gleicher Name, anderer Inhalt: mit Anhang _1, _2 … abgelegt", meldungen.anzahl(n)])
+                        zeilen.append(["Namenskonflikte (Anhang _1, _2 …)", meldungen.anzahl(n)])
                     zeilen.append(["Fehler", meldungen.anzahl(s.get("fehler", 0))])
                     if s.get("analysiert", 0):
-                        zeilen.append(["Noch nicht kopiert", meldungen.anzahl(s.get("analysiert", 0))])
+                        zeilen.append(["noch nicht kopiert", meldungen.anzahl(s.get("analysiert", 0))])
                     if s.get("kopieren_laeuft", 0):
-                        zeilen.append(["Unterbrochen (wird beim nächsten Mal fortgesetzt)", meldungen.anzahl(s.get("kopieren_laeuft", 0))])
+                        zeilen.append(["unterbrochen (wird fortgesetzt)", meldungen.anzahl(s.get("kopieren_laeuft", 0))])
                 elif schritt == "pruefen":
-                    zeilen.append(["Geprüft in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
-                    zeilen.append(["Gelesene Datenmenge", meldungen.groesse(int(zahlen.get("bytes", 0)))])
-                    zeilen.append(["Geprüft und in Ordnung (Kopie stimmt mit der Quelle überein)", meldungen.anzahl(zaehler.get("geprueft", 0))])
-                    zeilen.append(["Doppelte Dateien bestätigt", meldungen.anzahl(zaehler.get("duplikat_bestaetigt", 0))])
+                    zeilen.append(["geprüft in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
+                    zeilen.append(["gelesene Datenmenge", meldungen.groesse(int(zahlen.get("bytes", 0)))])
+                    zeilen.append(["geprueft (Kopie stimmt)", meldungen.anzahl(zaehler.get("geprueft", 0))])
+                    zeilen.append(["duplikat_bestaetigt", meldungen.anzahl(zaehler.get("duplikat_bestaetigt", 0))])
                     n = ereignis("pruefung_fehlgeschlagen")
-                    zeilen.append(["Prüfung fehlgeschlagen (Datei wird beim nächsten Mal neu kopiert)", meldungen.anzahl(n)])
+                    zeilen.append(["Prüfung fehlgeschlagen (wird neu kopiert)", meldungen.anzahl(n)])
                     if zaehler.get("kopiert", 0):
-                        zeilen.append(["Noch nicht geprüft", meldungen.anzahl(zaehler.get("kopiert", 0))])
+                        zeilen.append(["noch nicht geprüft", meldungen.anzahl(zaehler.get("kopiert", 0))])
                 elif schritt == "aufraeumen":
-                    zeilen.append(["Aus der Quelle entfernt in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
-                    zeilen.append(["Insgesamt aus der Quelle entfernt", meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
+                    zeilen.append(["entfernt in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
+                    zeilen.append(["quelle_geloescht (gesamt)", meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
                     n = ereignis("quelle_in_geloescht_ordner")
                     if n:
-                        zeilen.append(["Davon in den Ordner _geloescht_… verschoben", meldungen.anzahl(n)])
+                        zeilen.append(["davon nach _geloescht_", meldungen.anzahl(n)])
                     n = ereignis("leerer_ordner_entfernt")
                     if n:
-                        zeilen.append(["Leere Ordner entfernt", meldungen.anzahl(n)])
+                        zeilen.append(["leere Ordner entfernt", meldungen.anzahl(n)])
                     n = ereignis("loeschung_verweigert")
                     if n:
-                        zeilen.append(["Löschung verweigert (Quelle und Archiv stimmen nicht überein)", meldungen.anzahl(n)])
+                        zeilen.append(["Löschung verweigert", meldungen.anzahl(n)])
                     n = ereignis("quelle_seit_kopieren_geaendert")
                     if n:
-                        zeilen.append(["Quelle hat sich seit dem Kopieren geändert (wird neu kopiert)", meldungen.anzahl(n)])
+                        zeilen.append(["Quelle seit Kopieren geändert", meldungen.anzahl(n)])
                     if zaehler.get("geprueft", 0):
-                        zeilen.append(["Noch in der Quelle (geprüft, nicht entfernt)", meldungen.anzahl(zaehler.get("geprueft", 0))])
+                        zeilen.append(["noch in der Quelle (geprueft)", meldungen.anzahl(zaehler.get("geprueft", 0))])
                 else:
                     raise FotosortFehler(meldungen.arbeit_schritt_unbekannt(schritt))
                 sek = float(zahlen.get("sekunden", 0) or 0)
@@ -815,19 +848,26 @@ class Ablauf:
 
     # -- Bericht und Einstellungen ---------------------------------------------
 
-    def bericht_oeffnen(self) -> dict:
+    def bericht_oeffnen(self, art: str = "neu") -> dict:
+        """art = "neu": Bericht jetzt schreiben und oeffnen; "txt"/"csv": den
+        zuletzt geschriebenen oeffnen (gibt es keinen, wird einer geschrieben)."""
         with self.sperre:
-            self._datenbank_frei()
             if not self._archiv_da():
                 raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
-            stille = _StilleKonsole()
-            archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
-            try:
-                txt, _csv_d, _csv_e = bericht.schreiben(archiv.ziel, archiv.datenbank)
-            finally:
-                archiv.datenbank.schliessen()
-            geoeffnet = cli._editor_oeffnen(txt)
-            return {"pfad": str(txt), "geoeffnet": geoeffnet, "text": meldungen.ob_bericht(txt, geoeffnet)}
+            letzter = self._letzter_bericht() if art in ("txt", "csv") else {}
+            pfad = Path(letzter["txt" if art == "txt" else "csv"]) if letzter.get("txt" if art == "txt" else "csv") else None
+            if pfad is None:
+                self._datenbank_frei()
+                stille = _StilleKonsole()
+                archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
+                try:
+                    txt, csv_d, _csv_e = bericht.schreiben(archiv.ziel, archiv.datenbank)
+                finally:
+                    archiv.datenbank.schliessen()
+                pfad = csv_d if art == "csv" else txt
+            geoeffnet = cli._editor_oeffnen(pfad)
+            return {"pfad": str(pfad), "geoeffnet": geoeffnet, "text": meldungen.ob_bericht(pfad, geoeffnet),
+                    "bericht": self._letzter_bericht()}
 
     def einstellungen_oeffnen(self) -> dict:
         with self.sperre:

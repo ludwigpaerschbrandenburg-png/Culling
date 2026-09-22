@@ -35,7 +35,7 @@ fotosort = "fotosort.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"fotosort.oberflaeche" = ["static/*"]
+"fotosort.oberflaeche" = ["static/*", "static/fonts/*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fotosort.__version__" }

@@ -19,7 +19,7 @@ from . import server as server_modul
 
 OK = 0
 FEHLER = 1
-TITEL = "Foto-Sortierer"
+TITEL = "fotosort"
 SELBSTTEST_JS = """
 (function () {
   function melden(text) { window.pywebview.api.selbsttest_ergebnis(text); }
@@ -131,7 +131,7 @@ def starten(ohne_fenster: bool, port: int, selbsttest: bool, ziel: str | None, k
             return FEHLER
         ab.fenster = True
         api = _Api()
-        fenster = webview.create_window(TITEL, adresse, js_api=api, width=1120, height=820, min_size=(760, 560))
+        fenster = webview.create_window(TITEL, adresse, js_api=api, width=1180, height=800, min_size=(1040, 700), background_color="#161826")
         api._fenster = fenster
         rc = [OK]
         if selbsttest:

@@ -61,8 +61,17 @@ def main() -> int:
     fenster_exe = paket / ("fotosort-fenster.exe" if sys.platform.startswith("win") else "fotosort-fenster")
     if not fenster_exe.is_file():
         fehler.append(f"Fensterprogramm fehlt: {fenster_exe}")
-    if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / "index.html").is_file():
-        fehler.append("Seite der Oberflaeche (static/index.html) fehlt im Paket")
+    static = paket / "_internal" / "fotosort" / "oberflaeche" / "static"
+    for name in ("index.html", "app.js", "app.css", "styles.css", "fonts.css", "fonts/Inter-latin.woff2", "fonts/Inter-latin-ext.woff2"):
+        if not (static / name).is_file():
+            fehler.append(f"Seite der Oberflaeche: static/{name} fehlt im Paket")
+    # Offline: nichts in der Seite darf aus dem Internet geladen werden.
+    for name in ("styles.css", "app.css", "fonts.css", "index.html"):
+        try:
+            if "https://" in (static / name).read_text(encoding="utf-8", errors="replace"):
+                fehler.append(f"static/{name} verweist auf eine Internetadresse")
+        except OSError:
+            pass
 
     shutil.rmtree(arbeit, ignore_errors=True)
     arbeit.mkdir(parents=True)
