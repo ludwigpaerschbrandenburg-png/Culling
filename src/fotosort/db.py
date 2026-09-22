@@ -819,14 +819,23 @@ class Datenbank:
         if not modelle:
             return 0
         self.stapel_schreiben()
+        # Vergleich ohne Gross-/Kleinschreibung in Python (SQLite kennt LOWER
+        # nur fuer ASCII - ein Modell mit Umlaut fiele sonst durch).
+        klein = {m.strip().lower() for m in modelle}
+        genau = [
+            z["kamera_modell"] for z in self.verbindung.execute(
+                "SELECT DISTINCT kamera_modell FROM dateien WHERE status = 'analysiert'")
+            if str(z["kamera_modell"]).strip().lower() in klein
+        ]
+        if not genau:
+            return 0
         self._beginnen()
-        klein = [m.strip().lower() for m in modelle]
-        platz = ",".join("?" * len(klein))
+        platz = ",".join("?" * len(genau))
         cursor = self.verbindung.execute(
             "UPDATE dateien SET status = 'gefunden', zielpfad = '' WHERE status = 'analysiert'"
-            f" AND (LOWER(kamera_modell) IN ({platz}) OR (gruppe != '' AND gruppe IN"
-            f" (SELECT gruppe FROM dateien WHERE status = 'analysiert' AND LOWER(kamera_modell) IN ({platz}))))",
-            klein + klein,
+            f" AND (kamera_modell IN ({platz}) OR (gruppe != '' AND gruppe IN"
+            f" (SELECT gruppe FROM dateien WHERE status = 'analysiert' AND kamera_modell IN ({platz}))))",
+            genau + genau,
         )
         self.stapel_schreiben()
         return int(cursor.rowcount)
@@ -909,6 +918,24 @@ class Datenbank:
             (pfad_text(partner_zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
+
+    def duplikat_partner_umschreiben(self, alt, neu, lauf: int) -> int:
+        """Duplikate dieses Laufs, deren Partner unter 'alt' geplant war,
+        auf den tatsaechlichen Namen 'neu' umschreiben."""
+        self._beginnen()
+        cursor = self.verbindung.execute(
+            "UPDATE dateien SET zielpfad = ? WHERE status = 'duplikat' AND zielpfad = ? AND kopiert_in_lauf = ?",
+            (pfad_text(neu), pfad_text(alt), lauf),
+        )
+        self._vielleicht_schreiben()
+        return int(cursor.rowcount)
+
+    def duplikate_mit_partner(self, partner, lauf: int) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE status = 'duplikat' AND zielpfad = ? AND kopiert_in_lauf = ?",
+            (pfad_text(partner), lauf),
+        ).fetchall()
 
     def zurueck_auf_analysiert(self, quellpfad, zielpfad) -> None:
         self._beginnen()

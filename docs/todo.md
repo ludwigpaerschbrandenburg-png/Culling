@@ -305,6 +305,35 @@ Regel); eine spätere Beschleunigung wäre, die zweite Lesung samt `unlink` in d
   hängenden ExifTool-Stapel (siehe Phase 2, „Aus der Abnahme") und die Erkennung zweier
   Laufwerksbuchstaben auf derselben Platte (unten, ungemessen). Beides bleibt offen.
 
+### Aus der Prüfung von Phase 6 (ein unabhängiger Prüfer)
+
+Kein Fund der Stufe „Verlust möglich". Alle Funde sind behoben (Tests in `tests/test_start.py`,
+`tests/test_messen.py`, `tests/test_pruefbefunde6.py`):
+
+- [x] `start`: „nein" zum Aufräumen und „ja" zu leeren Ordnern fragte trotzdem das Löschwort für
+      Dateien ab — jetzt werden die Dateien ohne Frage übersprungen.
+- [x] Kopieren: Ein Duplikat derselben Runde zeigte auf den *geplanten* Namen seines Partners;
+      belegte ein Fremdprozess den Namen (Anhang `_1`), zeigte die Duplikat-Zeile auf die fremde
+      Datei. Jetzt werden solche Zeilen auf den tatsächlichen Endnamen umgeschrieben bzw. bei
+      Fehlschlag neu zum Kopieren freigegeben.
+- [x] Ziel-Index bekam die Quellzeit statt der Zeit der geschriebenen Datei (scheitert `utime`,
+      rundet FAT/SMB). Jetzt liefert der Worker die tatsächliche Zeit.
+- [x] Rückfall ohne `.part` (exFAT): bis zu einer Runde exklusiv angelegter Dateien vor dem
+      Anspruchs-Commit. Jetzt wie vorher je Gruppe festgeschrieben.
+- [x] `analyse_zuruecksetzen_nach_modell` verglich mit SQLite-`LOWER` (nur ASCII): Modell mit
+      Umlaut fiel durch. Jetzt Vergleich in Python.
+- [x] `aliase_ergaenzen` verlor den Kommentar am Zeilenende einer ersetzten Zeile.
+- [x] `--quelle` per Schalter wurde in `start` nicht geprüft; Alias-Frage kam auch ohne
+      Modell-Liste; Verschieben im geführten Modus ging mit Enter — jetzt Wort `verschieben`
+      vor Schritt 3 und genauer Vergleich der Modus-Antwort; ExifTool wird je Programmlauf nur
+      einmal gestartet.
+- [x] `messen`: Platzprüfung deckte bei kleinem `--mb` nicht die wirklich geschriebene Menge;
+      Pfad wurde vor dem exklusiven Anlegen gemerkt; Strg+C wirkte erst nach der Stufe; die
+      Abbruch-Meldung sagt jetzt, wenn ein Messordner liegen blieb; Profilvorschlag `netzwerk`
+      nur noch bei erkanntem Netzpfad.
+- [x] `einrichten.bat`: Klammerblöcke mit Variablen (ein `)` im Pfad hätte sie gesprengt) durch
+      `goto`-Ablauf ersetzt. `LIESMICH.md`: vier Abweichungen vom Code korrigiert.
+
 ### Aus der Prüfung
 
 - [ ] **Zwei Laufwerksbuchstaben auf derselben physischen Platte.** Die Laufwerkskennung für

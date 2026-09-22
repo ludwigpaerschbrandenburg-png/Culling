@@ -65,6 +65,11 @@ def exiftool_finden(konf=None) -> tuple[str | None, str]:
     return shutil.which("exiftool"), "exiftool ueber PATH"
 
 
+# ExifTool-Pfade, die in diesem Programmlauf schon einmal erfolgreich
+# gestartet wurden (der gefuehrte Modus oeffnet das Archiv mehrmals).
+_exiftool_startbar_gemerkt: set[str] = set()
+
+
 def exiftool_pruefen(befehl: str, konf, konsole) -> None:
     """Bei jedem Start pruefen, ob ExifTool da und startbar ist.
 
@@ -73,7 +78,8 @@ def exiftool_pruefen(befehl: str, konf, konsole) -> None:
     Befehlen, die Metadaten brauchen.
     """
     gefunden, wo = exiftool_finden(konf)
-    if gefunden and exiftool_startbar(gefunden):
+    if gefunden and (gefunden in _exiftool_startbar_gemerkt or exiftool_startbar(gefunden)):
+        _exiftool_startbar_gemerkt.add(gefunden)   # je Programmlauf nur einmal starten
         return
     if befehl in BRAUCHT_EXIFTOOL:
         raise FotosortFehler(meldungen.exiftool_fehlt(wo))
@@ -576,6 +582,8 @@ def befehl_aufraeumen(args, konsole) -> int:
         lauf = datenbank.lauf_beginnen(_befehlszeile())
 
         def bestaetigen(wurzel, n, b, w):
+            if getattr(args, "nur_ordner", False):
+                return False   # gefuehrter Modus: Dateien ausdruecklich verneint
             return _bestaetigung_lesen(konsole, meldungen.aufraeumen_frage(wurzel, n, b, w), meldungen.BESTAETIGUNGSWORT[w])
 
         def bestaetigen_ordner(wurzel, n):
@@ -676,7 +684,7 @@ def _start_archiv_lesen(args, konsole) -> dict:
             "kopieren": d.zu_kopieren_summe(),
             "pruefen": d.zu_pruefen_summe(),
             "aufraeumen": (sum(n for n, _ in loeschbar.values()), sum(b for _, b in loeschbar.values())),
-            "modelle": [m for m, _o, _n in d.analyse_zusammenfassung()["modelle"] if m],
+            "modelle": [(m, o, n) for m, o, n in d.analyse_zusammenfassung()["modelle"] if m],
             "konf_pfad": archiv.konf_pfad,
         }
     finally:
@@ -688,12 +696,33 @@ def _start_phase_text(zaehler: dict) -> str:
     return meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
 
 
+def _start_quelle_pruefen(antwort: str, ziel: Path, bekannt_auf: set, quellen: list[str]) -> str | None:
+    """Grund, warum dieser Quellordner nicht genommen wird - oder None."""
+    q = Path(antwort)
+    if not q.is_dir():
+        return meldungen.start_quelle_kein_ordner(q)
+    lage = pfade.lage_pruefen(q, ziel) if ziel.exists() else "getrennt"
+    if lage == "gleich":
+        return meldungen.quelle_gleich_ziel(pfade.aufloesen(q))
+    if lage == "quelle_in_ziel":
+        return meldungen.quelle_in_ziel(pfade.aufloesen(q))
+    auf = pfade.aufloesen(q)
+    if auf in bekannt_auf or any(pfade.aufloesen(Path(x)) == auf for x in quellen):
+        return meldungen.start_quelle_schon_dabei(auf)
+    return None
+
+
 def _start_quellen_fragen(args, konsole, ziel: Path, bekannt: list[str]) -> list[str]:
-    """Quellordner abfragen, bis der Nutzer mit leerer Eingabe fertig ist."""
+    """Quellordner abfragen, bis der Nutzer mit leerer Eingabe fertig ist.
+    Per Schalter genannte Quellen werden genauso geprueft wie getippte."""
     quellen: list[str] = []
-    for q in args.quelle or []:
-        quellen.append(str(q))
     bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
+    for q in args.quelle or []:
+        grund = _start_quelle_pruefen(str(q), ziel, bekannt_auf, quellen)
+        if grund is None:
+            quellen.append(str(q))
+        else:
+            konsole.print(meldungen.start_quelle_abgelehnt(q, grund))
     leer_hintereinander = 0
     while True:
         weitere = bool(quellen or bekannt)
@@ -707,20 +736,9 @@ def _start_quellen_fragen(args, konsole, ziel: Path, bekannt: list[str]) -> list
             konsole.print(meldungen.start_quelle_noetig())
             continue
         leer_hintereinander = 0
-        q = Path(antwort)
-        if not q.is_dir():
-            konsole.print(meldungen.quelle_existiert_nicht(q))
-            continue
-        lage = pfade.lage_pruefen(q, ziel) if ziel.exists() else "getrennt"
-        if lage == "gleich":
-            konsole.print(meldungen.quelle_gleich_ziel(pfade.aufloesen(q)))
-            continue
-        if lage == "quelle_in_ziel":
-            konsole.print(meldungen.quelle_in_ziel(pfade.aufloesen(q)))
-            continue
-        auf = pfade.aufloesen(q)
-        if auf in bekannt_auf or any(pfade.aufloesen(Path(x)) == auf for x in quellen):
-            konsole.print(meldungen.start_quelle_schon_dabei(auf))
+        grund = _start_quelle_pruefen(antwort, ziel, bekannt_auf, quellen)
+        if grund is not None:
+            konsole.print(grund)
             continue
         quellen.append(antwort)
 
@@ -729,7 +747,10 @@ def _start_aliase(args, konsole, stand: dict) -> bool:
     """Nach der Analyse: Aliase abfragen, eintragen, betroffene Dateien neu
     analysieren. True, wenn etwas eingetragen wurde."""
     neue: dict[str, str] = {}
-    bekannt = {m.lower(): m for m in stand["modelle"]}
+    if not stand["modelle"]:
+        return False   # nichts analysiert, also nichts zuzuordnen
+    konsole.print(meldungen.start_modelle(stand["modelle"]))
+    bekannt = {m.lower(): m for m, _o, _n in stand["modelle"]}
     while True:
         modell = _fragen(konsole, meldungen.start_frage_alias())
         if not modell:
@@ -796,7 +817,7 @@ def befehl_start(args, konsole) -> int:
         neue_quellen = _start_quellen_fragen(args, konsole, ziel, bekannt)
         verschieben = bool(getattr(args, "verschieben", False))
         if not verschieben:
-            verschieben = _fragen(konsole, meldungen.start_frage_modus(), "k").lower().startswith("v")
+            verschieben = _fragen(konsole, meldungen.start_frage_modus(), "k").lower() in ("v", "verschieben")
         profil_standard = stand["profil"] if stand else "hdd"
         profil = getattr(args, "profil", None)
         versuche = 0
@@ -870,7 +891,13 @@ def befehl_start(args, konsole) -> int:
             rc = befehl_kopieren(_start_namensraum(
                 args, "kopieren", verschieben=verschieben, dry_run=True, profil=profil,
                 kopier_worker=None, hash_worker=None), konsole)
-            if not _weiter(konsole, meldungen.start_frage_weiter(titel)):
+            if verschieben:
+                # Verschieben loescht die Quelle: wie beim Aufraeumen ein Wort, kein Enter.
+                n, b = stand["kopieren"]
+                if not _bestaetigung_lesen(konsole, meldungen.start_verschieben_frage(n, b), "verschieben"):
+                    konsole.print(meldungen.start_aufgehoert())
+                    return schlechtester
+            elif not _weiter(konsole, meldungen.start_frage_weiter(titel)):
                 konsole.print(meldungen.start_aufgehoert())
                 return schlechtester
             rc = befehl_kopieren(_start_namensraum(
@@ -903,7 +930,8 @@ def befehl_start(args, konsole) -> int:
         if aufraeumen_ja or leere:
             rc = befehl_aufraeumen(_start_namensraum(
                 args, "aufraeumen", quelle=None, leere_ordner=leere, dry_run=False,
-                endgueltig=False, profil=profil, hash_worker=None), konsole)
+                endgueltig=False, profil=profil, hash_worker=None,
+                nur_ordner=not aufraeumen_ja), konsole)
             if not pruefen_rueckgabe(rc):
                 return schlechtester
             stand = _start_archiv_lesen(args, konsole)
@@ -928,7 +956,7 @@ def befehl_messen(args, konsole) -> int:
         ergebnis = messen.ausfuehren(quelle, ziel, konsole, mb=args.mb)
     except KeyboardInterrupt:
         konsole.print("")
-        konsole.print(meldungen.messen_abgebrochen())
+        konsole.print(meldungen.messen_abgebrochen(messen.reste(ziel)))
         return ABGEBROCHEN
     if not (ergebnis.lesen_gemessen or ergebnis.schreiben_gemessen):
         konsole.print(meldungen.messen_nichts_gemessen())
@@ -1071,6 +1099,7 @@ def _konsole(fehlerausgabe: bool = False):
 def main(argv: list[str] | None = None) -> int:
     global _argumente
     eltern = parser_bauen()
+    _exiftool_startbar_gemerkt.clear()
     _argumente = list(sys.argv[1:] if argv is None else argv)
     args = eltern.parse_args(argv)
     if not args.befehl:

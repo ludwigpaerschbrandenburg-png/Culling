@@ -31,6 +31,9 @@ def _konf_pfad(ziel: Path, archiv_basis: Path) -> Path:
 # Zusammenfassung ok, Scan ok, Analyse ok, kein Alias, Kopieren ok,
 # Pruefen ok, nicht aufraeumen, keine leeren Ordner.
 def _antworten_voll(quelle: Path, modus: str = "k", profil: str = "ssd") -> list[str]:
+    if modus == "v":
+        # Verschieben verlangt vor Schritt 3 das Wort statt Enter.
+        return [str(quelle), "", modus, profil, "", "", "", "", "verschieben", "", "nein", "nein"]
     return [str(quelle), "", modus, profil, "", "", "", "", "", "", "nein", "nein"]
 
 
@@ -174,3 +177,79 @@ def test_aliase_ergaenzen_in_datei_ohne_tabelle(tmp_path):
     config.aliase_ergaenzen(pfad, {"X": "Y"})
     daten = tomllib.loads(pfad.read_text(encoding="utf-8"))
     assert daten["kamera"]["aliase"] == {"X": "Y"} and daten["ordner"]["vorlage"] == "{jahr}"
+
+
+# --------------------------------------------- Befunde der Pruefung Phase 6 ----
+
+
+def test_start_nein_zu_dateien_fragt_kein_loeschwort(baum, quelle, ziel, nachschauen, antwort, capsys):
+    """Fund 1: 'nein' zum Aufraeumen und 'ja' zu leeren Ordnern darf nie das
+    Loeschwort fuer Dateien abfragen (SPEC §8: nur auf ausdrueckliches ja)."""
+    antwort.extend(_antworten_voll(quelle))
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    capsys.readouterr()
+    (quelle / "leer").mkdir()
+    antwort.extend(["", "k", "", "", "", "nein", "ja", "entfernen"])
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "Zum Bestaetigen das Wort 'verschieben'" not in aus
+    assert "Zum Bestaetigen das Wort 'loeschen'" not in aus
+    assert "Soll ein Kameramodell" not in aus            # Fund 8: keine Liste, keine Frage
+    assert not (quelle / "leer").exists()
+    zeilen = _echte(_zeilen(nachschauen, ziel))
+    assert {z["status"] for z in zeilen.values()} == {"geprueft", "duplikat_bestaetigt"}
+    assert all(Path(qp).exists() for qp in zeilen)
+
+
+def test_start_quelle_schalter_wird_geprueft(baum, quelle, ziel, tmp_path, antwort, capsys):
+    """Fund 7: --quelle per Schalter geht durch dieselbe Pruefung wie getippt."""
+    antwort.extend([str(quelle), "", "k", "hdd", "n"])
+    assert _cli("start", "--ziel", ziel, "--quelle", tmp_path / "nix", "--quelle", ziel) == cli.ABGEBROCHEN
+    aus = capsys.readouterr().out
+    assert "nicht uebernommen" in aus and "kein Ordner" in aus
+    assert f"Quellen:  {quelle}" in aus
+
+
+def test_start_verschieben_braucht_das_wort(baum, quelle, ziel, nachschauen, antwort, capsys):
+    """Fund 9: Enter genuegt nicht, um die Quelle zu leeren."""
+    antwort.extend([str(quelle), "", "v", "ssd", "", "", "", "", ""])
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "Zum Bestaetigen das Wort 'verschieben'" in aus and "Hier aufgehoert" in aus
+    zeilen = _echte(_zeilen(nachschauen, ziel))
+    assert "verschoben" not in {z["status"] for z in zeilen.values()}
+    assert baum["analog"].exists()
+
+
+def test_start_modus_antwort_genau(baum, quelle, ziel, antwort, capsys):
+    antwort.extend([str(quelle), "", "vielleicht", "hdd", "n"])
+    assert _cli("start", "--ziel", ziel) == cli.ABGEBROCHEN
+    assert "Modus:    kopieren" in capsys.readouterr().out
+
+
+def test_aliase_ergaenzen_behaelt_kommentar_am_zeilenende(tmp_path):
+    """Fund 6."""
+    pfad = tmp_path / "config.toml"
+    pfad.write_text('[kamera.aliase]\n"ILCE-7C" = "A7C"   # meine Sony\n"X" = "Y"\n', encoding="utf-8")
+    config.aliase_ergaenzen(pfad, {"ilce-7c": "Neu"})
+    text = pfad.read_text(encoding="utf-8")
+    assert '"ilce-7c" = "Neu" # meine Sony' in text and text.count("ILCE-7C") == 0
+    assert tomllib.loads(text)["kamera"]["aliase"] == {"ilce-7c": "Neu", "X": "Y"}
+
+
+def test_zuruecksetzen_nach_modell_auch_mit_umlaut(baum, quelle, ziel, nachschauen):
+    """Fund 5: Vergleich in Python, nicht mit SQLite-LOWER (nur ASCII)."""
+    from test_kopieren import _vorbereiten
+    _vorbereiten(ziel, quelle)
+    with nachschauen(ziel) as d:
+        qp = db.pfad_text(baum["analog"])
+        d.verbindung.execute("UPDATE dateien SET kamera_modell = 'KAMERA Ü' WHERE quellpfad = ?", (qp,))
+        d.verbindung.commit()
+        assert d.analyse_zuruecksetzen_nach_modell(["kamera ü"]) == 1
+        assert d.zeile(qp)["status"] == "gefunden"
+        # Schon kopierte Zeilen fallen nie zurueck.
+        d.kopiert_setzen(db.pfad_text(baum["jpg"]), ziel / "x.jpg", "h" * 64, 1)
+        d.verbindung.execute("UPDATE dateien SET kamera_modell = 'KAMERA Ü' WHERE quellpfad = ?", (db.pfad_text(baum["jpg"]),))
+        d.verbindung.commit()
+        assert d.analyse_zuruecksetzen_nach_modell(["KAMERA Ü"]) == 0
+        assert d.zeile(db.pfad_text(baum["jpg"]))["status"] == "kopiert"

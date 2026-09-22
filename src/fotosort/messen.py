@@ -88,6 +88,8 @@ def _lesen(dateien: list[Path], worker: int, stop: threading.Event) -> tuple[int
     anzahl = 0
 
     def eine(p: Path) -> int:
+        if stop.is_set():
+            return 0
         try:
             hashes.blake3_datei(pfade.lang(p), stop)
             return os.stat(pfade.lang(p)).st_size
@@ -95,12 +97,14 @@ def _lesen(dateien: list[Path], worker: int, stop: threading.Event) -> tuple[int
             return 0
 
     with ThreadPoolExecutor(max_workers=worker) as pool:
-        for n in pool.map(eine, dateien):
-            if n:
-                gelesen += n
-                anzahl += 1
-            if stop.is_set():
-                break
+        try:
+            for n in pool.map(eine, dateien):
+                if n:
+                    gelesen += n
+                    anzahl += 1
+        except KeyboardInterrupt:
+            stop.set()
+            raise
     return gelesen, anzahl, time.perf_counter() - begonnen
 
 
@@ -116,10 +120,12 @@ def _schreiben(ordner: Path, worker: int, gesamt_bytes: int, stop: threading.Eve
     begonnen = time.perf_counter()
 
     def eine(nummer: int) -> int:
+        if stop.is_set():
+            return 0
         pfad = ordner / f"messung_{worker}_{nummer}.part"
-        with sperre:
-            angelegt.append(pfad)
         fd = hashes.exklusiv_anlegen(pfade.lang(pfad))
+        with sperre:
+            angelegt.append(pfad)   # erst merken, was wirklich unseres ist
         geschrieben = 0
         try:
             with os.fdopen(fd, "wb", buffering=0) as f:
@@ -135,7 +141,11 @@ def _schreiben(ordner: Path, worker: int, gesamt_bytes: int, stop: threading.Eve
         return geschrieben
 
     with ThreadPoolExecutor(max_workers=worker) as pool:
-        summe = sum(pool.map(eine, range(SCHREIB_DATEIEN)))
+        try:
+            summe = sum(pool.map(eine, range(SCHREIB_DATEIEN)))
+        except KeyboardInterrupt:
+            stop.set()   # laufende Dateien hoeren am naechsten Block auf
+            raise
     return summe, time.perf_counter() - begonnen
 
 
@@ -167,6 +177,14 @@ def _messordner_anlegen(ziel: Path) -> Path:
     raise OSError(meldungen.messen_nichts_gemessen())
 
 
+def reste(ziel: Path) -> list[Path]:
+    """Messordner, die im Ziel liegen geblieben sind (nach Abbruch, Fehler)."""
+    try:
+        return sorted(p for p in Path(ziel).iterdir() if p.name.startswith(MESSORDNER_PRAEFIX))
+    except OSError:
+        return []
+
+
 def empfehlung(e: Ergebnis, quelle: Path, ziel: Path) -> None:
     """Kleinste Worker-Zahl, die nahe am besten Wert liegt; Profil danach."""
     mit_lesen = [s for s in e.stufen if s.lesen_mb_s]
@@ -190,8 +208,8 @@ def empfehlung(e: Ergebnis, quelle: Path, ziel: Path) -> None:
         e.profil = "netzwerk"
         e.hinweis = meldungen.messen_netz_hinweis(netz)
         return
-    profile = {"hdd": 2, "netzwerk": 4, "ssd": 8}
-    e.profil = min(profile, key=lambda name: (abs(profile[name] - e.kopier_worker), profile[name]))
+    # "netzwerk" nur bei erkanntem Netzpfad; lokal entscheidet die Worker-Zahl.
+    e.profil = "hdd" if e.kopier_worker <= 2 else "ssd"
 
 
 def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,
@@ -210,9 +228,10 @@ def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,
         konsole.print(meldungen.messen_quelle_zu_klein(sum(lese_bytes), MINDEST_LESE_BYTES * len(stufen)))
 
     frei = pfade.freier_platz(ziel)
-    schreiben_moeglich = frei >= 2 * je_stufe
+    benoetigt = 2 * max(je_stufe, SCHREIB_DATEIEN * hashes.BLOCK)   # je Datei mindestens ein Block
+    schreiben_moeglich = frei >= benoetigt
     if not schreiben_moeglich and konsole is not None:
-        konsole.print(meldungen.messen_zu_wenig_platz(ziel, 2 * je_stufe, frei))
+        konsole.print(meldungen.messen_zu_wenig_platz(ziel, benoetigt, frei))
 
     ordner: Path | None = None
     angelegt: list[Path] = []

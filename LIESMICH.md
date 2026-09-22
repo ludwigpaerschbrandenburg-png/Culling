@@ -79,6 +79,7 @@ Die Fragen des geführten Ablaufs:
 | Frage | Was Sie eingeben |
 |---|---|
 | Zielordner des Archivs | `D:\Probe\Archiv` |
+| Soll er angelegt werden? (nur wenn es den Ordner noch nicht gibt) | `ja` |
 | Quellordner mit den unsortierten Bildern | `D:\Probe\Quelle` |
 | Weiterer Quellordner (leer = keiner mehr) | nur Enter |
 | Kopieren oder Verschieben? (k/v) | Enter (= kopieren; die Quelle bleibt unverändert) |
@@ -161,7 +162,10 @@ bleibt die Datei stehen und wird gemeldet.
 
 Zum Bestätigen verlangt das Programm ein ganzes Wort (`verschieben` für den Ordner
 `_geloescht_`, `loeschen` für endgültiges Löschen, `entfernen` für leere Ordner).
-Enter allein oder ein anderes Wort heißt: nichts tun.
+Enter allein oder ein anderes Wort heißt: nichts tun. Danach fragt der Ablauf noch
+**„Leere Ordner in den Quellen entfernen? (ja/nein)"** – auch das nur auf `ja` und nach
+dem Wort `entfernen`. Haben Sie im geführten Ablauf **Verschieben** gewählt, verlangt er
+schon vor Schritt 3 das Wort `verschieben`, weil dort die Quelle geleert wird.
 
 Am Ende steht **Gefuehrter Ablauf beendet** mit der Anzahl der Dateien je Status
 (Abschnitt 5 erklärt die Wörter).
@@ -321,8 +325,9 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 - `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = Anzahl der Prozessorkerne.
 - `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = automatisch.
   `fotosort.bat messen` schlägt passende Werte vor.
-- `exiftool_pfad` – Pfad zu `exiftool.exe`, falls es nicht gefunden wird. `einrichten.bat`
-  richtet das normalerweise selbst ein.
+- `exiftool_pfad` – Pfad zu `exiftool.exe`, falls es nicht gefunden wird. Normalerweise
+  nicht nötig: `einrichten.bat` merkt sich den gefundenen Pfad in der Datei `.exiftool_pfad`,
+  und `fotosort.bat` gibt ihn dem Programm bei jedem Start mit.
 
 ---
 
@@ -347,7 +352,7 @@ Befehl (oder `start.bat`) noch einmal – das Programm macht genau dort weiter.
 Halbfertige Kopien (`.part`-Dateien) räumt es beim nächsten Kopieren selbst weg und
 kopiert die betroffenen Dateien erneut.
 
-**„Das Archiv ist gerade belegt" / „Die Datenbank des Archivs ist gerade belegt":**
+**„Fuer dieses Archiv laeuft bereits ein Vorgang" / „Die Datenbank des Archivs ist gerade belegt":**
 Es läuft noch ein zweiter fotosort-Lauf auf dasselbe Archiv, oder ein abgestürzter
 Lauf hat seine Sperre hinterlassen. Erst prüfen, ob noch ein Fenster offen ist; dann
 den Befehl erneut versuchen.
@@ -383,7 +388,8 @@ neben der alten den Anhang `_1`.
 - **Nie zwei Läufe gleichzeitig** auf dasselbe Archiv. Das Programm sperrt das Archiv,
   aber warten Sie trotzdem, bis das Fenster fertig ist.
 - **Die Datenbank bleibt auf dem Rechner.** Beim Wechsel auf einen anderen Rechner
-  holt sich das Programm beim ersten Start die Sicherungskopie aus dem Archiv.
+  übernimmt das Programm nur die Einstellungen aus dem Archiv; die Datenbank selbst holen
+  Sie wie in Abschnitt 8 beschrieben von Hand zurück, solange `wiederherstellen` fehlt.
 - **Sidecars** (`.xmp` usw.) wandern immer zusammen mit ihrer Hauptdatei.
 - **Videos ohne Zeitzone** werden aus Weltzeit umgerechnet; steht `heimat_zeitzone`
   falsch, rutscht eine Abendaufnahme in den nächsten Tag.
@@ -396,7 +402,7 @@ neben der alten den Anhang `_1`.
 ## 10. Was noch nicht gebaut ist
 
 - `fotosort wiederherstellen` (Datenbank aus der Sicherungskopie holen) und
-  `fotosort ziel-index --neu-aufbauen` (das Archiv neu einlesen) melden sich als
-  „kommt in einer späteren Phase". Der Weg von Hand steht in Abschnitt 8.
+  `fotosort ziel-index --neu-aufbauen` (das Archiv neu einlesen) melden sich mit
+  „Er kommt in Phase 3" und tun noch nichts. Der Weg von Hand steht in Abschnitt 8.
 - Eine Oberfläche mit Knöpfen statt des schwarzen Fensters (Weboberfläche) und der
   Betrieb auf dem TrueNAS-Server sind spätere Phasen.

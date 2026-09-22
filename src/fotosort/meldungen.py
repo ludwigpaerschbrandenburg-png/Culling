@@ -1299,6 +1299,31 @@ def start_aufgehoert() -> str:
     )
 
 
+def start_modelle(modelle: list) -> str:
+    """(Rohmodell, Ordnername, Anzahl) - die Liste vor der Alias-Frage."""
+    zeilen = ["Gefundene Kameramodelle (Modell -> Ordner):"]
+    for roh, ordner, n in modelle:
+        zeilen.append(f"  {(roh or '(kein Modell)'):<28} -> {ordner:<20}{anzahl(n):>8}")
+    return "\n".join(zeilen)
+
+
+def start_quelle_kein_ordner(pfad) -> str:
+    return f"Das ist kein Ordner: {pfad}"
+
+
+def start_quelle_abgelehnt(pfad, grund: str) -> str:
+    return f"Quellordner {pfad} nicht uebernommen: {grund}"
+
+
+def start_verschieben_frage(n: int, bytes_: int) -> str:
+    return (
+        f"Verschieben: {anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv gebracht und danach\n"
+        "in der Quelle geloescht (auf demselben Laufwerk durch Umbenennen, sonst nach Kopie\n"
+        "und Frischlesung beider Seiten). Zum Bestaetigen das Wort 'verschieben' eingeben,\n"
+        "alles andere hoert hier auf: "
+    )
+
+
 def start_frage_alias() -> str:
     return (
         "Soll ein Kameramodell einen anderen Ordnernamen bekommen?\n"
@@ -1404,7 +1429,9 @@ def messen_nichts_gemessen() -> str:
     return "Es konnte weder Lesen noch Schreiben gemessen werden (siehe oben)."
 
 
-def messen_abgebrochen() -> str:
+def messen_abgebrochen(rest=None) -> str:
+    if rest:
+        return f"Messung abgebrochen. Der voruebergehende Messordner konnte nicht ganz entfernt werden: {rest}"
     return "Messung abgebrochen. Der voruebergehende Messordner wurde entfernt."
 
 

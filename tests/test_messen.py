@@ -72,9 +72,27 @@ def test_empfehlung_kleinste_zahl_nahe_am_besten_wert(tmp_path, monkeypatch):
     ])
     messen.empfehlung(e, tmp_path, tmp_path)
     assert e.kopier_worker == 2 and e.hash_worker == 4 and e.profil == "hdd"
+    # Lokal nie "netzwerk", auch wenn 4 Worker am besten sind (Fund 13).
+    e.stufen[1].schreiben_mb_s = 100
+    messen.empfehlung(e, tmp_path, tmp_path)
+    assert e.kopier_worker == 4 and e.profil == "ssd"
     monkeypatch.setattr(messen.pfade, "ist_netzpfad", lambda p: True)
     messen.empfehlung(e, tmp_path, tmp_path)
     assert e.profil == "netzwerk" and "Netzlaufwerk" in e.hinweis
+
+
+def test_platzpruefung_deckt_die_kleinste_schreibmenge(baum, quelle, ziel, monkeypatch, capsys):
+    """Fund 10: geschrieben werden mindestens 8 Bloecke, auch bei --mb 1."""
+    monkeypatch.setattr(messen.pfade, "freier_platz", lambda p: 10 * 1024 * 1024)
+    e = messen.ausfuehren(quelle, ziel, None, mb=1)
+    assert not e.schreiben_gemessen
+    assert _inhalt(ziel) == []
+
+
+def test_reste_erkennt_liegengebliebenen_messordner(ziel):
+    assert messen.reste(ziel) == []
+    (ziel / f"{messen.MESSORDNER_PRAEFIX}alt").mkdir()
+    assert [p.name for p in messen.reste(ziel)] == [f"{messen.MESSORDNER_PRAEFIX}alt"]
 
 
 def test_messen_kennt_keinen_lauf_und_braucht_kein_exiftool(baum, quelle, ziel, monkeypatch, capsys):

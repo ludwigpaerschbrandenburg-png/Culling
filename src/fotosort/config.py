@@ -446,6 +446,20 @@ def aus_ziel_uebernehmen(ziel: Path, nach: Path) -> bool:
     return True
 
 
+def _zeilenkommentar(zeile: str, schluessel: str) -> str:
+    """Der Kommentar am Ende einer TOML-Zeile (mit fuehrendem Leerraum),
+    sonst leer. Ein '#' innerhalb des Wertes zaehlt nicht."""
+    for i, zeichen in enumerate(zeile):
+        if zeichen != "#":
+            continue
+        try:
+            if schluessel in tomllib.loads(zeile[:i]):
+                return " " + zeile[i:].rstrip("\r\n")
+        except tomllib.TOMLDecodeError:
+            continue
+    return ""
+
+
 def aliase_ergaenzen(pfad: Path, neue: dict[str, str]) -> None:
     """Alias-Zeilen in die Tabelle [kamera.aliase] der config.toml eintragen.
 
@@ -484,7 +498,8 @@ def aliase_ergaenzen(pfad: Path, neue: dict[str, str]) -> None:
         for schluessel in list(paar):
             for modell in list(rest):
                 if schluessel.strip().lower() == modell.strip().lower():
-                    zeilen[j] = f"{_toml_wert(modell)} = {_toml_wert(rest.pop(modell))}\n"
+                    kommentar = _zeilenkommentar(zeilen[j], schluessel)
+                    zeilen[j] = f"{_toml_wert(modell)} = {_toml_wert(rest.pop(modell))}{kommentar}\n"
     while ende > kopf + 1 and zeilen[ende - 1].strip() == "":
         ende -= 1
     zeilen[ende:ende] = [f"{_toml_wert(k)} = {_toml_wert(v)}\n" for k, v in rest.items()]

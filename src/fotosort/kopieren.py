@@ -280,7 +280,13 @@ def _kopieren_worker(quelle: Path, schreibziel: Path, groesse: int, mtime: float
         os.utime(_L(schreibziel), ns=(st.st_atime_ns, st.st_mtime_ns))
     except OSError:
         pass  # Aenderungsdatum ist Komfort, kein Verlust
-    return _Kopie("ok", hash=h, bytes=n, mtime_ns=st.st_mtime_ns)
+    # Fuer den Ziel-Index zaehlt die Zeit, die die geschriebene Datei WIRKLICH
+    # traegt (utime kann scheitern, FAT/SMB runden) - ein stat im Worker.
+    try:
+        mtime_ns = os.stat(_L(schreibziel)).st_mtime_ns
+    except OSError:
+        mtime_ns = st.st_mtime_ns
+    return _Kopie("ok", hash=h, bytes=n, mtime_ns=mtime_ns)
 
 
 # ------------------------------------------------------------- Ablauf ----
@@ -455,6 +461,11 @@ class _Lauf:
         # abgeschickt wird in bereit_abschicken() - fuer alle Gruppen einer
         # Runde mit EINEM Commit (Tempo, Phase 6).
         self.bereit.append(auftraege)
+        if self.direkt:
+            # Rueckfall ohne .part: Die Dateien liegen schon exklusiv unter
+            # ihrem Endnamen. Nicht bis zu einer Runde davon ohne festgeschriebenen
+            # Anspruch liegen lassen - hier je Gruppe festschreiben wie vorher.
+            self.bereit_abschicken()
         return True
 
     def bereit_abschicken(self) -> None:
@@ -789,7 +800,8 @@ class _Lauf:
                 self.dbank.schreibpfad_setzen(a.zeile["quellpfad"], mit_anhang(a.ziel, anhang, a.stamm))
         for a in rest:
             if a.zeile["dateityp"] != "sidecar":
-                self.hash_anstehend.setdefault(a.ergebnis.hash, (mit_anhang(a.ziel, anhang, a.stamm), a.ergebnis.bytes))
+                self.hash_anstehend.setdefault(
+                    a.ergebnis.hash, (mit_anhang(a.ziel, anhang, a.stamm), a.ergebnis.bytes, id(a)))
         return rest, anhang
 
     def gruppe_fertigstellen(self, rest: list[_Auftrag], anhang: int) -> None:
@@ -887,13 +899,10 @@ class _Lauf:
             anhang = k
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.kopiert_setzen(a.zeile["quellpfad"], endname, a.ergebnis.hash, self.lauf)
-        # Groesse und Zeit der eben geschriebenen Datei sind bekannt (der
-        # Worker hat die Quellzeit uebernommen): kein stat je Datei noetig.
+        # Groesse und Zeit der eben geschriebenen Datei liefert der Worker:
+        # kein stat je Datei im Hauptstrang noetig.
         self.dbank.ziel_index_setzen(endname, a.ergebnis.bytes, a.ergebnis.mtime_ns / 1e9, a.ergebnis.hash, self.lauf)
-        anstehend = self.hash_anstehend.get(a.ergebnis.hash)
-        if anstehend is not None and db.pfad_text(anstehend[0]) == db.pfad_text(mit_anhang(a.ziel, anhang, a.stamm)) \
-                or (anstehend is not None and db.pfad_text(anstehend[0]) == db.pfad_text(endname)):
-            self.hash_anstehend.pop(a.ergebnis.hash, None)
+        self._anstehend_erledigt(a, endname)
         e.kopiert += 1
         e.bearbeitet += 1
         e.bytes_kopiert += a.ergebnis.bytes
@@ -902,6 +911,33 @@ class _Lauf:
             self.dbank.ereignis(self.lauf, ART_NAMENSKONFLIKT, a.quelle, 1, db.pfad_text(endname))
         if self.verschieben:
             self.nachpruefung_einreihen(a, endname)
+
+    def _anstehend_erledigt(self, a: _Auftrag, endname: Path | None) -> None:
+        """Den Eintrag in hash_anstehend abschliessen, den DIESER Auftrag
+        gesetzt hat. endname: wo die Datei jetzt wirklich liegt (im
+        Ziel-Index) - weicht er vom geplanten Namen ab (Fremdprozess hat den
+        Namen belegt), werden die Duplikate dieser Runde umgeschrieben; None:
+        die Datei kam nicht an, ihre Duplikate muessen neu kopiert werden
+        (Pruefbefund Phase 6)."""
+        if a.ergebnis is None:
+            return
+        eintrag = self.hash_anstehend.get(a.ergebnis.hash)
+        if eintrag is None or eintrag[2] != id(a):
+            return
+        geplant = eintrag[0]
+        self.hash_anstehend.pop(a.ergebnis.hash, None)
+        if endname is not None:
+            if db.pfad_text(endname) != db.pfad_text(geplant):
+                self.dbank.duplikat_partner_umschreiben(geplant, endname, self.lauf)
+            return
+        from . import analyse
+        from . import ziel as ziel_modul
+        struktur = ziel_modul.Zielstruktur(self.ziel)
+        for z in self.dbank.duplikate_mit_partner(geplant, self.lauf):
+            self.dbank.zurueck_auf_analysiert(z["quellpfad"], analyse.zielpfad_aus_zeile(struktur, z, self.konf))
+            self.ergebnis.duplikate -= 1
+            self.ergebnis.bearbeitet -= 1
+            self.wartend.append((None, [z]))
 
     def _part_ohne_umbenennen(self, a: _Auftrag, endname: Path) -> str:
         """Rueckfall mitten im Lauf: .part -> Zielname als exklusive Kopie.
@@ -929,6 +965,7 @@ class _Lauf:
 
     def _fehler(self, a: _Auftrag, grund: str) -> None:
         _entfernen_eigene(a.schreibziel)
+        self._anstehend_erledigt(a, None)
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", grund)
