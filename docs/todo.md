@@ -355,6 +355,25 @@ Kein Fund der Stufe „Verlust möglich". Alle Funde sind behoben (Tests in `tes
 
 ---
 
+## Windows-Paket (eigenständiges Programm)
+
+Gebaut: `paket/bauen.py` (PyInstaller, Ordner-Variante, kein Einzel-exe wegen Startzeit und
+Virenscanner), `paket/exiftool_holen.py` (ExifTool 64 Bit mit dem Ordner `exiftool_files`, den
+die Windows-Fassung neben der exe braucht), `paket/pruefen.py` (das gepackte Programm läuft in
+der CI wirklich durch `--version`, scan, analyse, kopieren, pruefen), Workflow `paket.yml`
+(Artefakt `fotosort-windows` je Push, Release mit `fotosort-windows.zip` bei Tag `v*`).
+`fotosort --version` nennt Programm- und ExifTool-Version; das mitgelieferte ExifTool wird vor
+`PATH` gefunden (SPEC §2). `fotosort.bat` erkennt selbst, ob es im Paket oder im Quellcode liegt.
+
+- [x] Paket, Artefakt, Release v0.1, Prüfung in der CI
+- [ ] **Signatur:** Das Programm ist nicht signiert; SmartScreen warnt beim ersten Start (LIESMICH
+      §1 sagt, was zu klicken ist). Eine Signatur bräuchte ein Zertifikat.
+- [ ] **ExifTool-Version:** Der Bau nimmt die jeweils aktuelle Version von exiftool.org; die
+      benutzte steht in `exiftool\VERSION.txt` im Paket. Zum Festnageln `--version` in
+      `paket/exiftool_holen.py` bzw. im Workflow angeben.
+
+---
+
 ## Phase 7 — Weboberfläche
 
 - [ ] FastAPI, nur Zusammenfassungen, eigener Prozess

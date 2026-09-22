@@ -14,52 +14,29 @@ werden dort erklärt, wo sie vorkommen.
 
 ---
 
-## 1. Installation (einmalig, etwa 15 Minuten)
+## 1. Installation: ZIP entpacken, start.bat doppelklicken
 
-### 1.1 Das Programm holen
+Das fertige Windows-Programm braucht keine Installation. Python und ExifTool sind
+schon im Paket enthalten.
 
-1. Die Seite des Projekts auf GitHub öffnen.
-2. Auf den grünen Knopf **Code** klicken, dann **Download ZIP**.
-3. Die ZIP-Datei entpacken, zum Beispiel nach `C:\fotosort`. In diesem Ordner
-   liegen danach unter anderem `einrichten.bat`, `start.bat`, `fotosort.bat` und
-   diese Anleitung.
+1. Auf der Release-Seite des Projekts die Datei **`fotosort-windows.zip`** herunterladen.
+2. Die ZIP-Datei entpacken (Rechtsklick, „Alle extrahieren…"), zum Beispiel nach
+   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort.bat`,
+   `fotosort.exe`, dieser Anleitung und den Unterordnern `_internal` und `exiftool`.
+3. **`start.bat` doppelklicken.** Es öffnet sich ein schwarzes Fenster mit Fragen
+   (Abschnitt 2).
 
-### 1.2 Python installieren
+**Wenn Windows beim ersten Start warnt:** Zeigt SmartScreen das blaue Fenster „Der
+Computer wurde durch Windows geschützt", klicken Sie auf „Weitere Informationen" und dann
+auf „Trotzdem ausführen". Meldet der Virenscanner die Datei `fotosort.exe`, ist das ein
+Fehlalarm, der bei selbst gebauten Programmen ohne Herstellersignatur vorkommt; lassen Sie
+die Datei als Ausnahme zu. Beides fragt Windows nur beim ersten Mal.
 
-Python ist die Programmiersprache, in der fotosort geschrieben ist. Der Rechner
-braucht sie, um das Programm auszuführen.
+Ob alles zusammenpasst, zeigt `fotosort.bat --version` im schwarzen Fenster: Es nennt die
+Programmversion und das mitgelieferte ExifTool.
 
-1. https://www.python.org/downloads/windows/ öffnen.
-2. Den **Windows installer (64-bit)** der Version **3.12 oder neuer** laden.
-3. Beim Installieren **unbedingt das Häkchen „Add python.exe to PATH" setzen**,
-   dann „Install Now".
-
-### 1.3 ExifTool installieren
-
-ExifTool liest aus jeder Datei das Aufnahmedatum und das Kameramodell. Ohne
-ExifTool weigert sich fotosort, überhaupt anzufangen – sonst landete alles unter
-„Ohne Datum / Unbekannte Kamera".
-
-1. https://exiftool.org öffnen und **Windows Executable** laden (eine ZIP-Datei).
-2. Die ZIP-Datei entpacken. Es entsteht ein Ordner mit der Datei
-   `exiftool(-k).exe` und einem Unterordner `exiftool_files`.
-3. Den ganzen entpackten Ordner nach `C:\ExifTool` verschieben.
-4. Dort die Datei `exiftool(-k).exe` in `exiftool.exe` umbenennen (nur das
-   `(-k)` entfernen).
-
-### 1.4 Einrichten
-
-`einrichten.bat` im Ordner `C:\fotosort` doppelklicken. Das Skript
-
-- prüft, ob Python und ExifTool da sind, und sagt sonst genau, was fehlt,
-- legt im Unterordner `.venv` eine eigene, abgeschottete Python-Umgebung an
-  (das ist ein Ordner, in dem fotosort und seine Bausteine liegen – am übrigen
-  Rechner ändert sich nichts),
-- installiert fotosort dort hinein (braucht Internet) und
-- meldet am Ende **FERTIG**.
-
-Bei einer Fehlermeldung: die genannten Schritte ausführen und `einrichten.bat`
-einfach noch einmal starten. Das Skript kann beliebig oft laufen.
+Wer das Programm aus dem Quellcode einrichten will, findet den Weg mit Python und
+ExifTool im Anhang am Ende dieser Anleitung.
 
 ---
 
@@ -325,9 +302,9 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 - `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = Anzahl der Prozessorkerne.
 - `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = automatisch.
   `fotosort.bat messen` schlägt passende Werte vor.
-- `exiftool_pfad` – Pfad zu `exiftool.exe`, falls es nicht gefunden wird. Normalerweise
-  nicht nötig: `einrichten.bat` merkt sich den gefundenen Pfad in der Datei `.exiftool_pfad`,
-  und `fotosort.bat` gibt ihn dem Programm bei jedem Start mit.
+- `exiftool_pfad` – Pfad zu `exiftool.exe`, falls ein anderes ExifTool benutzt werden soll.
+  Normalerweise nicht nötig: Das fertige Paket findet sein mitgeliefertes ExifTool selbst,
+  und aus dem Quellcode heraus gibt `fotosort.bat` den von `einrichten.bat` gemerkten Pfad mit.
 
 ---
 
@@ -357,8 +334,10 @@ Es läuft noch ein zweiter fotosort-Lauf auf dasselbe Archiv, oder ein abgestür
 Lauf hat seine Sperre hinterlassen. Erst prüfen, ob noch ein Fenster offen ist; dann
 den Befehl erneut versuchen.
 
-**„ExifTool wurde nicht gefunden":** Abschnitt 1.3 wiederholen und `einrichten.bat`
-erneut starten.
+**„ExifTool wurde nicht gefunden":** Im fertigen Paket liegt ExifTool im Unterordner
+`exiftool` neben `fotosort.exe`. Kommt die Meldung trotzdem, ist der Ordner beim Entpacken
+verloren gegangen: die ZIP-Datei noch einmal vollständig entpacken. Aus dem Quellcode
+heraus: Anhang lesen und `einrichten.bat` erneut starten.
 
 **„Es gibt eine Archiv-Kennung, aber die lokale Datenbank fehlt":** Das passiert,
 wenn das Archiv auf einem anderen Rechner angelegt wurde oder die Datenbank gelöscht
@@ -406,3 +385,27 @@ neben der alten den Anhang `_1`.
   „Er kommt in Phase 3" und tun noch nichts. Der Weg von Hand steht in Abschnitt 8.
 - Eine Oberfläche mit Knöpfen statt des schwarzen Fensters (Weboberfläche) und der
   Betrieb auf dem TrueNAS-Server sind spätere Phasen.
+
+---
+
+## Anhang für Entwickler: Einrichtung aus dem Quellcode
+
+Nur nötig, wenn Sie nicht das fertige Paket, sondern den Quellcode benutzen wollen.
+
+1. **Quellcode holen:** Auf der Seite des Projekts auf GitHub auf **Code** und
+   **Download ZIP** klicken, die ZIP-Datei entpacken, zum Beispiel nach `C:\fotosort-quellcode`.
+2. **Python 3.12 oder neuer** von https://www.python.org/downloads/windows/ als
+   „Windows installer (64-bit)" installieren, dabei **das Häkchen „Add python.exe to PATH"
+   setzen**.
+3. **ExifTool** von https://exiftool.org als „Windows Executable" (ZIP) laden, entpacken,
+   den ganzen Ordner nach `C:\ExifTool` verschieben und dort `exiftool(-k).exe` in
+   `exiftool.exe` umbenennen. Der Unterordner `exiftool_files` muss daneben bleiben.
+4. **`einrichten.bat`** doppelklicken. Das Skript prüft Python und ExifTool, sagt, was fehlt,
+   legt im Unterordner `.venv` eine eigene Python-Umgebung an, installiert fotosort hinein
+   (braucht Internet) und meldet FERTIG. Es kann beliebig oft laufen.
+5. Danach funktionieren `start.bat` und `fotosort.bat` genauso wie im fertigen Paket.
+
+**Das Paket selbst bauen** (wie es die GitHub-Actions tun): `python paket/exiftool_holen.py
+build/exiftool`, dann `python paket/bauen.py --exiftool build/exiftool`, dann
+`python paket/pruefen.py build/paket/dist/fotosort build/pruefung`. Das Ergebnis liegt unter
+`build/paket/dist/fotosort`.

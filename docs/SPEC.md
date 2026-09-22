@@ -22,7 +22,7 @@ Oberste Regel: **Es darf niemals ein Bild verloren gehen.** Geschwindigkeit ist 
 
 ### ExifTool finden und fehlendes ExifTool behandeln
 
-- **Gesucht** wird ExifTool über `PATH`. Der Pfad ist überschreibbar. Vorrang: Umgebungsvariable `FOTOSORT_EXIFTOOL`, dann der Konfigurationswert `exiftool_pfad` (Gruppe `[leistung]`, §9), dann `PATH`.
+- **Gesucht** wird ExifTool über `PATH`. Der Pfad ist überschreibbar. Vorrang: Umgebungsvariable `FOTOSORT_EXIFTOOL`, dann der Konfigurationswert `exiftool_pfad` (Gruppe `[leistung]`, §9), dann das im gepackten Windows-Programm mitgelieferte ExifTool (`<Programmordner>\exiftool\exiftool.exe` neben `exiftool_files`, nur im mit PyInstaller gebauten Paket), dann `PATH`. `fotosort --version` nennt Programmversion und das gefundene ExifTool.
 - Bei jedem Start wird geprüft, ob ExifTool vorhanden und startbar ist. Fehlt es, hängt die Folge vom Befehl ab:
   - **Harter Abbruch** bei allen Befehlen, die Metadaten brauchen: `analyse` und `start` (§8) sowie der Erzeuger des Testbaums (§11). Ohne ExifTool gäbe es weder Aufnahmedatum noch Kamera; alle Dateien landeten unter `_Ohne_Datum/Unbekannte_Kamera`. Das wäre kein brauchbares, sondern ein stillschweigend falsches Ergebnis, deshalb wird gar nicht erst angefangen.
   - **Kein Abbruch** bei allen übrigen Befehlen: `scan`, `status`, `bericht`, `kopieren`, `pruefen`, `aufraeumen`, `ziel-index` und `wiederherstellen` (§8). Sie lesen keine Metadaten, sondern arbeiten mit dem, was die Analyse bereits in die Datenbank geschrieben hat. Fehlt ExifTool, geben sie höchstens den Hinweis aus, dass die Analyse ohne ExifTool nicht laufen wird.

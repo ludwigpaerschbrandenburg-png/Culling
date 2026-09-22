@@ -47,6 +47,14 @@ Culling/ (Repository-Wurzel)
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
 │  ├─ bericht.py             Text- und CSV-Bericht
 │  └─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
+├─ paket/
+│  ├─ fotosort_start.py      Einstieg fuer PyInstaller
+│  ├─ exiftool_holen.py      ExifTool (Windows, 64 Bit, mit exiftool_files) von exiftool.org holen
+│  ├─ bauen.py               PyInstaller-Ordnervariante bauen, Paketordner zusammenstellen
+│  └─ pruefen.py             gepacktes Programm ausprobieren (--version, scan, analyse, kopieren, pruefen)
+├─ .github/workflows/
+│  ├─ tests.yml              Testsuite auf ubuntu-latest und windows-latest
+│  └─ paket.yml              Windows-Paket bauen und pruefen; Artefakt je Push, Release bei Tag v*
 └─ tests/
    ├─ testbaum.py            erzeugt den künstlichen Testbaum
    └─ test_*.py              ein Test je Modul

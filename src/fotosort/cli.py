@@ -62,7 +62,51 @@ def exiftool_finden(konf=None) -> tuple[str | None, str]:
                 aus_konf if Path(aus_konf).is_file() else None
             )
             return gefunden, f"{aus_konf} (exiftool_pfad)"
+    mitgeliefert = exiftool_mitgeliefert()
+    if mitgeliefert is not None:
+        return str(mitgeliefert), f"{mitgeliefert} (im Programmordner mitgeliefert)"
     return shutil.which("exiftool"), "exiftool ueber PATH"
+
+
+def programmordner() -> Path | None:
+    """Der Ordner des gepackten Programms (PyInstaller-Ordnervariante), sonst None."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return None
+
+
+def exiftool_mitgeliefert() -> Path | None:
+    """Das im Windows-Paket mitgelieferte ExifTool: <Programmordner>/exiftool/exiftool.exe
+    (daneben liegt der Ordner exiftool_files mit den Perl-Bibliotheken)."""
+    ordner = programmordner()
+    if ordner is None:
+        return None
+    for name in ("exiftool.exe", "exiftool"):
+        kandidat = ordner / "exiftool" / name
+        if kandidat.is_file():
+            return kandidat
+    return None
+
+
+class _Version(argparse.Action):
+    """--version: Programmversion und das gefundene ExifTool, dann Ende."""
+
+    def __init__(self, option_strings, dest, **kw):
+        super().__init__(option_strings, dest, nargs=0, help="Version anzeigen und beenden")
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+        gefunden, wo = exiftool_finden(config.Konfiguration())
+        exif = "nicht gefunden"
+        if gefunden:
+            try:
+                aus = subprocess.run([gefunden, "-ver"], capture_output=True, text=True, timeout=30)
+                exif = f"{aus.stdout.strip() or '?'} ({wo})" if aus.returncode == 0 else f"nicht startbar ({wo})"
+            except (OSError, subprocess.SubprocessError):
+                exif = f"nicht startbar ({wo})"
+        print(f"fotosort {__version__}")
+        print(f"ExifTool {exif}")
+        parser.exit(0)
 
 
 # ExifTool-Pfade, die in diesem Programmlauf schon einmal erfolgreich
@@ -1001,6 +1045,7 @@ def parser_bauen() -> argparse.ArgumentParser:
         prog="fotosort",
         description="Sortiert Fotos und Videos nach Aufnahmedatum und Kamera.",
     )
+    eltern.add_argument("--version", action=_Version)
     unterbefehle = eltern.add_subparsers(dest="befehl", metavar="BEFEHL")
 
     p = unterbefehle.add_parser("scan", help="Quelle durchlaufen und erfassen")

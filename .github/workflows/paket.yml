@@ -1,0 +1,74 @@
+name: Windows-Paket
+
+# Baut bei jedem Push das eigenstaendige Windows-Programm (PyInstaller,
+# Ordner-Variante, mit mitgeliefertem ExifTool), probiert es aus und legt es
+# als Artefakt "fotosort-windows" ab. Bei einem Tag v* entsteht ausserdem ein
+# GitHub-Release mit fotosort-windows.zip als Anhang.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paket-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paket:
+    name: Paket bauen und pruefen (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhaengigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pyinstaller
+
+      - name: ExifTool (64 Bit, mit Perl-Bibliotheken) holen
+        run: python paket/exiftool_holen.py build/exiftool
+
+      - name: Paket bauen
+        run: python paket/bauen.py --exiftool build/exiftool --ausgabe build/paket
+
+      - name: Paket pruefen (startet, findet ExifTool, --version, scan/analyse/kopieren/pruefen)
+        run: python paket/pruefen.py build/paket/dist/fotosort build/pruefung
+
+      - name: ZIP packen
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/paket/dist/fotosort -DestinationPath build/fotosort-windows.zip -Force
+          Get-Item build/fotosort-windows.zip | Select-Object Name, Length
+
+      - name: Artefakt ablegen (fotosort-windows.zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fotosort-windows
+          path: build/paket/dist/fotosort
+          if-no-files-found: error
+
+      - name: Release anlegen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: fotosort ${{ github.ref_name }}
+          files: build/fotosort-windows.zip
+          body: |
+            Eigenstaendiges Windows-Programm, nichts zu installieren.
+
+            1. `fotosort-windows.zip` herunterladen und entpacken, zum Beispiel nach `C:\fotosort`.
+            2. Im entpackten Ordner `start.bat` doppelklicken - der gefuehrte Ablauf stellt die Fragen.
+            3. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
+
+            ExifTool ist im Ordner `exiftool` mitgeliefert (Version siehe `exiftool\VERSION.txt`).
+            Bitte zuerst mit Kopien einiger Fotos ausprobieren.
