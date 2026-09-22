@@ -10,6 +10,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release anlegen mit diesem Tag (z. B. v0.1); leer = nur bauen"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -57,11 +62,15 @@ jobs:
           path: build/paket/dist/fotosort
           if-no-files-found: error
 
-      - name: Release anlegen (nur bei Tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Bei einem gepushten Tag v* oder von Hand gestartet mit release_tag:
+      # dann legt die Aktion Tag und Release auf diesem Stand selbst an.
+      - name: Release anlegen (Tag v* oder release_tag)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: fotosort ${{ github.ref_name }}
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: fotosort ${{ github.event.inputs.release_tag || github.ref_name }}
           files: build/fotosort-windows.zip
           body: |
             Eigenstaendiges Windows-Programm, nichts zu installieren.
