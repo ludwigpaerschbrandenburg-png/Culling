@@ -85,11 +85,16 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     def quelle(daten: dict = Body(...)):
         if daten.get("entfernen"):
             return ab.quelle_entfernen(str(daten.get("pfad", "")))
-        return ab.quelle_hinzufuegen(str(daten.get("pfad", "")))
+        return ab.quelle_hinzufuegen(str(daten.get("pfad", "")), trotzdem=bool(daten.get("trotzdem", False)))
 
     @app.post("/api/los")
     def los(daten: dict = Body(default={})):
-        return ab.los(ziel_anlegen=bool(daten.get("ziel_anlegen", False)))
+        return ab.los(ziel_anlegen=bool(daten.get("ziel_anlegen", False)),
+                      ziel_trotzdem=bool(daten.get("ziel_trotzdem", False)))
+
+    @app.post("/api/verwerfen")
+    def verwerfen(daten: dict = Body(default={})):
+        return ab.archiv_verwerfen(str(daten.get("wort", "")))
 
     @app.get("/api/lauf")
     def lauf():

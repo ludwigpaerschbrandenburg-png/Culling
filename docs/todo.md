@@ -416,7 +416,51 @@ Version 0.2.0, Release v0.2.
 - [ ] **Ordner-Browser für den Server (Phase 8):** Im Browser (`--ohne-fenster`) wird der Pfad
       eingetippt; der einfache Ordner-Browser aus SPEC §8 kommt mit dem Container.
 
+### Aus dem ersten echten Testlauf (v0.3, 36.000 Dateien auf einer Festplatte)
+
+- [x] **Schwarze Fenster:** Je ExifTool-Prozess ging ein Konsolenfenster auf (über 30), der
+      Virenscanner schlug an. Ursache: Ein Konsolenprogramm, das aus einem Programm ohne Konsole
+      (Fenster, losgelöster Arbeitsprozess) gestartet wird, bekommt von Windows eine neue Konsole.
+      Behoben: `prozesse.py` gibt jedem Hilfsprozess `CREATE_NO_WINDOW` und `SW_HIDE`
+      (ExifTool-Pool, ExifTool-Prüfung, `--version`, Arbeitsprozess). Die Paketprüfung beobachtet
+      während des Durchlaufs alle sichtbaren Fenster (`EnumWindows`) und scheitert bei jedem neuen
+      Konsolenfenster; eine Gegenprobe mit `CREATE_NEW_CONSOLE` zeigt vorher, ob die Umgebung
+      solche Fenster überhaupt sichtbar macht.
+- [x] **32 Prozesse auf einer Festplatte, 8 Dateien/s:** Die Prozesszahl war „Anzahl Kerne“.
+      Jetzt nach Profil: `hdd` 4, `netzwerk` 4, `ssd` Kerne bis 16; `metadaten_prozesse` und
+      `analyse --prozesse N` bleiben als feste Vorgabe, `analyse --profil` gibt das Profil an
+      (Fenster und geführter Modus reichen ihr Profil durch). Die Prozesse starten mit 200 ms
+      Abstand. Messung im Container (4 Kerne, Dateien im Cache, 8.000 Dateien): 4 Prozesse
+      ≈ 1.500 Dateien/s, 16 ≈ 1.350, 32 ≈ 1.000 — mehr Prozesse als Kerne sind selbst ohne
+      Platte langsamer. Eine echte Festplatte lässt sich im Container nicht messen; 4 ist die
+      begründete Wahl (ein Lesekopf, wenige Positionen).
+- [x] **Reihenfolge und Stapel geprüft:** Die Analyse holt die Dateien nach Quellpfad sortiert
+      (seitenweise 5.000), sammelt sie je Ordner und bildet Stapel gleichen Typs zu 200 Dateien in
+      Ordnerreihenfolge. Ein Stapel wird von einem ExifTool-Prozess nacheinander gelesen — mit
+      4 Prozessen liest die Platte an höchstens 4 Stellen. Die Stapelgröße bleibt 200.
+- [x] **Rückfragen auf der Startseite:** Laufwerksstamm, Benutzerordner oder Ordner aller
+      Benutzer als Quelle → Frage mit Erklärung, „Trotzdem nehmen“. Zielordner nicht leer und
+      ohne Archiv-Kennung → Frage vor dem Scan. Fenster und Browser-Fassung.
+- [x] **„Archiv verwerfen…“** auf der Startseite (Karte des angefangenen Archivs): entfernt den
+      lokalen Archiv-Ordner und `.fotosortierer` im Ziel, nie kopierte Dateien, nie eine Quelle;
+      Wort `verwerfen`; nicht bei laufendem Schritt oder belegtem Archiv; Sicherheitsnetz gegen
+      Bilddateien in den Programmordnern. Danach Startseite leer.
+- [x] **Datenmenge je Quelle** im Scan-Ergebnis (Fenster, `status`, Befehl `scan`) zählt nur
+      erfasste Dateien (Foto, RAW, Video, Sidecar), nicht die „sonstigen“.
+
 ### Entscheidungen für den Nutzer
+
+- [ ] **4 ExifTool-Prozesse für Festplatte und Netzlaufwerk** sind eine begründete Schätzung, keine
+      Messung an echter Hardware. Wenn der nächste Testlauf auf der Festplatte immer noch langsam
+      ist: `analyse --prozesse 2` oder `--prozesse 1` ausprobieren und die Dateien/s vergleichen.
+- [ ] **Welche Ordner eine Rückfrage auslösen:** nur Laufwerksstamm, der eigene Benutzerordner und
+      der Ordner aller Benutzer (`C:\Users`). „Dokumente“, „Downloads“ oder „Desktop“ fragen nicht.
+      Reicht das?
+- [ ] **„Ziel nicht leer“ fragt bei jedem Eintrag,** auch wenn nur eine `Thumbs.db` darin liegt —
+      lieber einmal zu oft fragen. Ist das Archiv einmal angelegt, kommt die Frage nicht mehr.
+- [ ] **„Archiv verwerfen“ behält die Protokolle der Oberfläche** (`oberflaeche/arbeit.log`,
+      `fenster.log`) und lässt die kopierten Dateien im Ziel liegen. Wer das Ziel komplett leeren
+      will, löscht die Ordner selbst — das Programm löscht nie Bilder aus dem Ziel.
 
 - [ ] **Paketgröße:** Mit Qt ist das Paket etwa doppelt so groß wie vorher (Qt-Bibliotheken).
       Reicht das, oder soll das Paket noch verkleinert werden (Module ausschließen, UPX)?

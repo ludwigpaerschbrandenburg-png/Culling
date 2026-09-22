@@ -20,6 +20,21 @@ def _laufen(capsys, *argumente) -> tuple[int, str]:
 # ------------------------------------------------- Unterbefehle vollzaehlig ----
 
 
+def test_analyse_prozesse_nach_profil_und_vorgabe(capsys, quelle, ziel):
+    """Die Zahl der ExifTool-Prozesse haengt am Profil (hdd 4), laesst sich
+    aber fest vorgeben - beides wird beim Start genannt."""
+    rueckgabe, _ = _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
+    assert rueckgabe == cli.OK
+    rueckgabe, ausgabe = _laufen(capsys, "analyse", "--ziel", str(ziel), "--profil", "hdd", "--prozesse", "2")
+    assert rueckgabe in (cli.OK, cli.FEHLER), ausgabe
+    assert "2 ExifTool-Prozesse" in ausgabe
+    eltern = cli.parser_bauen()
+    args = eltern.parse_args(["analyse", "--ziel", str(ziel), "--profil", "ssd"])
+    assert args.profil == "ssd" and args.prozesse is None
+    with pytest.raises(SystemExit):
+        eltern.parse_args(["analyse", "--ziel", str(ziel), "--profil", "turbo"])
+
+
 def test_alle_unterbefehle_aus_der_spec_gibt_es():
     eltern = cli.parser_bauen()
     aktionen = [

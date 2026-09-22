@@ -211,7 +211,8 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             ),
             (
                 "metadaten_prozesse",
-                "Anzahl dauerhaft laufender ExifTool-Prozesse. 0 = Anzahl Kerne.",
+                "Anzahl dauerhaft laufender ExifTool-Prozesse. 0 = nach Profil:\n"
+                "# hdd und netzwerk 4, ssd Anzahl Kerne (hoechstens 16).",
                 0,
             ),
             (

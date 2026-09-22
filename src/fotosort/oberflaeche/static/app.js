@@ -159,6 +159,7 @@
     leer(tags);
     wm.disabled = true;
     wm.textContent = "Weitermachen";
+    $("verwerfen").classList.toggle("versteckt", !($("ziel").value.trim() && archiv && archiv.da && !archiv.laeuft));
     if (!$("ziel").value.trim()) {
       kicker.textContent = "Zielordner"; text.textContent = "Noch kein Zielordner gewählt."; return;
     }
@@ -205,10 +206,13 @@
     }).catch(fehlerZeigen);
   }
 
-  function quelleHinzu(pfad) {
+  function quelleHinzu(pfad, trotzdem) {
     pfad = (pfad || "").trim();
     if (!pfad) { meldung("Bitte zuerst einen Ordner eintippen oder auswählen."); return; }
-    api("/api/quelle", { pfad: pfad }).then(function (a) {
+    api("/api/quelle", { pfad: pfad, trotzdem: !!trotzdem }).then(function (a) {
+      if (a && a.frage === "quelle_gross") {
+        return dialog("Wirklich diesen Ordner?", a.text, { ja: "Trotzdem nehmen", nein: "Anderen wählen" }).then(function (r) { if (r.ja) quelleHinzu(pfad, true); });
+      }
       $("quelle-neu").value = "";
       Z.zustand.quellen_neu = a.quellen_neu;
       quellenZeigen(a.quellen_neu);
@@ -216,14 +220,27 @@
     }).catch(fehlerZeigen);
   }
 
-  function los(zielAnlegen) {
+  function los(zielAnlegen, zielTrotzdem) {
     zielUebernehmen().then(function () {
-      return api("/api/los", { ziel_anlegen: !!zielAnlegen });
+      return api("/api/los", { ziel_anlegen: !!zielAnlegen, ziel_trotzdem: !!zielTrotzdem });
     }).then(function (a) {
       if (a && a.frage === "ziel_anlegen") {
-        return dialog("Ordner anlegen?", a.text, { ja: "Anlegen" }).then(function (r) { if (r.ja) los(true); });
+        return dialog("Ordner anlegen?", a.text, { ja: "Anlegen" }).then(function (r) { if (r.ja) los(true, zielTrotzdem); });
+      }
+      if (a && a.frage === "ziel_nicht_leer") {
+        return dialog("Zielordner ist nicht leer", a.text, { ja: "Weiter", nein: "Anderen Ordner wählen" }).then(function (r) { if (r.ja) los(zielAnlegen, true); });
       }
       if (a && a.gestartet) { hauptZeigen(); laufStarten(a.gestartet); }
+    }).catch(fehlerZeigen);
+  }
+
+  function archivVerwerfen() {
+    api("/api/verwerfen", {}).then(function (a) {
+      if (!a || a.frage !== "verwerfen") return;
+      return dialog("Archiv verwerfen?", a.text, { eingabe: true, ja: "Verwerfen", nein: "Behalten" }).then(function (r) {
+        if (!r.ja) return;
+        return api("/api/verwerfen", { wort: r.wert }).then(function (b) { laden("start"); meldung(b.text || "", true); });
+      });
     }).catch(fehlerZeigen);
   }
 
@@ -586,6 +603,7 @@
     $("quelle-waehlen").onclick = function () { ordnerWaehlen("").then(function (p) { if (p) quelleHinzu(p); }); };
     alle("input[name=modus]").forEach(function (r) { r.addEventListener("change", function () { modusText(); einstellungenSenden(); }); });
     alle("input[name=profil]").forEach(function (r) { r.addEventListener("change", function () { Z.profilGewaehlt = true; profilText(); einstellungenSenden(); }); });
+    $("verwerfen").onclick = archivVerwerfen;
     $("weitermachen").onclick = function () { zielUebernehmen().then(function () { Z.letzterSchritt = ""; hauptZeigen(); ruheZeigen(); }); };
     alle("input[name=weise]").forEach(function (r) { r.addEventListener("change", aufWortPruefen); });
     $("auf-wort").addEventListener("input", aufWortPruefen);

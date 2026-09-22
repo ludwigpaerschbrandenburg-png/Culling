@@ -1052,7 +1052,8 @@ def grund_weise_unbekannt(weise) -> str:
 
 # --------------------------------------------------------- Aufraeumen ---
 
-BESTAETIGUNGSWORT = {"endgueltig": "loeschen", "papierkorb": "verschieben", "ordner": "entfernen"}
+BESTAETIGUNGSWORT = {"endgueltig": "loeschen", "papierkorb": "verschieben", "ordner": "entfernen",
+                     "verwerfen": "verwerfen"}
 
 
 def weise_text(weise: str) -> str:
@@ -1515,6 +1516,50 @@ def ob_quelle_fehlt_pfad() -> str:
 
 def ob_frage_ziel_anlegen(ziel) -> str:
     return f"Den Ordner {ziel} gibt es noch nicht. Soll er angelegt werden?"
+
+
+def ob_frage_quelle_gross(pfad, art: str) -> str:
+    """Rueckfrage, wenn ein ganzes Laufwerk oder der Benutzerordner als Quelle gewaehlt wurde."""
+    if art == "laufwerk":
+        was = f"{pfad} ist ein ganzes Laufwerk. Dann werden alle Fotos und Videos darauf erfasst – auch die aus Programmen, Spielen und Systemordnern."
+    elif art == "profil":
+        was = f"{pfad} ist der eigene Benutzerordner. Dann werden alle Fotos und Videos darin erfasst – auch aus Downloads, vom Desktop und aus Programmdaten."
+    else:
+        was = f"{pfad} enthält die Ordner aller Benutzer dieses Rechners."
+    return was + " Meist ist ein Unterordner wie „Bilder“ gemeint. Trotzdem diesen Ordner nehmen?"
+
+
+def ob_frage_ziel_nicht_leer(ziel, n: int) -> str:
+    return (
+        f"Der Zielordner {ziel} ist nicht leer ({anzahl(n)} Einträge), enthält aber noch kein Archiv. "
+        "Es wird darin nichts gelöscht oder überschrieben; die Fotos kommen zu dem, was schon da liegt, "
+        "und passende Jahres- und Tagesordner werden weiterverwendet. Weiter mit diesem Ordner?"
+    )
+
+
+def ob_frage_verwerfen(ziel, lokal, im_ziel) -> str:
+    return (
+        f"Das entfernt die Merkliste des Programms zu {ziel}: die Datenbank unter {lokal} und den Ordner "
+        f"{im_ziel} mit Sicherung, Einstellungen und Berichten. Kopierte Fotos und Videos im Zielordner bleiben "
+        "unangetastet, die Quellordner ebenso. Danach ist die Startseite leer, und der Ordner kann als neues "
+        f"Archiv beginnen. Zum Bestätigen „{BESTAETIGUNGSWORT['verwerfen']}“ tippen:"
+    )
+
+
+def ob_verwerfen_bilddatei(pfad) -> str:
+    return (
+        f"Nicht verworfen: Unter {pfad} liegt eine Foto-, RAW- oder Videodatei in einem Ordner, "
+        "der nur Programmdaten enthalten dürfte. Das Programm löscht dort nichts. Bitte die Datei "
+        "zuerst von Hand in Sicherheit bringen."
+    )
+
+
+def ob_verwerfen_unvollstaendig(fehler: list) -> str:
+    return "Nicht alles ließ sich entfernen: " + "; ".join(str(f) for f in fehler[:5])
+
+
+def ob_verworfen(ziel, entfernt: int) -> str:
+    return f"Archiv zu {ziel} verworfen ({anzahl(entfernt)} Ordner entfernt). Die kopierten Fotos liegen unverändert dort."
 
 
 def ob_nichts_ausgewaehlt() -> str:

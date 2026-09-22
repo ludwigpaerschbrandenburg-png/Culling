@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -24,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import FotosortFehler, __version__, bericht, cli, config, db, kopieren, loeschen, meldungen, pfade, steuerung
+from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, pfade, prozesse, steuerung
 from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
@@ -71,10 +72,40 @@ def _umgebung() -> dict[str, str]:
 
 def _losgeloest() -> dict:
     """Popen-Argumente, damit der Prozess das Ende der Oberflaeche ueberlebt
-    und unter Windows kein Konsolenfenster aufspringt."""
-    if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
-        return {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
+    und unter Windows kein Konsolenfenster aufspringt (prozesse.py)."""
+    return prozesse.losgeloest()
+
+
+def quelle_warnung(pfad) -> str:
+    """Weshalb dieser Quellordner viel mehr enthalten duerfte als Fotos: "laufwerk"
+    (C:\\, /, \\\\server\\share), "profil" (der Benutzerordner), "profile" (der
+    Ordner aller Benutzer) - oder "" fuer einen gewoehnlichen Ordner."""
+    p = pfade.aufloesen(Path(pfad))
+    if Path(p.anchor) == p:
+        return "laufwerk"
+    try:
+        heim = pfade.aufloesen(Path.home())
+    except (OSError, RuntimeError):
+        return ""
+    if p == heim:
+        return "profil"
+    if p == heim.parent and heim.parent != Path(heim.parent.anchor):
+        return "profile"
+    return ""
+
+
+def ordner_eintraege(ordner: Path, hoechstens: int = 100000) -> int:
+    """Anzahl der Eintraege direkt im Ordner (fuer die Rueckfrage 'Ziel nicht leer')."""
+    n = 0
+    try:
+        with os.scandir(ordner) as es:
+            for _ in es:
+                n += 1
+                if n >= hoechstens:
+                    break
+    except OSError:
+        return 0
+    return n
 
 
 def pid_lebt(pid: int) -> bool:
@@ -467,7 +498,7 @@ class Ablauf:
             "profil": self.profil,
             "profile": [{"name": n, "text": t} for n, t in meldungen.OB_PROFILE],
             "fenster": self.fenster,
-            "woerter": dict(meldungen.BESTAETIGUNGSWORT),
+            "woerter": {k: v for k, v in meldungen.BESTAETIGUNGSWORT.items() if k != "verwerfen"},
             "schritte": {s: self._schritt_name(s) for s in SCHRITTE},
             "erklaerungen": dict(meldungen.SCHRITT_ERKLAERUNG),
             "archiv": self.archiv_info(),
@@ -501,7 +532,9 @@ class Ablauf:
         except FotosortFehler:
             return []
 
-    def quelle_hinzufuegen(self, pfad: str) -> dict:
+    def quelle_hinzufuegen(self, pfad: str, trotzdem: bool = False) -> dict:
+        """Quellordner aufnehmen. Ein ganzes Laufwerk oder der Benutzerordner wird
+        erst nach Rueckfrage genommen (Antwort {"frage": "quelle_gross"})."""
         pfad = str(pfad or "").strip()
         if not pfad:
             raise FotosortFehler(meldungen.ob_quelle_fehlt_pfad())
@@ -512,6 +545,10 @@ class Ablauf:
             grund = cli._start_quelle_pruefen(pfad, ziel, bekannt_auf, self.quellen)
             if grund is not None:
                 raise FotosortFehler(grund)
+            art = quelle_warnung(pfad)
+            if art and not trotzdem:
+                return {"frage": "quelle_gross", "art": art, "pfad": pfad,
+                        "text": meldungen.ob_frage_quelle_gross(pfad, art)}
             self.quellen.append(pfad)
             self._speichern()
             return {"quellen_neu": list(self.quellen)}
@@ -522,8 +559,13 @@ class Ablauf:
             self._speichern()
             return {"quellen_neu": list(self.quellen)}
 
-    def los(self, ziel_anlegen: bool = False) -> dict:
-        """Der grosse Knopf: Ziel pruefen, ExifTool pruefen, Scan starten."""
+    def los(self, ziel_anlegen: bool = False, ziel_trotzdem: bool = False) -> dict:
+        """Der grosse Knopf: Ziel pruefen, ExifTool pruefen, Scan starten.
+
+        Zwei Rueckfragen statt Fehler: {"frage": "ziel_anlegen"}, wenn es den
+        Zielordner noch nicht gibt, und {"frage": "ziel_nicht_leer"}, wenn er
+        Dateien enthaelt, aber noch kein Archiv ist.
+        """
         with self.sperre:
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self.lauf.schritt if self.lauf else ""))
@@ -539,6 +581,10 @@ class Ablauf:
                     raise FotosortFehler(meldungen.ziel_eltern_fehlt(ziel, ziel.parent))
                 if not ziel_anlegen:
                     return {"frage": "ziel_anlegen", "text": meldungen.ob_frage_ziel_anlegen(ziel)}
+            elif not archiv_da and not ziel_trotzdem:
+                n = ordner_eintraege(ziel)
+                if n:
+                    return {"frage": "ziel_nicht_leer", "n": n, "text": meldungen.ob_frage_ziel_nicht_leer(ziel, n)}
             # Jede neue Quelle noch einmal pruefen - das Ziel kann sich geaendert haben.
             bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
             geprueft: list[str] = []
@@ -565,6 +611,74 @@ class Ablauf:
             self.quellen = []   # nach dem Scan sind sie bekannte Quellen des Archivs
             self._speichern()
             return ergebnis
+
+    # -- Archiv verwerfen --------------------------------------------------------
+
+    def _verwerfen_orte(self) -> tuple[Path, Path, Path]:
+        """(Zielordner, lokaler Archiv-Ordner, .fotosortierer im Ziel)."""
+        if not self.ziel or not self._archiv_da():
+            raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+        ziel = Path(self.ziel)
+        archiv_id = db.archiv_id_lesen_oder_anlegen(ziel)   # ist vorhanden; kaputt -> Fehler
+        aeussere = config.laden(Path(self.config_pfad)) if self.config_pfad else None
+        lokal = db.archiv_ordner(archiv_id, aeussere)
+        im_ziel = ziel / db.ARCHIV_UNTERORDNER
+        assert lokal.name == archiv_id and im_ziel.name == db.ARCHIV_UNTERORDNER
+        return ziel, lokal, im_ziel
+
+    def archiv_verwerfen(self, wort: str = "") -> dict:
+        """Die Merkliste zu diesem Ziel entfernen: den lokalen Archiv-Ordner
+        (Datenbank, Einstellungen, Protokolle) und .fotosortierer im Ziel
+        (Sicherung, Berichte). Nie eine kopierte Datei, nie eine Quelle.
+
+        Ohne Wort kommt nur die Rueckfrage ({"frage": "verwerfen"}); mit dem
+        richtigen Wort wird entfernt, danach ist die Startseite leer.
+        """
+        with self.sperre:
+            if self.lauf_lebt():
+                raise FotosortFehler(meldungen.ob_laeuft_schon(self._schritt_name(self.lauf.schritt if self.lauf else "")))
+            ziel, lokal, im_ziel = self._verwerfen_orte()
+            erwartet = meldungen.BESTAETIGUNGSWORT["verwerfen"]
+            wort = str(wort or "").strip().lower()
+            if not wort:
+                return {"frage": "verwerfen", "wort": erwartet, "text": meldungen.ob_frage_verwerfen(ziel, lokal, im_ziel)}
+            if wort != erwartet:
+                raise FotosortFehler(meldungen.ob_wort_falsch(erwartet))
+            # Belegt ein anderer Lauf das Archiv, wird nichts angefasst.
+            if db.datenbank_pfad(lokal).is_file():
+                d = db.Datenbank.oeffnen(lokal, sperren=True)
+                d.schliessen()
+            # Sicherheitsnetz: In beiden Ordnern darf keine Foto-, RAW- oder
+            # Videodatei liegen - dort gehoeren nur Programmdaten hin.
+            konf_pfad = lokal / config.DATEINAME
+            konf = config.laden(konf_pfad) if konf_pfad.is_file() else config.Konfiguration()
+            for ordner in (lokal, im_ziel):
+                if not ordner.is_dir():
+                    continue
+                for p in ordner.rglob("*"):
+                    if p.is_file() and dateitypen.typ_von(p.name, konf) in (dateitypen.FOTO, dateitypen.RAW, dateitypen.VIDEO):
+                        raise FotosortFehler(meldungen.ob_verwerfen_bilddatei(p))
+            fehler: list[str] = []
+            entfernt = 0
+            for ordner in (lokal, im_ziel):
+                if not ordner.is_dir():
+                    continue
+                shutil.rmtree(ordner, onexc=lambda _fn, pfad, _exc: fehler.append(str(pfad)))
+                if not ordner.exists():
+                    entfernt += 1
+            if fehler:
+                raise FotosortFehler(meldungen.ob_verwerfen_unvollstaendig(fehler))
+            # Startseite leer: kein Ziel, keine Quellen, kein alter Lauf.
+            self.ziel, self.quellen, self.verschieben, self.profil, self.lauf = "", [], False, "hdd", None
+            for datei in (self.status_datei, self.steuer_datei, self.auftrag_datei):
+                try:
+                    datei.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as f:
+                    fehler.append(str(f))
+            self._speichern()
+            return {"verworfen": True, "entfernt": entfernt, "text": meldungen.ob_verworfen(ziel, entfernt)}
 
     # -- der naechste Schritt -----------------------------------------------
 
@@ -597,7 +711,7 @@ class Ablauf:
         """Einen Folgeschritt starten - mit den Bestaetigungen, die der Kern verlangt."""
         with self.sperre:
             if schritt == "analyse":
-                return self.schritt_starten("analyse")
+                return self.schritt_starten("analyse", profil=self.profil)
             if schritt == "kopieren":
                 if self.verschieben:
                     erwartet = meldungen.BESTAETIGUNGSWORT["papierkorb"]
@@ -633,7 +747,7 @@ class Ablauf:
         return {
             "je_quelle": je_quelle, "n": n, "bytes": b, "n_text": meldungen.anzahl(n), "groesse": meldungen.groesse(b),
             "quellen": stand["quellen"],
-            "woerter": dict(meldungen.BESTAETIGUNGSWORT),
+            "woerter": {k: v for k, v in meldungen.BESTAETIGUNGSWORT.items() if k != "verwerfen"},
         }
 
     def aufraeumen_plan(self) -> dict:
@@ -805,7 +919,7 @@ class Ablauf:
                 zurueck = archiv.datenbank.analyse_zuruecksetzen_nach_modell(list(neue))
             finally:
                 archiv.datenbank.schliessen()
-            ergebnis = self.schritt_starten("analyse")
+            ergebnis = self.schritt_starten("analyse", profil=self.profil)
             ergebnis.update(geaendert=len(neue), zurueck=zurueck, text=meldungen.ob_aliase_geschrieben(len(neue), zurueck))
             return ergebnis
 

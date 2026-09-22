@@ -137,6 +137,88 @@ def test_los_verlangt_quelle_und_fragt_vor_dem_anlegen(ob, quelle, tmp_path):
     assert neu.is_dir() and db.archiv_id_vorhanden(neu)
 
 
+def test_laufwerk_und_benutzerordner_nur_nach_rueckfrage(ob, tmp_path, ziel, monkeypatch):
+    """Ein ganzes Laufwerk oder der Benutzerordner ist fast nie gemeint (erster
+    echter Testlauf): erst eine Rueckfrage, dann - auf Wunsch - trotzdem."""
+    ab, client = ob
+    heim = tmp_path / "Benutzer" / "Ludwig"
+    (heim / "Bilder").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: heim))
+    assert ablauf_modul.quelle_warnung(heim) == "profil"
+    assert ablauf_modul.quelle_warnung(heim.parent) == "profile"
+    assert ablauf_modul.quelle_warnung(Path(Path.cwd().anchor)) == "laufwerk"
+    assert ablauf_modul.quelle_warnung(heim / "Bilder") == ""
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    a = _post(client, "/api/quelle", {"pfad": str(heim)})
+    assert a["frage"] == "quelle_gross" and a["art"] == "profil" and "Benutzerordner" in a["text"]
+    assert ab.quellen == []
+    a = _post(client, "/api/quelle", {"pfad": str(heim.parent)})
+    assert a["frage"] == "quelle_gross" and a["art"] == "profile"
+    a = _post(client, "/api/quelle", {"pfad": str(heim), "trotzdem": True})
+    assert a["quellen_neu"] == [str(heim)]
+    a = _post(client, "/api/quelle", {"pfad": str(heim / "Bilder")})    # gewoehnlicher Ordner: ohne Frage
+    assert "frage" not in a and str(heim / "Bilder") in a["quellen_neu"]
+
+
+def test_volles_ziel_ohne_archiv_nur_nach_rueckfrage(ob, quelle, ziel):
+    ab, client = ob
+    (ziel / "Urlaub.txt").write_text("alt", encoding="utf-8")
+    (ziel / "2026").mkdir()
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    a = _post(client, "/api/los")
+    assert a["frage"] == "ziel_nicht_leer" and a["n"] == 2 and "nicht leer" in a["text"]
+    assert not db.archiv_id_vorhanden(ziel) and ab.lauf is None
+    a = _post(client, "/api/los", {"ziel_trotzdem": True})
+    assert a["gestartet"] == "scan"
+    assert _warten(client)["zustand"] == "fertig"
+    assert (ziel / "Urlaub.txt").read_text(encoding="utf-8") == "alt"
+    # Mit Archiv im Ziel ist der volle Ordner der Normalfall: keine Frage mehr.
+    a = _post(client, "/api/los")
+    assert a["gestartet"] == "scan"
+    assert _warten(client)["zustand"] == "fertig"
+
+
+def test_archiv_verwerfen_verlangt_wort_und_laesst_bilder_in_ruhe(ob, quelle, ziel, archiv_basis):
+    ab, client = ob
+    assert "kein Archiv" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    assert _post(client, "/api/los")["gestartet"] == "scan"
+    assert "läuft" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})   # nicht waehrend eines Schritts
+    assert _warten(client)["zustand"] == "fertig"
+    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
+    lokal = archiv_basis / kennung
+    im_ziel = ziel / ".fotosortierer"
+    assert lokal.is_dir() and im_ziel.is_dir()
+    # Ohne Wort: nur die Rueckfrage. Falsches Wort: nichts passiert.
+    a = _post(client, "/api/verwerfen")
+    assert a["frage"] == "verwerfen" and a["wort"] == "verwerfen" and str(lokal) in a["text"]
+    assert "verwerfen" in _fehler(client, "/api/verwerfen", {"wort": "loeschen"})
+    assert lokal.is_dir() and im_ziel.is_dir()
+    # Eine Bilddatei, die jemand in den Programmordner gelegt hat: Weigerung, nichts geloescht.
+    fremd = im_ziel / "berichte" / "wichtig.jpg"
+    fremd.parent.mkdir(parents=True, exist_ok=True)
+    fremd.write_bytes(b"\xff\xd8\xff")
+    assert "wichtig.jpg" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})
+    assert lokal.is_dir() and fremd.is_file()
+    fremd.unlink()
+    # Kopierte Dateien im Ziel bleiben; nur die beiden Programmordner verschwinden.
+    archivbild = ziel / "2026" / "2026-01-01" / "DSC00001.JPG"
+    archivbild.parent.mkdir(parents=True)
+    archivbild.write_bytes(b"bild")
+    vorher_quelle = len(list(quelle.rglob("*")))
+    a = _post(client, "/api/verwerfen", {"wort": " Verwerfen "})
+    assert a["verworfen"] is True and a["entfernt"] == 2
+    assert not lokal.exists() and not im_ziel.exists()
+    assert archivbild.read_bytes() == b"bild"
+    assert len(list(quelle.rglob("*"))) == vorher_quelle       # Quelle unangetastet
+    z = client.get("/api/zustand").json()
+    assert z["ziel"] == "" and z["quellen_neu"] == [] and z["archiv"] == {"da": False}
+    assert client.get("/api/lauf").json()["aktiv"] is False
+    assert ablauf_modul.Ablauf(ordner=ab.ordner).ziel == ""
+
+
 def test_fremde_herkunft_wird_abgelehnt(ob):
     ab, client = ob
     r = client.post("/api/ziel", json={"ziel": "x"}, headers={"origin": "http://boese.example"})

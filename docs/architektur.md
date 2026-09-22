@@ -33,7 +33,8 @@ Culling/ (Repository-Wurzel)
 │  │
 │  ├─ scan.py                Phase 1: Quelle durchlaufen, zählen
 │  ├─ analyse.py             Phase 2: Gruppen, Metadaten, Datum, Ziel je Datei
-│  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2
+│  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2; Prozesszahl nach Profil, gestaffelter Start
+│  ├─ prozesse.py            Popen-Argumente für Hilfsprozesse: unter Windows kein Konsolenfenster (CREATE_NO_WINDOW, SW_HIDE)
 │  ├─ datum.py               Aufnahmedatum bestimmen        ← reine Logik
 │  ├─ kamera.py              Modell → Ordnername, Aliase    ← reine Logik
 │  ├─ dateitypen.py          Dateityp, Sidecar-Zuordnung    ← reine Logik

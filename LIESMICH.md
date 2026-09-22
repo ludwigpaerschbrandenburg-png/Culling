@@ -65,14 +65,24 @@ Auf der Startseite tragen Sie ein:
 | Feld | Was Sie tun |
 |---|---|
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
-| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. |
+| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
 | **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
 | **Zielordner liegt auf** | „hdd" lassen (Festplatte); bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
 
 Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
 dessen Stand und die bekannten Quellen, und **„Weitermachen"** springt zum offenen Schritt, ohne
 die Quellen erneut zu durchsuchen. **„Los geht's"** unten links durchsucht immer zuerst – das ist
-der richtige Knopf, wenn neue Dateien in der Quelle liegen.
+der richtige Knopf, wenn neue Dateien in der Quelle liegen. Ist der Zielordner nicht leer, enthält
+aber noch kein Archiv, fragt „Los geht's" erst, ob es dort weitergehen soll (es wird nichts
+gelöscht oder überschrieben; die Fotos kommen zu dem, was schon da liegt).
+
+**„Archiv verwerfen…"** auf derselben Karte ist der Neuanfang: Es entfernt das Gedächtnis des
+Programms zu diesem Zielordner – die Datenbank auf dem Rechner und den Ordner `.fotosortierer`
+im Ziel mit Sicherung und Berichten. **Kopierte Fotos und Videos bleiben unangetastet, die
+Quellordner ebenso.** Das Programm verlangt dafür das getippte Wort `verwerfen`, tut es nicht,
+solange ein Schritt läuft, und weigert sich, wenn in einem der beiden Ordner eine Bilddatei
+liegt. Danach ist die Startseite leer. Sinnvoll nach einem Probelauf, den Sie nicht mehr
+brauchen, oder wenn ein Archiv neu begonnen werden soll.
 
 Danach zeigt das Fenster die **Übersicht**: oben die Pfade (Quellen → Ziel) und die
 Phasenleiste **Scan · Analyse · Kopieren · Prüfen · Aufräumen** (die violette Linie zeigt, wie
@@ -345,7 +355,9 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 
 **[leistung]**
 - `profil` – `"hdd"` (Festplatte, 2 gleichzeitige Kopien), `"ssd"` (8) oder `"netzwerk"` (4).
-- `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = Anzahl der Prozessorkerne.
+- `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = nach Profil:
+  Festplatte und Netzlaufwerk 4, SSD Anzahl der Prozessorkerne (höchstens 16). Auf einer
+  Festplatte bremsen viele gleichzeitige Leser, weil der Lesekopf springt.
 - `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = automatisch.
   `fotosort.bat messen` schlägt passende Werte vor.
 - `exiftool_pfad` – Pfad zu `exiftool.exe`, falls ein anderes ExifTool benutzt werden soll.
@@ -425,6 +437,9 @@ neben der alten den Anhang `_1`.
 - **Sidecars** (`.xmp` usw.) wandern immer zusammen mit ihrer Hauptdatei.
 - **Videos ohne Zeitzone** werden aus Weltzeit umgerechnet; steht `heimat_zeitzone`
   falsch, rutscht eine Abendaufnahme in den nächsten Tag.
+- **Keine schwarzen Fenster:** Während der Analyse laufen mehrere ExifTool-Programme im
+  Hintergrund. Sie öffnen kein eigenes Fenster (seit v0.5). Meldet der Virenscanner trotzdem
+  `exiftool.exe` aus dem Programmordner, ist das ein Fehlalarm auf das mitgelieferte ExifTool.
 - **Eigene Ordnervorlage:** Steht `{kamera}` in derselben Ebene wie das Datum
   (`{jahr}-{monat}-{tag} {kamera}`), kann ein Tagesordner mit Zusatz für die falsche
   Kamera wiederverwendet werden. Mit der Standardvorlage passiert das nicht.

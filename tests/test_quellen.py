@@ -42,6 +42,15 @@ def test_zwei_quellen_werden_beide_erfasst(capsys, zwei_quellen, ziel, nachschau
         je = d.zaehler_je_quelle()
         assert je[str(pfade.aufloesen(a))]["gesamt"] == testbaum.ERWARTET_GESAMT
         assert je[str(pfade.aufloesen(b))]["gesamt"] == testbaum.ERWARTET_GESAMT
+        # Datenmenge je Quelle zaehlt nur erfasste Dateien, nicht die "sonstigen".
+        echte = d.verbindung.execute(
+            "SELECT COALESCE(SUM(groesse), 0) AS s FROM dateien WHERE quellwurzel = ? AND dateityp != 'sonstiges'",
+            (str(pfade.aufloesen(a)),)).fetchone()["s"]
+        alle = d.verbindung.execute(
+            "SELECT COALESCE(SUM(groesse), 0) AS s FROM dateien WHERE quellwurzel = ?",
+            (str(pfade.aufloesen(a)),)).fetchone()["s"]
+        assert 0 < echte < alle and je[str(pfade.aufloesen(a))]["bytes"] == echte
+        assert d.gesamtgroesse() == 2 * echte
         assert d.zaehler_je_status()["gefunden"] == 2 * (testbaum.ERWARTET_GESAMT - testbaum.ERWARTET_JE_TYP["sonstiges"])
     assert "Je Quelle" in ausgabe
     assert "2 Quellen" in ausgabe

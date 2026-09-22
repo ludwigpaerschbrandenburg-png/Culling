@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -125,9 +126,47 @@ def test_leere_datei_liefert_error_feld(pool, tmp_path):
 
 
 def test_prozesse_bestimmen(konf, monkeypatch):
-    assert metadaten.prozesse_bestimmen(konf) >= 1
+    """Nach dem ersten echten Testlauf (32 Prozesse auf einer Festplatte):
+    0 heisst nach Profil, ein fester Konfigurationswert gilt immer."""
+    monkeypatch.setattr(metadaten.os, "cpu_count", lambda: 32)
+    assert metadaten.prozesse_bestimmen(konf) == 4                    # Standardprofil hdd
+    assert metadaten.prozesse_bestimmen(konf, "hdd") == 4
+    assert metadaten.prozesse_bestimmen(konf, "netzwerk") == 4
+    assert metadaten.prozesse_bestimmen(konf, "ssd") == 16            # Kerne, hoechstens 16
+    monkeypatch.setattr(metadaten.os, "cpu_count", lambda: 6)
+    assert metadaten.prozesse_bestimmen(konf, "ssd") == 6
+    konf.alle()["leistung"]["profil"] = "ssd"
+    assert metadaten.prozesse_bestimmen(konf) == 6                    # Profil aus der Konfiguration
+    assert metadaten.prozesse_bestimmen(konf, "HDD ") == 4            # Befehlszeile geht vor
     konf.alle()["leistung"]["metadaten_prozesse"] = 3
     assert metadaten.prozesse_bestimmen(konf) == 3
+    assert metadaten.prozesse_bestimmen(konf, "ssd") == 3             # fester Wert gewinnt immer
+
+
+def test_prozesse_starten_gestaffelt(monkeypatch, baum):
+    """Nicht alle ExifTool-Prozesse im selben Augenblick, sondern mit Abstand."""
+    monkeypatch.setattr(metadaten, "STARTABSTAND", 0.15)
+    starts: list[float] = []
+    echt = metadaten._Prozess.__init__
+
+    def mitschreiben(self, programm):
+        starts.append(time.monotonic())
+        echt(self, programm)
+
+    monkeypatch.setattr(metadaten._Prozess, "__init__", mitschreiben)
+    with metadaten.ExifToolPool(testbaum.exiftool_pfad(), 3) as pool:
+        zukuenfte = [pool.einreichen([(str(baum["jpg"]), FOTO)]) for _ in range(3)]
+        for z in zukuenfte:
+            assert z.result()
+    assert len(starts) == 3
+    abstaende = [b - a for a, b in zip(sorted(starts), sorted(starts)[1:])]
+    assert all(a >= 0.14 for a in abstaende), abstaende
+    # Ein einzelner Prozess wartet auf niemanden.
+    starts.clear()
+    beginn = time.monotonic()
+    with metadaten.ExifToolPool(testbaum.exiftool_pfad(), 1) as pool:
+        pool.lesen([(str(baum["jpg"]), FOTO)])
+    assert starts and starts[0] - beginn < 0.1
 
 
 def test_argumente_fast2_nur_fuer_fotos():

@@ -9,6 +9,10 @@ In GitHub Actions unter Windows (lokal auch unter Linux, dann ohne start.bat):
      die Datei "schliessen" beendet.
   3. Ein kompletter Durchlauf am kuenstlichen Testbaum ueber die Oberflaeche
      (fotosort-konsole.exe fenster --durchlauf, Qt offscreen), mit Bildern.
+     Waehrenddessen darf unter Windows kein Konsolenfenster aufgehen (im
+     ersten echten Testlauf oeffnete jeder ExifTool-Prozess ein schwarzes
+     Fenster). Eine Gegenprobe zeigt vorher, dass die Umgebung solche
+     Fenster ueberhaupt sichtbar machen wuerde.
   4. Die Befehle: --version (mitgeliefertes ExifTool), scan, analyse, kopieren,
      pruefen, status, und ein Schritt als Arbeitsprozess der Oberflaeche.
 
@@ -27,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -42,6 +47,76 @@ def _lauf(befehl: list[str], umgebung: dict, cwd: Path, zeit: int = 600) -> tupl
     text = aus.stdout + aus.stderr
     print(text[-4000:], flush=True)
     return aus.returncode, text
+
+
+class _FensterWaechter:
+    """Merkt sich unter Windows jedes sichtbare Fenster, das waehrend eines
+    Vorgangs neu aufgeht (Klasse, Titel, PID). Konsolenfenster haben die
+    Klasse ConsoleWindowClass."""
+
+    KONSOLE = "ConsoleWindowClass"
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+        self.ctypes, self.wintypes = ctypes, wintypes
+        self.u32 = ctypes.windll.user32
+        self.rueckruf_typ = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        self.anfang = self._sichtbare()
+        self.neue: dict[int, tuple[str, str, int]] = {}
+        self._laeuft = False
+        self._thread = threading.Thread(target=self._schleife, daemon=True)
+
+    def _sichtbare(self) -> dict[int, tuple[str, str, int]]:
+        ctypes, wintypes, u32 = self.ctypes, self.wintypes, self.u32
+        gefunden: dict[int, tuple[str, str, int]] = {}
+
+        def rueckruf(hwnd, _lp):
+            if u32.IsWindowVisible(hwnd):
+                klasse = ctypes.create_unicode_buffer(256)
+                u32.GetClassNameW(hwnd, klasse, 256)
+                titel = ctypes.create_unicode_buffer(512)
+                u32.GetWindowTextW(hwnd, titel, 512)
+                pid = wintypes.DWORD()
+                u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                gefunden[int(hwnd)] = (klasse.value, titel.value, int(pid.value))
+            return True
+
+        u32.EnumWindows(self.rueckruf_typ(rueckruf), 0)
+        return gefunden
+
+    def _schleife(self) -> None:
+        while self._laeuft:
+            for hwnd, fenster in self._sichtbare().items():
+                if hwnd not in self.anfang and hwnd not in self.neue:
+                    self.neue[hwnd] = fenster
+            time.sleep(0.2)
+
+    def start(self) -> "_FensterWaechter":
+        self._laeuft = True
+        self._thread.start()
+        return self
+
+    def stop(self) -> list[tuple[str, str, int]]:
+        self._laeuft = False
+        self._thread.join(3)
+        return list(self.neue.values())
+
+    def konsolen(self) -> list[tuple[str, str, int]]:
+        return [f for f in self.neue.values() if f[0] == self.KONSOLE]
+
+
+def _gegenprobe_konsolenfenster() -> bool:
+    """Wuerde diese Umgebung ein neues Konsolenfenster ueberhaupt sichtbar
+    machen? Ein Python mit CREATE_NEW_CONSOLE muss vom Waechter gesehen werden."""
+    w = _FensterWaechter().start()
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"],
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)  # type: ignore[attr-defined]
+    try:
+        p.wait(timeout=60)
+    finally:
+        w.stop()
+    return bool(w.konsolen())
 
 
 def _pid_lebt(pid: int) -> bool:
@@ -153,10 +228,26 @@ def main() -> int:
     ziel_fenster = arbeit / "Ziel (Fenster)"
     ziel_fenster.mkdir()
     fotos = arbeit / "fotos"
+    waechter = None
+    if WINDOWS:
+        gegenprobe = _gegenprobe_konsolenfenster()
+        print("Gegenprobe: ein neues Konsolenfenster ist hier "
+              + ("sichtbar - die Pruefung auf schwarze Fenster ist aussagekraeftig." if gegenprobe
+                 else "NICHT sichtbar - die Pruefung auf schwarze Fenster kann hier nichts finden."), flush=True)
+        waechter = _FensterWaechter().start()
     rc, text = _lauf([str(konsole), "fenster", "--durchlauf", str(ziel_fenster), str(quelle), "--fotos", str(fotos)],
                      dict(umgebung, QT_QPA_PLATFORM="offscreen"), start_ordner, zeit=900)
     if rc != 0 or "Durchlauf bestanden" not in text:
         fehler.append(f"Durchlauf ueber das Fenster: Rueckgabewert {rc}")
+    if waechter is not None:
+        neue = waechter.stop()
+        konsolen = waechter.konsolen()
+        if konsolen:
+            fehler.append(f"Waehrend des Durchlaufs gingen {len(konsolen)} Konsolenfenster auf: "
+                          + "; ".join(f"'{t}' (PID {pid})" for _k, t, pid in konsolen[:5]))
+        andere = [f for f in neue if f[0] != waechter.KONSOLE]
+        print(f"Waehrend des Durchlaufs neu sichtbar: {len(konsolen)} Konsolenfenster, {len(andere)} andere"
+              + (" (" + "; ".join(f"{k} '{t}'" for k, t, _p in andere[:5]) + ")" if andere else ""), flush=True)
     bilder = sorted(fotos.glob("*.png")) if fotos.is_dir() else []
     if len(bilder) < 12:
         fehler.append(f"Durchlauf: nur {len(bilder)} Bilder statt 12")
@@ -213,8 +304,8 @@ def _ende(fehler: list[str]) -> int:
         for f in fehler:
             print("  -", f)
         return 1
-    print("PAKETPRUEFUNG BESTANDEN: Fenster aus Ordner mit Leerzeichen gestartet, Durchlauf ueber das Fenster, "
-          "Befehle und Arbeitsprozess laufen, ExifTool mitgeliefert.")
+    print("PAKETPRUEFUNG BESTANDEN: Fenster aus Ordner mit Leerzeichen gestartet, Durchlauf ueber das Fenster "
+          "ohne Konsolenfenster, Befehle und Arbeitsprozess laufen, ExifTool mitgeliefert.")
     return 0
 
 

@@ -348,7 +348,9 @@ def _verbuchen(fund: Fund, quelle_auf: Path, dbank, lauf: int, ergebnis: Ergebni
         ergebnis.ins_ziel += 1
 
     ergebnis.dateien += 1
-    ergebnis.bytes_gesamt += fund.groesse
+    if fund.typ != dateitypen.SONSTIGES:
+        # Datenmenge = nur erfasste Dateien; sonstige werden nie angefasst.
+        ergebnis.bytes_gesamt += fund.groesse
     ergebnis.je_typ[fund.typ] = ergebnis.je_typ.get(fund.typ, 0) + 1
 
 

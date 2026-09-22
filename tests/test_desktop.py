@@ -66,6 +66,68 @@ def test_startseite_kennt_archiv_und_quellen(app, tmp_path, quelle, ziel):
     f.close()
 
 
+def test_rueckfragen_und_archiv_verwerfen_im_fenster(app, tmp_path, quelle, ziel, monkeypatch, capsys):
+    """Laufwerk/Benutzerordner als Quelle und volles Ziel fragen nach; „Archiv
+    verwerfen“ verlangt das Wort, laesst kopierte Dateien in Ruhe und leert die Startseite."""
+    fragen: list[tuple[str, str]] = []
+    antworten: list[tuple[bool, str]] = []
+
+    def frage_ersatz(_eltern, titel, text, eingabe=False, ja="Ja", nein="Abbrechen"):
+        fragen.append((titel, ja))
+        return antworten.pop(0)
+
+    monkeypatch.setattr(desktop, "frage", frage_ersatz)
+    heim = tmp_path / "Benutzer" / "Ludwig"
+    heim.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: heim))
+
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    assert not f.start.verwerfen.isVisible()               # noch kein Archiv
+    antworten.append((False, ""))
+    f.quelle_hinzufuegen(str(heim))                        # Benutzerordner -> Frage -> Nein
+    assert fragen[-1] == ("Wirklich diesen Ordner?", "Trotzdem nehmen") and ab.quellen == []
+    antworten.append((True, ""))
+    f.quelle_hinzufuegen(str(heim))                        # -> Ja
+    assert ab.quellen == [str(heim)]
+    f.quelle_entfernen(str(heim))
+    f.quelle_hinzufuegen(str(quelle))
+    assert len(fragen) == 2 and ab.quellen == [str(quelle)]
+
+    (ziel / "alt.txt").write_text("x", encoding="utf-8")
+    antworten.append((False, ""))
+    f.los(False)                                           # volles Ziel -> Frage -> anderen Ordner
+    assert fragen[-1] == ("Zielordner ist nicht leer", "Weiter") and ab.lauf is None
+    antworten.append((True, ""))
+    f.los(False)                                           # -> Weiter: Scan startet
+    assert ab.lauf is not None and ab.lauf.schritt == "scan"
+    ende = time.monotonic() + 120
+    while time.monotonic() < ende and ab.lauf_lebt():
+        _ereignisse(app, 0.2)
+    _ereignisse(app, 1.0)
+    assert f.ab.lauf_status()["zustand"] == "fertig"
+
+    f.laden("start")
+    assert f.start.verwerfen.isVisible() and f.start.karte.kicker.text() == "ANGEFANGENES ARCHIV"
+    kopie = ziel / "2026" / "bild.jpg"
+    kopie.parent.mkdir()
+    kopie.write_bytes(b"bild")
+    antworten.append((True, "falsch"))
+    f.archiv_verwerfen()                                   # falsches Wort: Meldung, nichts weg
+    assert fragen[-1] == ("Archiv verwerfen?", "Verwerfen")
+    assert (ziel / ".fotosortierer").is_dir() and f.meldung_label.isVisible() and ab.ziel == str(ziel)
+    antworten.append((True, "verwerfen"))
+    f.archiv_verwerfen()
+    assert not (ziel / ".fotosortierer").exists() and kopie.read_bytes() == b"bild"
+    assert ab.ziel == "" and f.start.ziel.text() == "" and f.ansicht == "start"
+    assert not f.start.verwerfen.isVisible() and "verworfen" in f.meldung_label.text()
+    assert not antworten
+    f.close()
+
+
 def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys):
     fotos = tmp_path / "fotos"
     rc = cli.main(["fenster", "--durchlauf", str(ziel), str(quelle), "--fotos", str(fotos)])

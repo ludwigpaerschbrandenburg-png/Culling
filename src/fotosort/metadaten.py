@@ -2,7 +2,9 @@
 
 ExifTool wird nicht je Datei gestartet, sondern laeuft mit -stay_open
 weiter und bekommt Stapel von Dateien. Je Strang ein Prozess; die Anzahl
-ist einstellbar (leistung.metadaten_prozesse, 0 = Anzahl Kerne).
+ist einstellbar (leistung.metadaten_prozesse), sonst richtet sie sich nach
+dem Profil: Festplatte und Netzlaufwerk 4, SSD Anzahl Kerne, hoechstens 16.
+Die Prozesse starten gestaffelt (STARTABSTAND), nicht alle auf einmal.
 
 Fotos und RAW werden mit -fast2 gelesen. Videos ohne: Sony legt seine
 XML-Metadaten (CreationDateValue mit Zeitzonen-Offset) am Ende der Datei
@@ -16,10 +18,11 @@ import json
 import os
 import subprocess
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from . import dateitypen
+from . import dateitypen, prozesse
 
 # Nur die Felder, die die Datumsermittlung (SPEC Abschnitt 3) und der
 # Kamera-Ordner brauchen. Gruppenpraefixe weggelassen: ExifTool liefert
@@ -51,6 +54,15 @@ FELDER_SIDECAR_XML: tuple[str, ...] = (
 
 STAPELGROESSE = 200
 
+# ExifTool-Prozesse je Profil, wenn leistung.metadaten_prozesse = 0 ist.
+# Eine Festplatte liest mit 32 Lesern auf einmal nur noch mit springendem
+# Kopf (im ersten echten Testlauf: 8 Dateien/s); 0 heisst Anzahl Kerne.
+PROZESSE_JE_PROFIL: dict[str, int] = {"hdd": 4, "netzwerk": 4, "ssd": 0}
+PROZESSE_HOECHSTENS = 16
+# Abstand zwischen zwei Prozessstarts: 16 Perl-Starts im selben Augenblick
+# bremsen sich gegenseitig und lassen Virenscanner anschlagen.
+STARTABSTAND = 0.2
+
 
 class MetadatenFehler(Exception):
     """ExifTool konnte eine Datei nicht lesen."""
@@ -75,12 +87,20 @@ def unzulaessig_fuer_exiftool(pfad) -> bool:
     return "\n" in text or "\r" in text
 
 
-def prozesse_bestimmen(konf) -> int:
-    """0 heisst automatisch: Anzahl Kerne (SPEC Abschnitt 9)."""
+def prozesse_bestimmen(konf, profil: str | None = None) -> int:
+    """Konfigurationswert, sonst nach Profil (SPEC Abschnitte 7 und 9).
+
+    Das Profil kommt von der Befehlszeile oder aus der Oberflaeche; fehlt
+    es, gilt leistung.profil aus der Konfiguration.
+    """
     gewuenscht = int(konf.wert("leistung.metadaten_prozesse") or 0)
     if gewuenscht > 0:
         return gewuenscht
-    return max(1, os.cpu_count() or 1)
+    profil = str(profil or konf.wert("leistung.profil") or "hdd").strip().lower()
+    fest = PROZESSE_JE_PROFIL.get(profil, PROZESSE_JE_PROFIL["hdd"])
+    if fest > 0:
+        return fest
+    return max(1, min(os.cpu_count() or 1, PROZESSE_HOECHSTENS))
 
 
 def _argumente(dateityp: str) -> list[str]:
@@ -108,6 +128,7 @@ class _Prozess:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            **prozesse.unsichtbar(),
         )
 
     def lesen(self, pfade_typ: list[tuple[str, str]]) -> dict[str, dict]:
@@ -169,6 +190,7 @@ class ExifToolPool:
         self._alle: list[_Prozess] = []
         self._schloss = threading.Lock()
         self._executor: ThreadPoolExecutor | None = None
+        self._naechster_start = 0.0
 
     def __enter__(self) -> "ExifToolPool":
         self._executor = ThreadPoolExecutor(max_workers=self.prozesse, thread_name_prefix="exiftool")
@@ -177,9 +199,20 @@ class ExifToolPool:
     def __exit__(self, *_: object) -> None:
         self.schliessen()
 
+    def _startplatz_abwarten(self) -> None:
+        """Prozesse gestaffelt starten: der naechste fruehestens STARTABSTAND
+        nach dem vorigen, der erste sofort."""
+        with self._schloss:
+            jetzt = time.monotonic()
+            geplant = max(jetzt, self._naechster_start)
+            self._naechster_start = geplant + STARTABSTAND
+        if geplant > jetzt:
+            time.sleep(geplant - jetzt)
+
     def _prozess(self) -> _Prozess:
         p = getattr(self._lokal, "prozess", None)
         if p is None:
+            self._startplatz_abwarten()
             p = _Prozess(self.programm)
             self._lokal.prozess = p
             with self._schloss:

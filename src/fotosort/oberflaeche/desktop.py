@@ -386,6 +386,10 @@ class StartSeite(QWidget):
         self.weitermachen = knopf("Weitermachen", "primary", self.f.weitermachen)
         self.weitermachen.setEnabled(False)
         self.karte.lay.addWidget(self.weitermachen)
+        self.verwerfen = knopf("Archiv verwerfen…", "ghost", self.f.archiv_verwerfen)
+        self.verwerfen.setToolTip("Merkliste und Berichte zu diesem Ziel entfernen – kopierte Fotos bleiben.")
+        self.verwerfen.hide()
+        self.karte.lay.addWidget(self.verwerfen)
         seite.addWidget(self.karte)
         k2 = Karte("Bevor es losgeht", gedaempft=True)
         for t in ("Zuerst mit Kopien üben.", "Gelöscht wird nur nach Bestätigungswort.", "Fenster schließen hält nichts an."):
@@ -441,6 +445,7 @@ class StartSeite(QWidget):
         _leeren(self.archiv_tags)
         self.weitermachen.setEnabled(False)
         self.weitermachen.setText("Weitermachen")
+        self.verwerfen.setVisible(bool(self.ziel.text()) and bool(archiv.get("da")) and not archiv.get("laeuft"))
         if not self.ziel.text():
             self.karte.kicker.setText("ZIELORDNER")
             self.archiv_text.setText("Noch kein Zielordner gewählt.")
@@ -944,9 +949,14 @@ class Hauptfenster(QMainWindow):
             self.start.texte(self.zustand)
             self.einstellungen_senden()
 
-    def quelle_hinzufuegen(self, pfad: str) -> None:
-        a = self._versuchen(self.ab.quelle_hinzufuegen, pfad)
+    def quelle_hinzufuegen(self, pfad: str, trotzdem: bool = False) -> None:
+        a = self._versuchen(self.ab.quelle_hinzufuegen, pfad, trotzdem)
         if a is None:
+            return
+        if a.get("frage") == "quelle_gross":
+            ja, _ = frage(self, "Wirklich diesen Ordner?", a["text"], ja="Trotzdem nehmen", nein="Anderen wählen")
+            if ja:
+                self.quelle_hinzufuegen(pfad, True)
             return
         self.zustand["quellen_neu"] = a["quellen_neu"]
         self.start.quellen_zeigen(a["quellen_neu"])
@@ -970,18 +980,36 @@ class Hauptfenster(QMainWindow):
             self.zustand["verschieben"] = a["verschieben"]
             self.zustand["profil"] = a["profil"]
 
-    def los(self, ziel_anlegen: bool) -> None:
-        a = self._versuchen(self.ab.los, ziel_anlegen)
+    def los(self, ziel_anlegen: bool, ziel_trotzdem: bool = False) -> None:
+        a = self._versuchen(self.ab.los, ziel_anlegen, ziel_trotzdem)
         if a is None:
             return
         if a.get("frage") == "ziel_anlegen":
             ja, _ = frage(self, "Ordner anlegen?", a["text"], ja="Anlegen")
             if ja:
-                self.los(True)
+                self.los(True, ziel_trotzdem)
+            return
+        if a.get("frage") == "ziel_nicht_leer":
+            ja, _ = frage(self, "Zielordner ist nicht leer", a["text"], ja="Weiter", nein="Anderen Ordner wählen")
+            if ja:
+                self.los(ziel_anlegen, True)
             return
         if a.get("gestartet"):
             self.haupt_zeigen()
             self.lauf_starten(a["gestartet"])
+
+    def archiv_verwerfen(self) -> None:
+        a = self._versuchen(self.ab.archiv_verwerfen, "")
+        if a is None or a.get("frage") != "verwerfen":
+            return
+        ja, wort = frage(self, "Archiv verwerfen?", a["text"], eingabe=True, ja="Verwerfen", nein="Behalten")
+        if not ja:
+            return
+        a = self._versuchen(self.ab.archiv_verwerfen, wort)
+        if a is None:
+            return
+        self.laden("start")
+        self.meldung(a.get("text", ""), gut=True)
 
     def weitermachen(self) -> None:
         self.letzter_schritt = ""

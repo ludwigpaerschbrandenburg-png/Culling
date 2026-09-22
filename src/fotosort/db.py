@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, unquote_to_bytes
 
-from . import FotosortFehler, meldungen, pfade
+from . import FotosortFehler, dateitypen, meldungen, pfade
 
 DATEINAME = "fotosort.db"
 ARCHIV_UNTERORDNER = ".fotosortierer"
@@ -654,7 +654,11 @@ class Datenbank:
         self._vielleicht_schreiben()
 
     def zaehler_je_quelle(self) -> dict[str, dict[str, int]]:
-        """Je Quelle: Anzahl gesamt, Bytes und Anzahl je Dateityp."""
+        """Je Quelle: Anzahl gesamt, Anzahl je Dateityp und Bytes.
+
+        "bytes" zaehlt nur die erfassten Dateien (Foto, RAW, Video, Sidecar);
+        sonstige Dateien werden nie angefasst und gehoeren nicht zur Datenmenge.
+        """
         self.stapel_schreiben()
         ergebnis: dict[str, dict[str, int]] = {}
         for z in self.verbindung.execute(
@@ -662,9 +666,11 @@ class Datenbank:
             " FROM dateien GROUP BY quellwurzel, dateityp"
         ):
             eintrag = ergebnis.setdefault(z["quellwurzel"], {"gesamt": 0, "bytes": 0})
-            eintrag[z["dateityp"] or "sonstiges"] = int(z["n"])
+            typ = z["dateityp"] or "sonstiges"
+            eintrag[typ] = int(z["n"])
             eintrag["gesamt"] += int(z["n"])
-            eintrag["bytes"] += int(z["b"])
+            if dateitypen.ist_echter_typ(typ):
+                eintrag["bytes"] += int(z["b"])
         return ergebnis
 
     def zaehler_je_status_und_quelle(self) -> dict[str, dict[str, int]]:
@@ -1284,8 +1290,9 @@ class Datenbank:
         return fertig
 
     def gesamtgroesse(self) -> int:
+        """Bytes der erfassten Dateien (Foto, RAW, Video, Sidecar)."""
         zeile = self.verbindung.execute(
-            "SELECT COALESCE(SUM(groesse), 0) AS s FROM dateien"
+            f"SELECT COALESCE(SUM(groesse), 0) AS s FROM dateien WHERE dateityp IN {self.ECHTE_TYPEN_SQL}"
         ).fetchone()
         return int(zeile["s"])
 

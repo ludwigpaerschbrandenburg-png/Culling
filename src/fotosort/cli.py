@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, steuerung, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, prozesse, steuerung, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -100,7 +100,8 @@ class _Version(argparse.Action):
         exif = "nicht gefunden"
         if gefunden:
             try:
-                aus = subprocess.run([gefunden, "-ver"], capture_output=True, text=True, timeout=30)
+                aus = subprocess.run([gefunden, "-ver"], capture_output=True, text=True, timeout=30,
+                                     **prozesse.unsichtbar())
                 exif = f"{aus.stdout.strip() or '?'} ({wo})" if aus.returncode == 0 else f"nicht startbar ({wo})"
             except (OSError, subprocess.SubprocessError):
                 exif = f"nicht startbar ({wo})"
@@ -133,7 +134,7 @@ def exiftool_pruefen(befehl: str, konf, konsole) -> None:
 def exiftool_startbar(pfad: str) -> bool:
     try:
         fertig = subprocess.run(
-            [pfad, "-ver"], capture_output=True, timeout=20, check=False
+            [pfad, "-ver"], capture_output=True, timeout=20, check=False, **prozesse.unsichtbar()
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -470,7 +471,8 @@ def befehl_analyse(args, konsole) -> int:
         gefunden, _wo = exiftool_finden(archiv.konf)
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         offen = datenbank.anzahl_zu_analysieren()
-        prozesse = metadaten.prozesse_bestimmen(archiv.konf)
+        prozesse = int(getattr(args, "prozesse", 0) or 0) or metadaten.prozesse_bestimmen(
+            archiv.konf, getattr(args, "profil", None))
         if offen == 0:
             konsole.print(meldungen.analyse_nichts_zu_tun())
         else:
@@ -928,12 +930,12 @@ def befehl_start(args, konsole) -> int:
             if not _weiter(konsole, meldungen.start_frage_weiter("Analyse")):
                 konsole.print(meldungen.start_aufgehoert())
                 return schlechtester
-            rc = befehl_analyse(_start_namensraum(args, "analyse"), konsole)
+            rc = befehl_analyse(_start_namensraum(args, "analyse", profil=profil), konsole)
             if not pruefen_rueckgabe(rc):
                 return schlechtester
             stand = _start_archiv_lesen(args, konsole)
         while _start_aliase(args, konsole, stand):
-            rc = befehl_analyse(_start_namensraum(args, "analyse"), konsole)
+            rc = befehl_analyse(_start_namensraum(args, "analyse", profil=profil), konsole)
             if not pruefen_rueckgabe(rc):
                 return schlechtester
             stand = _start_archiv_lesen(args, konsole)
@@ -1019,6 +1021,8 @@ def befehl_arbeit(args, konsole) -> int:
             ns.ziel_anlegen = bool(auftrag.get("ziel_anlegen"))
             rc = befehl_scan(ns, konsole)
         elif schritt == "analyse":
+            ns.profil = auftrag.get("profil")
+            ns.prozesse = None
             rc = befehl_analyse(ns, konsole)
         elif schritt == "kopieren":
             ns.verschieben = bool(auftrag.get("verschieben"))
@@ -1166,6 +1170,9 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("analyse", help="Metadaten lesen und Ziel berechnen")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE),
+                   help="bestimmt die Zahl der ExifTool-Prozesse (hdd/netzwerk 4, ssd Kerne bis 16)")
+    p.add_argument("--prozesse", type=int, default=None, help="Zahl der ExifTool-Prozesse fest vorgeben")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("kopieren", help="Dateien ins Ziel uebertragen")
