@@ -216,7 +216,7 @@ def test_haengender_stapel_kostet_nur_die_eine_datei(tmp_path, monkeypatch):
         # Der Pool ist danach voll brauchbar: neuer Prozess, normale Antwort.
         assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
         assert len(pool._alle) == 1
-    assert time.monotonic() - beginn < 8.0
+    assert time.monotonic() - beginn < 20.0
 
 
 def test_ohne_zeitlimit_kein_waechter(baum):

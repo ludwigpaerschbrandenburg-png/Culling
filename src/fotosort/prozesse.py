@@ -38,3 +38,22 @@ def losgeloest() -> dict:
         "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
         "startupinfo": start,
     }
+
+
+def baum_beenden(prozess: subprocess.Popen) -> None:
+    """Einen Hilfsprozess samt seinen Kindern hart beenden.
+
+    Unter Windows ist exiftool.exe nur ein Starter fuer perl.exe, das die
+    Ausgabe-Pipe haelt: Wuerde nur der Starter beendet, bliebe das Lesen der
+    Antwort ewig stehen. taskkill /T nimmt den ganzen Prozessbaum.
+    """
+    if sys.platform.startswith("win"):
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(prozess.pid)],
+                           capture_output=True, timeout=30, check=False, **unsichtbar())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        prozess.kill()
+    except OSError:
+        pass

@@ -50,7 +50,10 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 - [x] **Zeitlimit beim Lesen eines ExifTool-Stapels.** Gebaut (Nacht-Auftrag Teil 4): 60 s plus
       1 s je Datei des Stapels; danach wird der Prozess beendet und neu gestartet, der Stapel Datei
       für Datei nachgelesen, nur die hängende Datei bekommt `fehler` (Zeitlimit). Test mit einem
-      nachgebauten ExifTool (`tests/exiftool_haengt.py`), das an einer Datei hängen bleibt.
+      nachgebauten ExifTool (`tests/exiftool_haengt.py`), das an einer Datei hängen bleibt. Aus der
+      Windows-CI gelernt: `exiftool.exe` ist dort nur ein Starter für `perl.exe`, das die Ausgabe hält —
+      beendet wird deshalb der ganze Prozessbaum (`taskkill /T`, `prozesse.baum_beenden`), sonst
+      bliebe das Lesen der Antwort ewig stehen.
 - [x] **Eigene Vorlage mit Kamera im Datumsordner (`{jahr}-{monat}-{tag} {kamera}`).** Der
       Zusatz-Abgleich gilt je Ebene mit Datumsfeld; in einer gemischten Ebene könnte
       `2026-01-01 Geburtstag` für `2026-01-01 A7C` gewählt werden. Mit der Standardvorlage

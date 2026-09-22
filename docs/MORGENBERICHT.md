@@ -85,9 +85,14 @@ es einen Test.
   Doppelpunkt in einem Schrittnamen die Ablaufdatei ungültig machte; und ein Windows-Test
   öffnete ein echtes Meldungsfenster und wartete ewig auf einen Klick. Beides behoben, danach
   alles grün, dann Release v0.4.
-- **In der Nacht:** Kein roter Lauf. Ein Testlauf wurde von der Cloud abgebrochen, weil kurz
-  danach schon der nächste Stand hochgeladen wurde – das ist normal, der folgende Lauf war
-  grün.
+- **In der Nacht:** Ein roter Lauf, und der war wertvoll: Der neue Test für das
+  ExifTool-Zeitlimit hing unter Windows fest. Grund: Unter Windows ist `exiftool.exe` nur ein
+  kleines Startprogramm, das im Hintergrund `perl.exe` laufen lässt; wer nur das Startprogramm
+  beendet, lässt Perl weiterlaufen, und das Programm hätte im Ernstfall ewig auf die Antwort
+  gewartet. Jetzt wird bei einem Zeitlimit der ganze Prozessbaum beendet. Ohne die
+  Windows-Prüfung wäre das erst bei Ihnen aufgefallen. Ein weiterer Testlauf wurde von der
+  Cloud abgebrochen, weil kurz danach schon der nächste Stand hochgeladen wurde – das ist
+  normal.
 
 ## Was offen ist
 

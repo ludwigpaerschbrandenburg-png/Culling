@@ -147,11 +147,10 @@ class _Prozess:
         )
 
     def _abwuergen(self) -> None:
+        """Nach Ablauf des Zeitlimits: Prozess samt Kindern beenden, damit
+        readline() sicher zu Ende kommt (prozesse.baum_beenden)."""
         self.abgewuergt = True
-        try:
-            self.prozess.kill()
-        except OSError:
-            pass
+        prozesse.baum_beenden(self.prozess)
 
     def lesen(self, pfade_typ: list[tuple[str, str]], limit: float | None = None) -> dict[str, dict]:
         """Einen Stapel gleichen Dateityps lesen. Pfad -> Felder.
