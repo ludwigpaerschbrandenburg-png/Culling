@@ -45,6 +45,7 @@ ART_ANGEFANGENE_ENTFERNT = "angefangene_zieldatei_entfernt"
 ART_NACHTRAEGLICH_BESTAETIGT = "kopie_nachtraeglich_bestaetigt"
 ART_EXFAT_RUECKFALL = "rueckfall_kopieren"
 ART_NEU_NACH_PRUEFUNG = "neu_nach_pruefung"
+ART_ANHANG_ABWEICHEND = "anhang_abweichend"
 
 # Deutsche Texte, die in die Datenbank gelangen, stehen in meldungen.py.
 GRUND_QUELLE_FEHLT = meldungen.GRUND_QUELLE_FEHLT
@@ -88,6 +89,7 @@ class Ergebnis:
     quelle_geloescht: int = 0        # kopiert, beide Seiten frisch gelesen, Quelle geloescht
     quelle_seit_kopieren: int = 0    # Quelle hat sich nach dem Kopieren geaendert: nicht geloescht
     loeschung_verweigert: int = 0
+    anhang_abweichend: int = 0        # Gruppenmitglied mit anderem Anhang (Fremdprozess dazwischen)
 
 
 @dataclass
@@ -370,6 +372,21 @@ class _Lauf:
                 e.part_aufgeraeumt += 1
                 self.dbank.ereignis(self.lauf, ART_PART_AUFGERAEUMT, part, 1, meldungen.EREIGNIS_PART_AUFGERAEUMT)
             st = _stat(schreib) if schreib is not None and db.pfad_text(schreib) != db.pfad_text(part) else None
+            if st is not None and int(z["umbenannt"] or 0) and _stat(quelle) is None:
+                # Verschieben durch Umbenennen: Der Name war vorher beansprucht
+                # und nachweislich frei (nicht ueberschreibendes Umbenennen);
+                # die Quelle ist weg, die Datei liegt unter dem Endnamen. Das
+                # Umbenennen war fertig, nur der Status nicht festgeschrieben.
+                if st.st_size == int(z["groesse"]):
+                    self.dbank.verschoben_setzen(z["quellpfad"], schreib, self.lauf)
+                    e.nachtraeglich_bestaetigt += 1
+                    self.dbank.ereignis(self.lauf, ART_NACHTRAEGLICH_BESTAETIGT, quelle, 1,
+                                        meldungen.EREIGNIS_VERSCHOBEN_NACHGETRAGEN)
+                else:
+                    self.dbank.verschoben_setzen(z["quellpfad"], schreib, self.lauf)
+                    self.dbank.status_setzen(z["quellpfad"], "fehler", meldungen.GRUND_VERSCHIEBEN_GROESSE)
+                    e.fehler += 1
+                continue
             if st is not None:
                 if st.st_size == int(z["groesse"]) and _stat(quelle) is not None:
                     h_ziel = self.hasher.submit(hashes.blake3_datei, _L(schreib))
@@ -479,7 +496,7 @@ class _Lauf:
             while True:
                 endname = mit_anhang(a.ziel, k, a.stamm)
                 # Anspruch VOR dem Umbenennen festschreiben (SPEC §5).
-                self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, endname, self.lauf)
+                self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, endname, self.lauf, umbenannt=True)
                 self.dbank.stapel_schreiben()
                 try:
                     _L(endname.parent).mkdir(parents=True, exist_ok=True)
@@ -539,7 +556,7 @@ class _Lauf:
     # -- Verschieben ueber Kopieren: Frischlesung, dann Quelle entfernen -------
 
     def nachpruefung_einreihen(self, a: _Auftrag, endname: Path) -> None:
-        zukunft = self.hasher.submit(loeschen.frisch_lesen, a.quelle, endname, self.byte_vergleich, self.stop)
+        zukunft = self.hasher.submit(loeschen.frisch_lesen, a.quelle, endname, self.byte_vergleich, self.stop, self.lauf)
         self.nachpruefung.append((a, endname, zukunft))
 
     def nachpruefungen_verbuchen(self, alle: bool) -> None:
@@ -572,7 +589,21 @@ class _Lauf:
             self.dbank.geprueft_setzen(quellpfad)
             try:
                 loeschen.quelldatei_entfernen(self.dbank, self.lauf, quellpfad, L, loeschen.WEISE_ENDGUELTIG, self.byte_vergleich)
+            except OSError as fehler:
+                grund = f"{meldungen.EREIGNIS_LOESCHFEHLER}: {fehler.strerror or fehler}"
+                self.dbank.status_setzen(quellpfad, "fehler", grund)
+                self.dbank.ereignis(self.lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
+                e.loeschung_verweigert += 1
+                return
             except loeschen.Verweigert as v:
+                if str(v) == meldungen.GRUND_QUELLE_ABWEICHUNG:
+                    # Quelle hat sich zwischen Lesung und Loeschung geaendert:
+                    # nicht loeschen, neu kopieren (SPEC §5).
+                    self.dbank.zurueck_auf_analysiert_ohne_hash(quellpfad)
+                    self.dbank.ereignis(self.lauf, loeschen.ART_QUELLE_SEIT_KOPIEREN_GEAENDERT, quellpfad, 1, str(v))
+                    e.quelle_seit_kopieren += 1
+                    return
+                self.dbank.status_setzen(quellpfad, "fehler", str(v))
                 self.dbank.ereignis(self.lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, str(v))
                 e.loeschung_verweigert += 1
                 return
@@ -797,6 +828,13 @@ class _Lauf:
                 except OSError as fehler:
                     self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
                     return
+            if k != anhang:
+                # Ein Fremdprozess hat den Gruppennamen dazwischen belegt: Dieses
+                # Mitglied traegt einen anderen Anhang als die Gruppe. Nichts
+                # geht verloren; der Bericht zeigt es (SPEC §5, docs/todo.md).
+                self.dbank.ereignis(self.lauf, ART_ANHANG_ABWEICHEND, a.quelle, 1,
+                                    f"{meldungen.EREIGNIS_ANHANG_ABWEICHEND}: {db.pfad_text(endname)}")
+                e.anhang_abweichend += 1
             anhang = k
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.kopiert_setzen(a.zeile["quellpfad"], endname, a.ergebnis.hash, self.lauf)
@@ -855,6 +893,11 @@ class _Lauf:
                     # selbst angelegt. Bei "belegt" gehoert sie jemand anderem.
                     if k.art in ("ok", "abgebrochen"):
                         _entfernen_eigene(a.schreibziel)
+                elif a.fd is not None:
+                    # Rueckfall ohne .part: exklusiv angelegt, aber nie
+                    # geschrieben - keine leere Datei unter einem echten Namen
+                    # zuruecklassen (Pruefbefund).
+                    self._zuruecknehmen([a])
                 self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.offen.clear()
         self.nachpruefung.clear()   # Zeilen bleiben "kopiert"; aufraeumen holt sie nach

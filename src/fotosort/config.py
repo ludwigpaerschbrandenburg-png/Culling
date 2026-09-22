@@ -444,3 +444,4 @@ def aus_ziel_uebernehmen(ziel: Path, nach: Path) -> bool:
     nach.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(im_ziel, nach)
     return True
+

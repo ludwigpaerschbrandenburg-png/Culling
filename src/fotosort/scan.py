@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterator
 
-from . import FotosortFehler, dateitypen, meldungen, pfade
+from . import FotosortFehler, dateitypen, loeschen, meldungen, pfade
 
 # Ereignisarten in lauf_ereignisse (SPEC Abschnitt 6).
 ART_AUSGESCHLOSSEN = "ausgeschlossen"
@@ -205,6 +205,7 @@ def _ablaufen(
     Laeuft bei mehreren Quellen in einem eigenen Strang.
     """
     stapel: list[Path] = [quelle_auf]
+    ziel_kennung = pfade.ordner_kennung(ziel_auf)
 
     while stapel:
         if stop is not None and stop.is_set():
@@ -232,10 +233,21 @@ def _ablaufen(
                 if _ist_verknuepfung(eintrag) and not folgen:
                     yield Fund("verknuepfung", pfad)
                     continue
+                if loeschen.ist_papierkorb(eintrag.name):
+                    # Der Ordner _geloescht_ wird vom Scan nie angefasst
+                    # (SPEC §4 Phase 5): Sonst wuerden die dorthin geraeumten
+                    # Dateien als neue Quelldateien erfasst und beim naechsten
+                    # Aufraeumen ein zweites Mal entfernt.
+                    yield Fund("ausgeschlossen", pfad, "Ordner _geloescht_")
+                    continue
                 if ist_ausgeschlossen(relativ, muster, ordner=True):
                     yield Fund("ausgeschlossen", pfad, "Ordner")
                     continue
-                if pfade.liegt_in(pfad, ziel_auf):
+                if pfade.liegt_in(pfad, ziel_auf) or (
+                    ziel_kennung is not None and pfade.ordner_kennung(pfad) == ziel_kennung
+                ):
+                    # Auch ueber einen zweiten Pfad (Bind-Mount, zweite
+                    # Freigabe) erkannt: gleiche Geraete- und Inode-Nummer.
                     yield Fund("ins_ziel", pfad)
                     continue
                 stapel.append(pfad)

@@ -70,11 +70,13 @@ def test_standard_verschiebt_in_geloescht_ordner(baum, quelle, ziel, nachschauen
         assert neu.is_relative_to(korb) and neu.exists()
         assert hashes.blake3_datei(neu) == z["hash"]
         assert z["bestaetigt_in_lauf"] is not None
-    # Nichts ist verloren: jeder Inhalt von vorher liegt im Papierkorb, das Ziel ist unveraendert.
+    # Nichts ist verloren: Der Inhalt JEDER echten Quelldatei von vorher liegt
+    # jetzt im Papierkorb (gleicher relativer Pfad), das Ziel ist unveraendert.
     nachher = _quelldateien(korb)
-    assert sorted(vorher.values()) == sorted(list(nachher.values()) + [
-        h for rel, h in vorher.items() if rel.split("/")[0] in ("Sonstiges",) or rel.endswith((".txt", ".db", ".DS_Store"))
-    ]) or set(nachher.values()) <= set(vorher.values())
+    echte_vorher = {rel: h for rel, h in vorher.items() if str(quelle / rel) in zeilen}
+    assert echte_vorher, "Test ohne echte Dateien waere wirkungslos"
+    for rel, h in echte_vorher.items():
+        assert nachher.get(rel) == h, f"{rel} fehlt im Papierkorb oder hat anderen Inhalt"
     assert _zieldateien(ziel) == zieldateien_vorher
     # sonstiges bleibt liegen
     assert (quelle / "Sonstiges" / "notizen.txt").exists()
@@ -159,7 +161,7 @@ def test_ungepruefte_datei_wird_nie_geloescht(baum, quelle, ziel, nachschauen, a
     # Auch die Loeschstelle selbst weigert sich bei falschem Status.
     with nachschauen(ziel) as d:
         z = d.zeile(baum["analog"])
-        lesung = loeschen.frisch_lesen(baum["analog"], Path(z["zielpfad"]), False)
+        lesung = loeschen.frisch_lesen(baum["analog"], Path(z["zielpfad"]), False, lauf=99)
         with pytest.raises(loeschen.Verweigert):
             loeschen.quelldatei_entfernen(d, 99, z["quellpfad"], lesung, loeschen.WEISE_ENDGUELTIG, False)
     assert baum["analog"].exists()
@@ -371,22 +373,34 @@ def test_loeschstelle_prueft_jede_bedingung(baum, quelle, ziel, nachschauen):
         lauf = d.lauf_beginnen("test")
         z = d.zeile(baum["analog"])
         zp = Path(z["zielpfad"])
-        gut = loeschen.frisch_lesen(baum["analog"], zp, False)
+        gut = loeschen.frisch_lesen(baum["analog"], zp, False, lauf=lauf)
+
+        def wie_gut(**anders):
+            werte = dict(art="ok", quell_hash=gut.quell_hash, ziel_hash=gut.ziel_hash,
+                         quell_groesse=gut.quell_groesse, ziel_groesse=gut.ziel_groesse,
+                         lauf=lauf, quell_kennung=gut.quell_kennung)
+            werte.update(anders)
+            return loeschen.Lesung(**werte)
+
         # falscher Hash der Quelle
-        falsch = loeschen.Lesung("ok", quell_hash="x" * 64, ziel_hash=gut.ziel_hash,
-                                 quell_groesse=gut.quell_groesse, ziel_groesse=gut.ziel_groesse)
         with pytest.raises(loeschen.Verweigert):
-            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], falsch, loeschen.WEISE_ENDGUELTIG, False)
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(quell_hash="x" * 64), loeschen.WEISE_ENDGUELTIG, False)
         # falscher Hash des Ziels
-        falsch = loeschen.Lesung("ok", quell_hash=gut.quell_hash, ziel_hash="x" * 64,
-                                 quell_groesse=gut.quell_groesse, ziel_groesse=gut.ziel_groesse)
         with pytest.raises(loeschen.Verweigert):
-            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], falsch, loeschen.WEISE_ENDGUELTIG, False)
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(ziel_hash="x" * 64), loeschen.WEISE_ENDGUELTIG, False)
         # Groesse weicht ab
-        falsch = loeschen.Lesung("ok", quell_hash=gut.quell_hash, ziel_hash=gut.ziel_hash,
-                                 quell_groesse=gut.quell_groesse + 1, ziel_groesse=gut.ziel_groesse)
         with pytest.raises(loeschen.Verweigert):
-            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], falsch, loeschen.WEISE_ENDGUELTIG, False)
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(quell_groesse=gut.quell_groesse + 1), loeschen.WEISE_ENDGUELTIG, False)
+        # Lesung aus einem anderen Lauf
+        with pytest.raises(loeschen.Verweigert, match="nicht aus dem laufenden Lauf"):
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(lauf=lauf - 1), loeschen.WEISE_ENDGUELTIG, False)
+        # Lesung ohne Kennung der Quelle (keine echte Frischlesung)
+        with pytest.raises(loeschen.Verweigert):
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(quell_kennung=()), loeschen.WEISE_ENDGUELTIG, False)
+        # Kennung der Quelle passt nicht mehr (Datei zwischen Lesung und Loeschung angefasst)
+        alt_k = gut.quell_kennung
+        with pytest.raises(loeschen.Verweigert, match="seit dem Kopieren geaendert"):
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], wie_gut(quell_kennung=alt_k[:3] + (alt_k[3] + 1,) + alt_k[4:]), loeschen.WEISE_ENDGUELTIG, False)
         # unbekannte Loeschweise
         with pytest.raises(loeschen.Verweigert):
             loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], gut, "irgendwas", False)
@@ -408,9 +422,9 @@ from fotosort import loeschen, cli
 
 original = loeschen.frisch_lesen
 
-def langsam(quelle, zielpfad, byte_vergleich, stop=None):
+def langsam(quelle, zielpfad, byte_vergleich, stop=None, lauf=0):
     time.sleep(0.08)
-    return original(quelle, zielpfad, byte_vergleich, stop)
+    return original(quelle, zielpfad, byte_vergleich, stop, lauf)
 
 loeschen.frisch_lesen = langsam
 os.environ["FOTOSORT_EINGABE_ERZWINGEN"] = "1"

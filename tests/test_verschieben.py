@@ -124,10 +124,10 @@ def test_verschieben_quelle_waehrend_des_laufs_veraendert_wird_nicht_geloescht(b
     datei = baum["analog"]
     original = loeschen.frisch_lesen
 
-    def veraendern_dann_lesen(q, z, byte_vergleich, stop=None):
+    def veraendern_dann_lesen(q, z, byte_vergleich, stop=None, lauf=0):
         if Path(q) == datei:
             Path(q).write_bytes(Path(q).read_bytes() + b"neu")
-        return original(q, z, byte_vergleich, stop)
+        return original(q, z, byte_vergleich, stop, lauf)
 
     monkeypatch.setattr(kopieren.loeschen, "frisch_lesen", veraendern_dann_lesen)
     assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.OK
@@ -145,10 +145,10 @@ def test_verschieben_zieldatei_nach_dem_kopieren_veraendert_wird_nicht_geloescht
     datei = baum["analog"]
     original = loeschen.frisch_lesen
 
-    def ziel_kaputt_dann_lesen(q, z, byte_vergleich, stop=None):
+    def ziel_kaputt_dann_lesen(q, z, byte_vergleich, stop=None, lauf=0):
         if Path(q) == datei:
             Path(z).write_bytes(b"kaputt")
-        return original(q, z, byte_vergleich, stop)
+        return original(q, z, byte_vergleich, stop, lauf)
 
     monkeypatch.setattr(kopieren.loeschen, "frisch_lesen", ziel_kaputt_dann_lesen)
     assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.OK

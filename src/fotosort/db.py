@@ -73,7 +73,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quellen (
@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS dateien (
     fehlergrund             TEXT    NOT NULL DEFAULT '',
     bestaetigt_in_lauf      INTEGER,
     kopiert_in_lauf         INTEGER,
+    umbenannt               INTEGER NOT NULL DEFAULT 0,
     gefunden_in_lauf        INTEGER,
     zuletzt_gesehen_in_lauf INTEGER
 );
@@ -563,10 +564,18 @@ class Datenbank:
         if status not in STATUS:
             raise ValueError(f"Unbekannter Status: {status!r}")
         self._beginnen()
-        self.verbindung.execute(
-            "UPDATE dateien SET status = ?, fehlergrund = ? WHERE quellpfad = ?",
-            (status, fehlergrund, pfad_text(quellpfad)),
-        )
+        if status == "fehler":
+            # Ein Fehler ist keine bestaetigte Loeschung: Die Kennung "Quelle
+            # und Ziel frisch gelesen" verliert ihre Beweiskraft (Pruefbefund).
+            self.verbindung.execute(
+                "UPDATE dateien SET status = ?, fehlergrund = ?, bestaetigt_in_lauf = NULL WHERE quellpfad = ?",
+                (status, fehlergrund, pfad_text(quellpfad)),
+            )
+        else:
+            self.verbindung.execute(
+                "UPDATE dateien SET status = ?, fehlergrund = ? WHERE quellpfad = ?",
+                (status, fehlergrund, pfad_text(quellpfad)),
+            )
         self._vielleicht_schreiben()
 
     def zeile(self, quellpfad) -> sqlite3.Row | None:
@@ -838,7 +847,7 @@ class Datenbank:
             (pfad_text(quellwurzel), gruppe),
         ).fetchall()
 
-    def kopieren_beanspruchen(self, quellpfad, zielpfad, schreibpfad, lauf: int) -> None:
+    def kopieren_beanspruchen(self, quellpfad, zielpfad, schreibpfad, lauf: int, umbenannt: bool = False) -> None:
         """Zielpfad beanspruchen, BEVOR geschrieben wird (SPEC §5).
 
         zielpfad ist der berechnete Name (ohne Anhang), schreibpfad die Datei,
@@ -848,8 +857,8 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'kopieren_laeuft', zielpfad = ?, schreibpfad = ?,"
-            " kopiert_in_lauf = ? WHERE quellpfad = ?",
-            (pfad_text(zielpfad), pfad_text(schreibpfad), lauf, pfad_text(quellpfad)),
+            " kopiert_in_lauf = ?, umbenannt = ?, bestaetigt_in_lauf = NULL WHERE quellpfad = ?",
+            (pfad_text(zielpfad), pfad_text(schreibpfad), lauf, int(bool(umbenannt)), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
 
@@ -866,7 +875,7 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'kopiert', zielpfad = ?, schreibpfad = '', hash = ?,"
-            " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
+            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
             (pfad_text(zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -876,7 +885,7 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'duplikat', zielpfad = ?, schreibpfad = '', hash = ?,"
-            " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
+            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
             (pfad_text(partner_zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -885,7 +894,7 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'analysiert', zielpfad = ?, schreibpfad = '',"
-            " kopiert_in_lauf = NULL WHERE quellpfad = ?",
+            " kopiert_in_lauf = NULL, bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
             (pfad_text(zielpfad), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -1020,7 +1029,12 @@ class Datenbank:
 
     # -- Aufraeumen und Verschieben (SPEC Abschnitt 4 Phase 5, Abschnitt 5) ---
 
-    ZU_LOESCHEN_SQL = "status IN ('geprueft', 'duplikat_bestaetigt') AND zielpfad != ''"
+    # Zeilen unter einem Ordner _geloescht_ sind nie Kandidaten: Der
+    # Papierkorb wird vom Aufraeumen nie angefasst (SPEC §4 Phase 5).
+    ZU_LOESCHEN_SQL = (
+        "status IN ('geprueft', 'duplikat_bestaetigt') AND zielpfad != ''"
+        " AND instr(quellpfad, '/_geloescht_') = 0 AND instr(quellpfad, '\\_geloescht_') = 0"
+    )
 
     def zu_loeschen_summe(self, quellwurzeln=None) -> dict[str, tuple[int, int]]:
         """Je Quellwurzel (Anzahl, Bytes) der loeschberechtigten Zeilen."""

@@ -28,7 +28,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from . import db, fortschritt, hashes, loeschen, meldungen, pfade
+from . import dateitypen, db, fortschritt, hashes, loeschen, meldungen, pfade, scan
 from .kopieren import worker_zahlen
 from .scan import ART_QUELLE_NICHT_ERREICHBAR
 
@@ -126,7 +126,7 @@ def ausfuehren(
                     wurzel, [z["quellpfad"] for z in zeilen], max(0, n - len(zeilen))))
             if leere_ordner:
                 liste: list[Path] = []
-                _ordner_leeren(pfad, pfad, ziel, reste, dbank, lauf, e, True, liste, melden=False)
+                _ordner_leeren(pfad, pfad, ziel, reste, konf, dbank, lauf, e, True, liste, melden=False)
                 e.dry_run_ordner[wurzel] = liste
                 if konsole is not None:
                     konsole.print(meldungen.aufraeumen_ordner_dry_run(wurzel, [str(o) for o in liste]))
@@ -155,12 +155,12 @@ def ausfuehren(
                 # Vorlauf: zaehlen und melden, nichts anfassen. Ernstfall erst
                 # nach Bestaetigung; dort wird nur noch entfernt, nicht gezaehlt.
                 liste: list[Path] = []
-                _ordner_leeren(pfad, pfad, ziel, reste, dbank, lauf, e, True, liste, melden=True)
+                _ordner_leeren(pfad, pfad, ziel, reste, konf, dbank, lauf, e, True, liste, melden=True)
                 if liste and (bestaetigen_ordner is None or not bestaetigen_ordner(wurzel, len(liste))):
                     if konsole is not None:
                         konsole.print(meldungen.aufraeumen_uebersprungen(wurzel))
                 elif liste:
-                    _ordner_leeren(pfad, pfad, ziel, reste, dbank, lauf, e, False, [], melden=False)
+                    _ordner_leeren(pfad, pfad, ziel, reste, konf, dbank, lauf, e, False, [], melden=False)
     except KeyboardInterrupt:
         e.abgebrochen = True
         stop.set()
@@ -189,7 +189,7 @@ def _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_
             for z in seite:
                 zukunft = pool.submit(
                     loeschen.frisch_lesen, Path(db.text_pfad(z["quellpfad"])),
-                    Path(db.text_pfad(z["zielpfad"])), byte_vergleich, stop,
+                    Path(db.text_pfad(z["zielpfad"])), byte_vergleich, stop, lauf,
                 )
                 offen.append((z, zukunft))
         if not offen:
@@ -213,6 +213,15 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
         return
     try:
         neu = loeschen.quelldatei_entfernen(dbank, lauf, quellpfad, L, weise, byte_vergleich, papierkorb)
+    except OSError as fehler:
+        # Schreibschutz, fehlende Rechte, nur lesbar eingebundene Freigabe:
+        # Diese eine Datei bekommt Status fehler, der Lauf geht weiter
+        # (SPEC §5). Die Quelle ist noch da.
+        grund = f"{meldungen.EREIGNIS_LOESCHFEHLER}: {fehler.strerror or fehler}"
+        dbank.status_setzen(quellpfad, "fehler", grund)
+        dbank.ereignis(lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
+        e.verweigert += 1
+        return
     except loeschen.Verweigert as v:
         grund = str(v)
         if grund == meldungen.GRUND_QUELLE_ABWEICHUNG:
@@ -264,7 +273,7 @@ def _quelle_fehlt(z, dbank, lauf, e) -> None:
 # ------------------------------------------------------- Leere Ordner ---
 
 
-def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], dbank, lauf, e,
+def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], konf, dbank, lauf, e,
                    dry_run: bool, liste: list[Path], melden: bool) -> bool:
     """Liefert True, wenn der Ordner leer ist (oder es nach dem Entfernen der
     Reste waere). Entfernt im Ernstfall Reste und dann den Ordner selbst -
@@ -286,15 +295,19 @@ def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], dbank
     leer = leer_unten
     for k in kinder:
         kind = pfad / k.name
-        if k.is_symlink():
+        if scan._ist_verknuepfung(k):
+            # Symlink oder Windows-Junction: nie betreten, macht den Ordner nicht leer.
             leer = False
             continue
         if k.is_dir(follow_symlinks=False):
-            if not _ordner_leeren(kind, wurzel, ziel, reste, dbank, lauf, e, dry_run, liste, melden):
+            if not _ordner_leeren(kind, wurzel, ziel, reste, konf, dbank, lauf, e, dry_run, liste, melden):
                 leer = False
             continue
         if k.name.lower() in reste:
-            if dbank.echter_typ_bekannt(kind):
+            # Ein Rest muss auch nach seiner Endung "sonstiges" sein. Sonst
+            # koennte ein Foto, das nach dem Scan dazukam (keine Zeile), ueber
+            # einen Eintrag wie "beute.jpg" in reste_dateien verschwinden.
+            if dbank.echter_typ_bekannt(kind) or dateitypen.typ_von(k.name, konf) != dateitypen.SONSTIGES:
                 # Name aus reste_dateien, aber ein echtes Foto/Video: bleibt.
                 if melden:
                     e.reste_verweigert += 1

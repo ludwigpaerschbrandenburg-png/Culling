@@ -45,7 +45,6 @@ Culling/ (Repository-Wurzel)
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
-│  ├─ aufraeumen.py          Phase 5+6: löschen             ← nur nach Statusprüfung
 │  └─ bericht.py             Text- und CSV-Bericht
 └─ tests/
    ├─ testbaum.py            erzeugt den künstlichen Testbaum
@@ -189,6 +188,7 @@ Die Spalten sind dieselben wie in SPEC §6; hier steht zu jeder, wofür sie gebr
 | `status` | siehe unten |
 | `fehlergrund` | Klartext bei `fehler` und `uebersprungen`, landet so im Bericht; sonst leer |
 | `bestaetigt_in_lauf` | Nummer des Laufs, in dem Quelldatei **und** Zieldatei zuletzt frisch gelesen und ihre Hashes verglichen wurden — gilt für `geprueft` und `duplikat_bestaetigt` gleichermaßen |
+| `umbenannt` | 1, wenn der laufende Anspruch (`kopieren_laeuft`) ein Verschieben durch Umbenennen ist; so erkennt der nächste Start nach einem Absturz ein fertiges Umbenennen (Quelle weg, Zieldatei da) |
 | `gefunden_in_lauf` | Nummer des Laufs, in dem diese Zeile angelegt wurde |
 | `zuletzt_gesehen_in_lauf` | Nummer des letzten Laufs, in dem der Quellpfad beim Scan noch vorhanden war. Daran wird „Quelle nicht mehr vorhanden" erkannt |
 

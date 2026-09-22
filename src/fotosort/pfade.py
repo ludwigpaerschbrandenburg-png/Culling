@@ -199,15 +199,50 @@ def liegt_in(kind: Path, eltern: Path) -> bool:
         return False
 
 
+def ordner_kennung(p: Path) -> tuple | None:
+    """(Geraet, Inode) eines vorhandenen Ordners; None, wenn es ihn nicht
+    gibt oder das System keine Inode-Nummern liefert."""
+    try:
+        st = os.stat(lang(p))
+    except OSError:
+        return None
+    if not st.st_ino:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _liegt_in_nach_kennung(kind: Path, eltern: Path) -> bool:
+    """Wie liegt_in, aber ueber Geraete- und Inode-Nummern der Ordnerkette:
+    erkennt denselben Ordner auch ueber einen zweiten Pfad (Bind-Mount,
+    zweite Netzfreigabe), den resolve() nicht zusammenfuehrt."""
+    ke = ordner_kennung(eltern)
+    if ke is None:
+        return False
+    p = aufloesen(kind)
+    while True:
+        if ordner_kennung(p) == ke:
+            return True
+        if p.parent == p:
+            return False
+        p = p.parent
+
+
 def lage_pruefen(quelle: Path, ziel: Path) -> str:
-    """"gleich" | "ziel_in_quelle" | "quelle_in_ziel" | "getrennt"."""
+    """"gleich" | "ziel_in_quelle" | "quelle_in_ziel" | "getrennt".
+
+    Erst ueber die aufgeloesten Pfade, dann ueber Geraete- und
+    Inode-Nummern (SPEC §4 Phase 1: derselbe Ort ueber zwei Pfade).
+    """
     q = aufloesen(quelle)
     z = aufloesen(ziel)
     if q == z:
         return "gleich"
-    if liegt_in(z, q):
+    kq, kz = ordner_kennung(q), ordner_kennung(z)
+    if kq is not None and kq == kz:
+        return "gleich"
+    if liegt_in(z, q) or _liegt_in_nach_kennung(z, q):
         return "ziel_in_quelle"
-    if liegt_in(q, z):
+    if liegt_in(q, z) or _liegt_in_nach_kennung(q, z):
         return "quelle_in_ziel"
     return "getrennt"
 

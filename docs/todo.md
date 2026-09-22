@@ -192,6 +192,46 @@ Frischlesung beider Seiten → Löschen über die Löschstelle).
 - **Kein Test mit einer zweiten physischen Platte im Container:** „gleiches Laufwerk" wird in den
   Tests durch Nachstellen (immer nein bzw. tmp_path) geprüft; das echte Umbenennen zwischen zwei
   Laufwerksbuchstaben unter Windows prüft `fotosort messen` bzw. der erste Lauf mit Kopien.
+- **Endgültiges Löschen liest die Quelle zweimal.** Nach dem Angriff „Quelle zwischen Frischlesung
+  und Löschen ändern" (siehe unten) wird bei `--endgueltig` und `kopieren --verschieben` die Quelle
+  unmittelbar vor dem `unlink` noch einmal vollständig gelesen. Das kostet beim Aufräumen von
+  50.000 Dateien (4,2 GB) im Container rund die Hälfte mehr Lesezeit (gemessen in Phase 6, siehe
+  dort). Beim Standard (Ordner `_geloescht_`) nicht nötig, weil der aktuelle Inhalt mitwandert.
+- **Ein Rest muss auch nach seiner Endung „sonstiges" sein.** Ein Eintrag wie `beute.jpg` in
+  `reste_dateien` löscht nie ein Foto, auch keines ohne Zeile in der Datenbank. Die Standardliste
+  ist davon nicht betroffen.
+- **Schema-Version 6** (neue Spalte `umbenannt`). Es gibt noch keine echten Daten, daher keine
+  Migration; eine ältere Datenbank wird wie bisher abgelehnt.
+
+### Aus der Prüfung von Phase 5 (zwei unabhängige Prüfer, einer als Angreifer)
+
+Alle Funde sind behoben, jeder mit einem Test in `tests/test_pruefbefunde.py`:
+
+- [x] **VERLUST MÖGLICH — Quelle und Ziel dieselbe Datei über zwei Pfade** (Bind-Mount, zweite
+      Freigabe, Hardlink): Der zweite Zyklus hätte die Archivdateien selbst gelöscht. Jetzt: Vergleich
+      von Geräte-/Inode-Nummer und aufgelöstem Pfad vor jeder Löschung; Scan und Lage-Prüfung erkennen
+      das Ziel auch über den zweiten Pfad.
+- [x] **VERLUST (Angreifer) — Quelle zwischen Frischlesung und `unlink` verändert** (gleiche Größe,
+      Änderungszeit zurückgestellt): wurde bei `--endgueltig` und `--verschieben` gelöscht. Jetzt:
+      Kennung der Quelle (Gerät, Inode, Größe, mtime, ctime) vor der Lesung festgehalten und direkt vor
+      dem Entfernen verglichen; beim endgültigen Löschen zusätzlich vollständige zweite Lesung.
+- [x] **Reste-Datei mit Fotoinhalt ohne Datenbankzeile** (`beute.jpg` in `reste_dateien`) wurde
+      entfernt. Jetzt: Rest nur, wenn die Endung `sonstiges` ist.
+- [x] Ordner `_geloescht_` wurde vom nächsten Scan erfasst und beim nächsten Aufräumen ein zweites
+      Mal entfernt. Jetzt: Scan überspringt ihn in jeder Tiefe, Aufräumen wählt ihn nie aus.
+- [x] Betriebssystemfehler beim Entfernen (Schreibschutz) brach den Lauf ab. Jetzt: nur die eine Datei
+      `fehler`, Lauf läuft weiter, Bericht wird geschrieben.
+- [x] Absturz nach dem Umbenennen, vor dem Festschreiben von `verschoben`, endete in „Quelldatei
+      nicht mehr vorhanden". Jetzt: Spalte `umbenannt`, Status wird nachgetragen.
+- [x] Frischlesung trug keine Laufnummer; `bestaetigt_in_lauf` wurde bei Neukopie nicht geleert.
+- [x] Papierkorb-Rückfall (exFAT) prüfte die geschriebene Kopie nicht durch Zurücklesen.
+- [x] Windows-Junctions in `--leere-ordner` wurden wie Ordner betreten (jetzt `_ist_verknuepfung`).
+- [x] Abbruch im exFAT-Rückfall ließ leere Dateien unter Archivnamen liegen.
+- [x] Namensanhang konnte sich in einer Gruppe aufspalten (Fremdprozess dazwischen): jetzt Ereignis
+      `anhang_abweichend` im Bericht.
+- [x] Fehlermeldung nannte bei kaputter Zielkopie die Quelle („Quelle 160, Ziel 159"); jetzt „Zieldatei
+      hat die falsche Groesse … die Quelle ist in Ordnung".
+- [x] Schwache Zusicherung in `test_standard_verschiebt_in_geloescht_ordner` ersetzt.
 
 ---
 

@@ -1010,6 +1010,11 @@ GRUND_PAPIERKORB_KOPIE = "Loeschung verweigert: Kopie in den Ordner _geloescht_ 
 GRUND_QUELLE_FEHLT_LOESCHEN = "Loeschung verweigert: Quelldatei nicht mehr vorhanden"
 GRUND_ZIEL_FEHLT_LOESCHEN = "Loeschung verweigert: Zieldatei nicht mehr vorhanden"
 GRUND_VERSCHIEBEN_GROESSE = "Verschieben: Zieldatei nach dem Umbenennen nicht vorhanden oder Groesse weicht ab"
+GRUND_DIESELBE_DATEI = "Loeschung verweigert: Quelle und Ziel sind dieselbe Datei (derselbe Speicherort ueber zwei Pfade)"
+GRUND_LESUNG_FREMDER_LAUF = "Loeschung verweigert: Frischlesung stammt nicht aus dem laufenden Lauf"
+EREIGNIS_VERSCHOBEN_NACHGETRAGEN = "Umbenennen aus abgebrochenem Lauf war fertig (Quelle weg, Zieldatei mit passender Groesse da) - Status verschoben nachgetragen"
+EREIGNIS_ANHANG_ABWEICHEND = "Namensanhang weicht innerhalb der Gruppe ab (ein anderes Programm hat den Namen dazwischen belegt)"
+EREIGNIS_LOESCHFEHLER = "Betriebssystemfehler beim Entfernen - Quelle bleibt"
 EREIGNIS_GELOESCHT = "Quelldatei endgueltig geloescht"
 EREIGNIS_NACHGETRAGEN = "Loeschung aus abgebrochenem Lauf nachgetragen (Quelle fehlt, Ziel stimmt, Frischlesung war festgeschrieben)"
 EREIGNIS_REST_NICHT_ENTFERNT = "Name in reste_dateien, steht aber mit echtem Dateityp in der Datenbank - nicht entfernt"
@@ -1030,6 +1035,11 @@ def grund_lesung(art: str) -> str:
 
 
 def grund_groesse_abweichung(erwartet: int, quelle: int, ziel: int) -> str:
+    if quelle == erwartet:
+        return (
+            f"Loeschung verweigert: Zieldatei hat die falsche Groesse (gespeichert {anzahl(erwartet)} Byte,"
+            f" Ziel {anzahl(ziel)}); die Quelle ist in Ordnung"
+        )
     return (
         f"Loeschung verweigert: Groesse weicht ab (gespeichert {anzahl(erwartet)} Byte,"
         f" Quelle {anzahl(quelle)}, Ziel {anzahl(ziel)})"
@@ -1175,3 +1185,4 @@ def quelle_unbekannt(pfad) -> str:
 
 def aufraeumen_dry_run_schluss() -> str:
     return "Probelauf (--dry-run): Es wurde nichts geloescht und kein Lauf angelegt."
+
