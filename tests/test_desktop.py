@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from fotosort import cli, meldungen  # noqa: E402
 from fotosort.oberflaeche import ablauf as ablauf_modul  # noqa: E402
 from fotosort.oberflaeche import desktop, meldungsfenster, stil  # noqa: E402
+from test_unterbrechungen import _hart_beenden, _kopierte, _pruefen_gleich, grosse_quelle, referenz  # noqa: E402,F401
 
 
 @pytest.fixture(scope="module")
@@ -125,6 +126,67 @@ def test_rueckfragen_und_archiv_verwerfen_im_fenster(app, tmp_path, quelle, ziel
     assert ab.ziel == "" and f.start.ziel.text() == "" and f.ansicht == "start"
     assert not f.start.verwerfen.isVisible() and "verworfen" in f.meldung_label.text()
     assert not antworten
+    f.close()
+
+
+def _bis_im_fenster(app, bedingung, sekunden: float = 240.0) -> None:
+    ende = time.monotonic() + sekunden
+    while time.monotonic() < ende:
+        app.processEvents()
+        if bedingung():
+            return
+        time.sleep(0.02)
+    raise AssertionError("im Fenster nicht eingetreten")
+
+
+def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle, ziel, referenz, nachschauen):
+    """Teil 3 im Fenster: Fenster waehrend des Scans schliessen, neu oeffnen (zeigt
+    den Lauf), Analyse und Kopieren per Knopf, harter Abschuss mitten im Kopieren
+    (Anzeige: unerwartet beendet, Protokoll sichtbar, Knopf zum Weitermachen),
+    noch einmal neu oeffnen, "Weitermachen" - am Ende wie der Referenzlauf."""
+    ordner = tmp_path / "ob"
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    f.quelle_hinzufuegen(str(grosse_quelle))
+    f.los(False)
+    assert f.ansicht == "haupt" and f.poll.isActive()
+    f.close()                                                   # Fenster zu, Scan laeuft weiter
+    _ereignisse(app, 0.2)
+
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.show()
+    _ereignisse(app, 0.6)
+    assert f.ansicht == "haupt" and "Quellen durchsuchen" in f.haupt.aktuell.text() or f.in_ruhe()
+    _bis_im_fenster(app, f.in_ruhe)
+    assert f.primaer().text().startswith("Analyse starten")
+    f.primaer().click()
+    _bis_im_fenster(app, f.in_ruhe)
+    assert f.primaer().text().startswith("Kopieren starten")
+    f.primaer().click()
+    _bis_im_fenster(app, lambda: f.ab.lauf is not None and f.ab.lauf.schritt == "kopieren", 30)
+    pid = f.ab.lauf.pid
+    _bis_im_fenster(app, lambda: _kopierte(ziel) >= 200, 120)
+    _hart_beenden(pid)
+    _bis_im_fenster(app, lambda: f.lauf.get("zustand") == "abgestuerzt", 60)
+    _bis_im_fenster(app, f.in_ruhe, 30)
+    assert f.haupt.log.isVisible() and "unerwartet" in f.haupt.aktuell.text().lower()
+    assert f.primaer().text().startswith("Kopieren starten")     # Weitermachen genau hier
+    f.close()
+
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.show()
+    _ereignisse(app, 0.5)
+    assert f.ansicht == "start" and f.start.weitermachen.isEnabled()
+    assert f.start.weitermachen.text() == "Weitermachen: Kopieren"
+    f.start.weitermachen.click()
+    _bis_im_fenster(app, f.in_ruhe, 30)
+    assert f.primaer().text().startswith("Kopieren starten")
+    f.primaer().click()
+    _bis_im_fenster(app, lambda: f.in_ruhe() and f.lauf.get("zustand") == "fertig")
+    assert f.primaer().text().startswith("Prüfen starten")
+    _pruefen_gleich(f.ab, ziel, referenz, nachschauen)
     f.close()
 
 

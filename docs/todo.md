@@ -447,6 +447,18 @@ Version 0.2.0, Release v0.2.
       Bilddateien in den Programmordnern. Danach Startseite leer.
 - [x] **Datenmenge je Quelle** im Scan-Ergebnis (Fenster, `status`, Befehl `scan`) zählt nur
       erfasste Dateien (Foto, RAW, Video, Sidecar), nicht die „sonstigen“.
+- [x] **Unterbrechungen in jeder Kombination geprüft** (`tests/test_unterbrechungen.py`, dazu ein
+      Test im Fenster): Abbrechen mitten im Kopieren → Fenster zu → neu auf → Weitermachen; harter
+      Abschuss des Arbeitsprozesses (SIGKILL/TerminateProcess) dreimal an verschiedenen Stellen;
+      „Sofort beenden“; Pause → Fenster zu → neues Fenster übernimmt den pausierten Lauf →
+      Fortsetzen; Fenster zu während des Scans, Abbruch in der Analyse; zweites Fenster kann
+      nichts doppelt starten. Maßstab ist ein ungestörter Referenzlauf über dieselbe Quelle
+      (2.000 eindeutige Dateien): Zielbaum Datei für Datei gleich, keine `.part`-Reste, kein
+      Zielpfad doppelt, kein offener Anspruch, Zähler je Status identisch, Anzeige nennt den Stand
+      (abgebrochen / unerwartet beendet mit Protokoll / Weitermachen beim richtigen Schritt).
+      Kein Fehler gefunden. Bekannte Eigenheit: Pause und Abbruch greifen bei der nächsten
+      Fortschrittsmeldung, frühestens 0,5 s nach der vorigen — ein Schritt, der schneller fertig
+      ist, läuft einfach zu Ende.
 
 ### Entscheidungen für den Nutzer
 
