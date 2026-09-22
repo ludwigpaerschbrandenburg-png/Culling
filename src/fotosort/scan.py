@@ -192,6 +192,17 @@ class Fund:
     zeigt_ins_ziel: bool = False
 
 
+def _liegt_in_aufgeloest(kind_auf: Path, eltern_auf: Path) -> bool:
+    """liegt_in fuer zwei schon aufgeloeste Pfade - ohne erneutes resolve()."""
+    k = os.path.normcase(str(kind_auf))
+    e = os.path.normcase(str(eltern_auf))
+    if k == e:
+        return True
+    if not e.endswith(os.sep):
+        e += os.sep
+    return k.startswith(e)
+
+
 def _ablaufen(
     quelle_auf: Path,
     ziel_auf: Path,
@@ -203,14 +214,21 @@ def _ablaufen(
     """Reiner Dateisystem-Durchlauf einer Quelle. Kein Datenbankzugriff.
 
     Laeuft bei mehreren Quellen in einem eigenen Strang.
+
+    Tempo (Phase 6): Der aufgeloeste Pfad wird je ORDNER mitgefuehrt, nicht
+    je Datei neu berechnet. Eine gewoehnliche Datei in einem gewoehnlichen
+    Ordner loest sich immer zu <aufgeloester Ordner>/<Name> auf; nur
+    Verknuepfungen brauchen resolve(). Vorher kostete resolve() je Datei
+    drei Viertel der Scan-Zeit (50.000 Dateien: 150.000 Aufrufe).
     """
-    stapel: list[Path] = [quelle_auf]
+    # (Pfad wie in der Quelle, aufgeloester Pfad, Pfad relativ zur Wurzel)
+    stapel: list[tuple[Path, Path, str]] = [(quelle_auf, quelle_auf, "")]
     ziel_kennung = pfade.ordner_kennung(ziel_auf)
 
     while stapel:
         if stop is not None and stop.is_set():
             return
-        ordner = stapel.pop()
+        ordner, ordner_auf, ordner_rel = stapel.pop()
         try:
             with os.scandir(pfade.lang(ordner)) as eintraege:
                 gesammelt = sorted(eintraege, key=lambda e: e.name)
@@ -221,8 +239,9 @@ def _ablaufen(
             continue
 
         for eintrag in gesammelt:
+            name = eintrag.name
             pfad = pfade.kurz(eintrag.path)
-            relativ = _relativ(pfad, quelle_auf)
+            relativ = f"{ordner_rel}/{name}" if ordner_rel else name
 
             try:
                 ist_ordner = eintrag.is_dir(follow_symlinks=True)
@@ -230,10 +249,11 @@ def _ablaufen(
                 ist_ordner = False
 
             if ist_ordner:
-                if _ist_verknuepfung(eintrag) and not folgen:
+                verknuepft = _ist_verknuepfung(eintrag)
+                if verknuepft and not folgen:
                     yield Fund("verknuepfung", pfad)
                     continue
-                if loeschen.ist_papierkorb(eintrag.name):
+                if loeschen.ist_papierkorb(name):
                     # Der Ordner _geloescht_ wird vom Scan nie angefasst
                     # (SPEC §4 Phase 5): Sonst wuerden die dorthin geraeumten
                     # Dateien als neue Quelldateien erfasst und beim naechsten
@@ -243,26 +263,30 @@ def _ablaufen(
                 if ist_ausgeschlossen(relativ, muster, ordner=True):
                     yield Fund("ausgeschlossen", pfad, "Ordner")
                     continue
-                if pfade.liegt_in(pfad, ziel_auf) or (
+                kind_auf = pfade.aufloesen(pfad) if verknuepft else ordner_auf / name
+                if _liegt_in_aufgeloest(kind_auf, ziel_auf) or (
                     ziel_kennung is not None and pfade.ordner_kennung(pfad) == ziel_kennung
                 ):
                     # Auch ueber einen zweiten Pfad (Bind-Mount, zweite
                     # Freigabe) erkannt: gleiche Geraete- und Inode-Nummer.
                     yield Fund("ins_ziel", pfad)
                     continue
-                stapel.append(pfad)
+                stapel.append((pfad, kind_auf, relativ))
                 continue
 
             if ist_ausgeschlossen(relativ, muster):
                 yield Fund("ausgeschlossen", pfad, "Datei")
                 continue
 
-            aufgeloest = pfade.aufloesen(pfad)
+            # Nur eine Verknuepfung kann woandershin zeigen (SPEC §4 Phase 1).
+            zeigt_ins_ziel = False
+            if _ist_verknuepfung(eintrag):
+                zeigt_ins_ziel = _liegt_in_aufgeloest(pfade.aufloesen(pfad), ziel_auf)
             fund = Fund(
                 "datei",
                 pfad,
-                typ=dateitypen.typ_von(eintrag.name, konf),
-                zeigt_ins_ziel=pfade.liegt_in(aufgeloest, ziel_auf),
+                typ=dateitypen.typ_von(name, konf),
+                zeigt_ins_ziel=zeigt_ins_ziel,
             )
             try:
                 werte = eintrag.stat(follow_symlinks=True)

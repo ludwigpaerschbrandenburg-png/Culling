@@ -811,6 +811,26 @@ class Datenbank:
             ),
         }
 
+    def analyse_zuruecksetzen_nach_modell(self, modelle: list[str]) -> int:
+        """Gefuehrter Modus: Nach neu eingetragenen Aliasen die betroffenen
+        analysierten Zeilen samt Gruppenmitgliedern auf 'gefunden' stellen,
+        damit die Analyse Kamera-Ordner und Zielpfad neu berechnet. Nur
+        Status analysiert - schon kopierte Dateien bleiben, wo sie sind."""
+        if not modelle:
+            return 0
+        self.stapel_schreiben()
+        self._beginnen()
+        klein = [m.strip().lower() for m in modelle]
+        platz = ",".join("?" * len(klein))
+        cursor = self.verbindung.execute(
+            "UPDATE dateien SET status = 'gefunden', zielpfad = '' WHERE status = 'analysiert'"
+            f" AND (LOWER(kamera_modell) IN ({platz}) OR (gruppe != '' AND gruppe IN"
+            f" (SELECT gruppe FROM dateien WHERE status = 'analysiert' AND LOWER(kamera_modell) IN ({platz}))))",
+            klein + klein,
+        )
+        self.stapel_schreiben()
+        return int(cursor.rowcount)
+
     # -- Kopieren (SPEC Abschnitt 4 Phase 3, Abschnitt 5) -----------------
 
     def zu_kopieren_summe(self, quellwurzeln=None) -> tuple[int, int]:

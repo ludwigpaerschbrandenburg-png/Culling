@@ -38,6 +38,7 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
         "wiederherstellen",
         "config",
         "start",
+        "messen",
     }
 
 
@@ -46,7 +47,6 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
     [
         ("ziel-index", 3),
         ("wiederherstellen", 3),
-        ("start", 6),
     ],
 )
 def test_spaetere_phase_meldet_freundlich_und_endet_ungleich_null(

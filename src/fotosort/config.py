@@ -445,3 +445,59 @@ def aus_ziel_uebernehmen(ziel: Path, nach: Path) -> bool:
     shutil.copyfile(im_ziel, nach)
     return True
 
+
+def aliase_ergaenzen(pfad: Path, neue: dict[str, str]) -> None:
+    """Alias-Zeilen in die Tabelle [kamera.aliase] der config.toml eintragen.
+
+    Der einzige Fall, in dem das Programm die Konfigurationsdatei anfasst -
+    und nur, weil der Nutzer es im gefuehrten Modus ausdruecklich verlangt
+    hat. Kommentare und alle anderen Zeilen bleiben unveraendert. Ein schon
+    vorhandener Alias fuer dasselbe Modell wird ersetzt. Geschrieben wird
+    erst, wenn das Ergebnis als TOML gueltig ist und die neuen Werte darin
+    stehen; sonst bleibt die Datei, wie sie war.
+    """
+    import os
+    pfad = Path(pfad)
+    if not neue:
+        return
+    text = pfad.read_text(encoding="utf-8") if pfad.exists() else vorlage_text()
+    zeilen = text.splitlines(keepends=True)
+    if zeilen and not zeilen[-1].endswith("\n"):
+        zeilen[-1] += "\n"
+    kopf = next((i for i, z in enumerate(zeilen) if z.strip() == "[kamera.aliase]"), None)
+    if kopf is None:
+        zeilen += ["\n", "[kamera.aliase]\n"]
+        kopf = len(zeilen) - 1
+    ende = len(zeilen)
+    for j in range(kopf + 1, len(zeilen)):
+        if zeilen[j].lstrip().startswith("["):
+            ende = j
+            break
+    # Vorhandene Eintraege fuer dieselben Modelle ersetzen (Vergleich ohne
+    # Gross-/Kleinschreibung, so wie kamera.py die Tabelle liest).
+    rest = dict(neue)
+    for j in range(kopf + 1, ende):
+        try:
+            paar = tomllib.loads(zeilen[j])
+        except tomllib.TOMLDecodeError:
+            continue
+        for schluessel in list(paar):
+            for modell in list(rest):
+                if schluessel.strip().lower() == modell.strip().lower():
+                    zeilen[j] = f"{_toml_wert(modell)} = {_toml_wert(rest.pop(modell))}\n"
+    while ende > kopf + 1 and zeilen[ende - 1].strip() == "":
+        ende -= 1
+    zeilen[ende:ende] = [f"{_toml_wert(k)} = {_toml_wert(v)}\n" for k, v in rest.items()]
+    neu = "".join(zeilen)
+    try:
+        geparst = tomllib.loads(neu)
+    except tomllib.TOMLDecodeError as fehler:
+        raise FotosortFehler(meldungen.config_alias_nicht_geschrieben(pfad, next(iter(neue)))) from fehler
+    tabelle = geparst.get("kamera", {}).get("aliase", {})
+    for modell, name in neue.items():
+        if tabelle.get(modell) != name:
+            raise FotosortFehler(meldungen.config_alias_nicht_geschrieben(pfad, modell))
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    vorlaeufig = pfad.with_name(pfad.name + ".neu")
+    vorlaeufig.write_text(neu, encoding="utf-8")
+    os.replace(vorlaeufig, pfad)

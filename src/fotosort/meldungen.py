@@ -1186,3 +1186,227 @@ def quelle_unbekannt(pfad) -> str:
 def aufraeumen_dry_run_schluss() -> str:
     return "Probelauf (--dry-run): Es wurde nichts geloescht und kein Lauf angelegt."
 
+
+# ------------------------------------------------- Gefuehrter Modus -----
+
+
+def start_keine_eingabe() -> str:
+    return (
+        "Der gefuehrte Modus stellt Fragen und braucht dafuer ein Terminal.\n"
+        "Ohne Terminal (Pipe, Skript, Aufgabenplanung) bitte die einzelnen Befehle\n"
+        "benutzen: scan, analyse, kopieren, pruefen, aufraeumen."
+    )
+
+
+def start_begruessung() -> str:
+    return (
+        "fotosort - gefuehrter Ablauf\n"
+        "Es werden ein paar Fragen gestellt; danach laufen die Schritte nacheinander,\n"
+        "und vor jedem Schritt wird gefragt. Enter allein nimmt den Vorschlag in\n"
+        "eckigen Klammern. Abbrechen jederzeit mit Strg+C - das Bisherige bleibt\n"
+        "gespeichert, und 'fotosort start' macht spaeter an derselben Stelle weiter."
+    )
+
+
+def start_frage_ziel() -> str:
+    return "Zielordner des Archivs (dorthin werden die Bilder sortiert): "
+
+
+def start_ziel_fehlt(ziel) -> str:
+    return f"Den Ordner {ziel} gibt es noch nicht."
+
+
+def start_frage_ziel_anlegen() -> str:
+    return "Soll er angelegt werden? (ja/nein) [nein]: "
+
+
+def start_quellen_bekannt(quellen: list) -> str:
+    zeilen = ["Bekannte Quellordner dieses Archivs:"]
+    zeilen += [f"  {q}" for q in quellen]
+    return "\n".join(zeilen)
+
+
+def start_frage_quelle(weitere: bool) -> str:
+    if weitere:
+        return "Weiterer Quellordner (leer = keiner mehr): "
+    return "Quellordner mit den unsortierten Bildern: "
+
+
+def start_quelle_noetig() -> str:
+    return "Ohne mindestens einen Quellordner kann nichts sortiert werden."
+
+
+def start_quelle_schon_dabei(pfad) -> str:
+    return f"Schon dabei: {pfad}"
+
+
+def start_frage_modus() -> str:
+    return (
+        "Kopieren (Quelle bleibt unveraendert, aufraeumen spaeter) oder\n"
+        "Verschieben (Quelle wird nach gelungener Pruefung Datei fuer Datei geloescht)?\n"
+        "(k = kopieren, v = verschieben) [k]: "
+    )
+
+
+def start_frage_profil(standard: str) -> str:
+    return (
+        "Wo liegt das Ziel? hdd = Festplatte, ssd = SSD, netzwerk = Netzlaufwerk"
+        f" [{standard}]: "
+    )
+
+
+def start_zusammenfassung(ziel, quellen: list, verschieben: bool, profil: str, phase_text: str) -> str:
+    zeilen = [
+        "",
+        "Zusammenfassung",
+        f"  Ziel:     {ziel}",
+        "  Quellen:  " + (", ".join(str(q) for q in quellen) if quellen else "(keine)"),
+        f"  Modus:    {'verschieben' if verschieben else 'kopieren'}",
+        f"  Profil:   {profil}",
+        f"  {phase_text}",
+    ]
+    return "\n".join(zeilen)
+
+
+def start_frage_ok() -> str:
+    return "Stimmt das so? (Enter = ja, n = abbrechen): "
+
+
+def start_abgebrochen() -> str:
+    return "Abgebrochen. Es wurde nichts veraendert."
+
+
+def start_schritt(nummer: int, titel: str) -> str:
+    return f"\n=== Schritt {nummer}: {titel} ==="
+
+
+def start_frage_weiter(titel: str) -> str:
+    return f"Weiter mit '{titel}'? (Enter = ja, n = hier aufhoeren): "
+
+
+def start_uebersprungen(titel: str) -> str:
+    return f"{titel}: nichts zu tun, wird uebersprungen."
+
+
+def start_fehler_frage() -> str:
+    return "Der Schritt hat Fehler gemeldet (siehe oben). Trotzdem weitermachen? (ja/nein) [nein]: "
+
+
+def start_aufgehoert() -> str:
+    return (
+        "Hier aufgehoert. Alles Bisherige ist gespeichert;\n"
+        "'fotosort start' macht spaeter an dieser Stelle weiter."
+    )
+
+
+def start_frage_alias() -> str:
+    return (
+        "Soll ein Kameramodell einen anderen Ordnernamen bekommen?\n"
+        "Modell genau wie in der Liste oben eingeben (leer = nein, weiter): "
+    )
+
+
+def start_frage_alias_ordner(modell: str) -> str:
+    return f"Ordnername fuer '{modell}': "
+
+
+def start_alias_unbekannt(modell: str) -> str:
+    return f"Dieses Modell kam in der Analyse nicht vor: {modell} - nicht eingetragen."
+
+
+def start_aliase_geschrieben(pfad, n: int, zurueck: int) -> str:
+    return (
+        f"{anzahl(n)} Alias{'e' if n != 1 else ''} in {pfad} eingetragen;"
+        f" {anzahl(zurueck)} Dateien werden neu analysiert."
+    )
+
+
+def start_frage_aufraeumen(n: int, bytes_: int) -> str:
+    return (
+        f"Quelle jetzt aufraeumen? {anzahl(n)} geprueft kopierte Dateien ({groesse(bytes_)})\n"
+        "wuerden in den Ordner _geloescht_<Datum> innerhalb der Quelle verschoben\n"
+        "(je Quelle wird noch einmal mit einem Wort bestaetigt). (ja/nein) [nein]: "
+    )
+
+
+def start_frage_leere_ordner() -> str:
+    return "Leere Ordner in den Quellen entfernen? (ja/nein) [nein]: "
+
+
+def start_fertig(zaehler: dict) -> str:
+    zeilen = ["", "Gefuehrter Ablauf beendet.", status_zaehler(zaehler)]
+    return "\n".join(zeilen)
+
+
+def config_alias_nicht_geschrieben(pfad, modell: str) -> str:
+    return (
+        f"Der Alias fuer '{modell}' konnte nicht in {pfad} eingetragen werden;"
+        " die Datei wurde nicht veraendert. Bitte von Hand unter [kamera.aliase] eintragen (fotosort config)."
+    )
+
+
+# ------------------------------------------------------------ Messen -----
+
+
+def messen_beginnt(quelle, ziel, mb: int, stufen: tuple) -> str:
+    return (
+        f"Tempo messen: Lesen aus {quelle}, Schreiben nach {ziel}.\n"
+        f"  Je Stufe etwa {mb} MB, Worker-Zahlen {', '.join(str(s) for s in stufen)}.\n"
+        "  Im Ziel entsteht nur ein voruebergehender Messordner, der am Ende wieder entfernt wird."
+    )
+
+
+def messen_quelle_zu_klein(bytes_: int, mindestens: int) -> str:
+    return (
+        f"In der Quelle liegen nur {groesse(bytes_)} an Dateien (mindestens {groesse(mindestens)} noetig)."
+        " Das Lesetempo wird deshalb nicht gemessen."
+    )
+
+
+def messen_zu_wenig_platz(ziel, benoetigt: int, frei: int) -> str:
+    return (
+        f"Im Ziel {ziel} sind nur {groesse(frei)} frei; fuer die Schreibmessung werden"
+        f" {groesse(benoetigt)} gebraucht. Das Schreibtempo wird nicht gemessen."
+    )
+
+
+def messen_stufe(worker: int, lesen: float | None, schreiben: float | None) -> str:
+    def mbs(w):
+        return "   -   " if w is None else f"{w:7.1f}".replace(".", ",")
+    return f"  {worker:>6}   {mbs(lesen)} MB/s     {mbs(schreiben)} MB/s"
+
+
+def messen_tabelle_kopf() -> str:
+    return "  Worker     Lesen (Hash)     Schreiben"
+
+
+def messen_ergebnis(e) -> str:
+    zeilen = ["", "Vorschlag fuer die config.toml, Gruppe [leistung]:"]
+    zeilen.append(f'  profil = "{e.profil}"')
+    zeilen.append(f"  kopier_worker = {e.kopier_worker}")
+    zeilen.append(f"  hash_worker = {e.hash_worker}")
+    zeilen.append("")
+    zeilen.append(
+        "So ist das zu lesen: 'Worker' sind gleichzeitig laufende Kopier- bzw."
+        " Lesevorgaenge. Mehr Worker helfen bei SSDs und im Netz, bremsen aber eine"
+        " Festplatte aus. Gewaehlt wird die kleinste Zahl, die nahe am besten Wert liegt."
+    )
+    if e.hinweis:
+        zeilen.append(e.hinweis)
+    zeilen.append(
+        "Die Messung dauerte " + dauer(e.sekunden) + ". Beim ersten Durchlauf kann der"
+        " Zwischenspeicher des Betriebssystems mitspielen; im Zweifel zweimal messen."
+    )
+    return "\n".join(zeilen)
+
+
+def messen_nichts_gemessen() -> str:
+    return "Es konnte weder Lesen noch Schreiben gemessen werden (siehe oben)."
+
+
+def messen_abgebrochen() -> str:
+    return "Messung abgebrochen. Der voruebergehende Messordner wurde entfernt."
+
+
+def messen_netz_hinweis(wo: str) -> str:
+    return f"Hinweis: {wo} liegt auf einem Netzlaufwerk; deshalb wird das Profil netzwerk vorgeschlagen."

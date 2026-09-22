@@ -44,6 +44,27 @@ def _endungen(konf, gruppe: str) -> set[str]:
     return {str(e).lower().lstrip(".") for e in werte}
 
 
+def _tabelle(konf) -> dict[str, str]:
+    """Endung -> Typ, einmal je Konfiguration aufgebaut und an ihr gemerkt.
+
+    Tempo (Phase 6): typ_von wird millionenfach gerufen (Gruppenbildung);
+    vorher wurden dabei jedes Mal vier Mengen aus der Konfiguration neu
+    gebaut. Bei doppelt eingetragener Endung gewinnt wie bisher die
+    fruehere Gruppe (foto vor raw vor video vor sidecar).
+    """
+    tabelle = getattr(konf, "_dateityp_tabelle", None)
+    if tabelle is None:
+        tabelle = {}
+        for typ, gruppe in reversed(_GRUPPEN):
+            for endung in _endungen(konf, gruppe):
+                tabelle[endung] = typ
+        try:
+            konf._dateityp_tabelle = tabelle
+        except AttributeError:  # pragma: no cover - Konfiguration ohne __dict__
+            pass
+    return tabelle
+
+
 def typ_von(name: str, konf) -> str:
     """foto | raw | video | sidecar | sonstiges.
 
@@ -53,10 +74,7 @@ def typ_von(name: str, konf) -> str:
     endung = _endung(name)
     if not endung:
         return SONSTIGES
-    for typ, gruppe in _GRUPPEN:
-        if endung in _endungen(konf, gruppe):
-            return typ
-    return SONSTIGES
+    return _tabelle(konf).get(endung, SONSTIGES)
 
 
 def ist_echter_typ(typ: str) -> bool:

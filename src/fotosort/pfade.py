@@ -78,7 +78,7 @@ def lang(p: Path) -> Path:
     "relativ zur Wurzel" schluege fehl.
     """
     if not _IST_WINDOWS:
-        return Path(p)
+        return p if isinstance(p, Path) else Path(p)
     return Path(lang_text(str(Path(p))))
 
 

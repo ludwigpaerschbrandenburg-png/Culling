@@ -222,6 +222,7 @@ class _Auftrag:
     fd: int | None = None            # Rueckfall: vom Hauptstrang exklusiv angelegt
     zukunft: Future | None = None
     ziel_hash: Future | None = None  # Hash einer schon vorhandenen Datei am Zielnamen
+    ziel_da: bool | None = None      # beim Einreichen: lag schon eine Datei am Zielnamen?
     ergebnis: object = None
 
 
@@ -303,9 +304,14 @@ class _Lauf:
         self.stop = threading.Event()
         self.kopierer = ThreadPoolExecutor(max_workers=kopier_worker, thread_name_prefix="kopie")
         self.hasher = ThreadPoolExecutor(max_workers=hash_worker, thread_name_prefix="hash")
-        self.max_offen = max(2, kopier_worker * 2)
+        self.max_offen = max(4, kopier_worker * 4)
         self.in_arbeit: set[str] = set()       # Zielnamen (Text), die gerade entstehen
         self.offen: list[list[_Auftrag]] = []  # eingereichte Gruppen
+        self.bereit: list[list[_Auftrag]] = [] # beansprucht, Anspruch noch nicht festgeschrieben
+        # Hash -> (Endname, Bytes) der Dateien, deren Umbenennen in dieser
+        # Runde noch aussteht: Ein inhaltsgleiches Duplikat aus derselben
+        # Runde findet seinen Partner so auch vor dem Eintrag im Ziel-Index.
+        self.hash_anstehend: dict[str, tuple[Path, int]] = {}
         self.wartend: deque[tuple[_Quelle, list]] = deque()
         self.ergebnis = Ergebnis()
         self.anzeige: fortschritt.Fortschritt | None = None
@@ -313,19 +319,25 @@ class _Lauf:
     # -- Namen -----------------------------------------------------------
 
     def belegt(self, p: Path, eigene_dateien: frozenset[str] = frozenset(),
-               eigene_namen: frozenset[str] = frozenset()) -> bool:
+               eigene_namen: frozenset[str] = frozenset(),
+               bekannt_frei: frozenset[str] = frozenset()) -> bool:
         """Name im Ziel vergeben: gerade in Arbeit oder schon auf der Platte.
 
         eigene_dateien: Dateien, die die fragende Gruppe selbst gerade
         schreibt (.part) - zaehlen gar nicht. eigene_namen: die berechneten
         Zielnamen der Gruppe - sie stehen zwar in "in Arbeit", aber ob der
         Name auf der Platte belegt ist, muss trotzdem geprueft werden.
+        bekannt_frei: Namen, die beim Einreichen nachweislich frei waren -
+        kein zweiter stat; legt ein Fremdprozess sie dazwischen an, faengt
+        das nicht ueberschreibende Umbenennen das ab (FileExistsError).
         """
         t = db.pfad_text(p)
         if t in eigene_dateien:
             return False
         if t in self.in_arbeit and t not in eigene_namen:
             return True
+        if t in bekannt_frei:
+            return False
         return _stat(p) is not None
 
     def hash_von_vorhandener(self, p: Path) -> Future:
@@ -433,18 +445,32 @@ class _Lauf:
             self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, a.schreibziel, self.lauf)
             self.in_arbeit.add(db.pfad_text(a.ziel))
             self.in_arbeit.add(db.pfad_text(a.schreibziel))
-            if db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel) and _stat(a.ziel) is not None:
-                a.ziel_hash = self.hash_von_vorhandener(a.ziel)   # parallel zur Kopie
+            if db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
+                a.ziel_da = _stat(a.ziel) is not None
+                if a.ziel_da:
+                    a.ziel_hash = self.hash_von_vorhandener(a.ziel)   # parallel zur Kopie
         # Der Anspruch muss VOR dem ersten Schreiben festgeschrieben sein
         # (SPEC §5): Nur dann erkennt der naechste Start nach einem Absturz,
-        # wem eine liegengebliebene Datei gehoert.
-        self.dbank.stapel_schreiben()
-        for a in auftraege:
-            a.zukunft = self.kopierer.submit(
-                _kopieren_worker, a.quelle, a.schreibziel, a.zeile["groesse"], a.zeile["mtime"], self.stop, a.fd
-            )
-        self.offen.append(auftraege)
+        # wem eine liegengebliebene Datei gehoert. Festgeschrieben und
+        # abgeschickt wird in bereit_abschicken() - fuer alle Gruppen einer
+        # Runde mit EINEM Commit (Tempo, Phase 6).
+        self.bereit.append(auftraege)
         return True
+
+    def bereit_abschicken(self) -> None:
+        """Ansprueche aller vorbereiteten Gruppen festschreiben, dann erst
+        die Kopien starten (SPEC §5: Anspruch vor dem ersten Schreiben)."""
+        if not self.bereit:
+            return
+        self.dbank.stapel_schreiben()
+        for auftraege in self.bereit:
+            for a in auftraege:
+                a.zukunft = self.kopierer.submit(
+                    _kopieren_worker, a.quelle, a.schreibziel, a.zeile["groesse"],
+                    a.zeile["mtime"], self.stop, a.fd
+                )
+            self.offen.append(auftraege)
+        self.bereit.clear()
 
     def umbenennen_moeglich(self, quellwurzel: str) -> bool:
         """Verschieben durch Umbenennen nur, wenn Quelle und Ziel NACHWEISLICH
@@ -668,10 +694,11 @@ class _Lauf:
         """
         dateien = frozenset(db.pfad_text(a.schreibziel) for a in auftraege)
         namen = frozenset(db.pfad_text(a.ziel) for a in auftraege)
+        frei = frozenset(db.pfad_text(a.ziel) for a in auftraege if a.ziel_da is False)
         k = ab
         while True:
             if not any(
-                self.belegt(mit_anhang(a.ziel, k, a.stamm), dateien, namen)
+                self.belegt(mit_anhang(a.ziel, k, a.stamm), dateien, namen, frei)
                 or self.belegt(part_pfad(mit_anhang(a.ziel, k, a.stamm)), dateien, namen)
                 for a in auftraege
             ):
@@ -680,7 +707,12 @@ class _Lauf:
 
     # -- Abschliessen ----------------------------------------------------
 
-    def gruppe_abschliessen(self, auftraege: list[_Auftrag]) -> None:
+    def gruppe_abschliessen(self, auftraege: list[_Auftrag]) -> tuple[list[_Auftrag], int] | None:
+        """Ergebnisse verbuchen, Duplikate erkennen, Anhang bestimmen und den
+        endgueltigen Namen je Mitglied vormerken (schreibpfad). Liefert
+        (Rest, Anhang) fuer gruppe_fertigstellen - erst NACH dem gemeinsamen
+        Commit der Runde wird umbenannt (SPEC §5: Name vor dem Umbenennen
+        festgeschrieben; Tempo: ein Commit je Runde statt je Datei)."""
         e = self.ergebnis
         bleiben: list[_Auftrag] = []
         for a in auftraege:
@@ -747,13 +779,23 @@ class _Lauf:
             rest.append(a)
 
         # 2. Endgueltiger Name: gemeinsamer Anhang fuer die ganze Gruppe.
-        if rest:
-            if self.direkt:
-                anhang = rest[0].anhang
-            else:
-                anhang = self._freier_anhang(rest, ab=0)
+        if not rest:
+            return None
+        if self.direkt:
+            anhang = rest[0].anhang
+        else:
+            anhang = self._freier_anhang(rest, ab=0)
             for a in rest:
-                self._endgueltig(a, anhang)
+                self.dbank.schreibpfad_setzen(a.zeile["quellpfad"], mit_anhang(a.ziel, anhang, a.stamm))
+        for a in rest:
+            if a.zeile["dateityp"] != "sidecar":
+                self.hash_anstehend.setdefault(a.ergebnis.hash, (mit_anhang(a.ziel, anhang, a.stamm), a.ergebnis.bytes))
+        return rest, anhang
+
+    def gruppe_fertigstellen(self, rest: list[_Auftrag], anhang: int) -> None:
+        """Nach dem Commit der Runde: umbenennen und 'kopiert' verbuchen."""
+        for a in rest:
+            self._endgueltig(a, anhang, vorgemerkt=True)
 
     def _part_unbeansprucht(self, a: _Auftrag) -> bool:
         """Beansprucht eine andere Zeile den Zielnamen dieser .part-Datei?"""
@@ -768,7 +810,8 @@ class _Lauf:
     def _duplikat_partner(self, a: _Auftrag) -> Path | None:
         h = a.ergebnis.hash
         # a) Der berechnete Zielname ist belegt: gleicher Inhalt?
-        if a.ziel_hash is None and _stat(a.ziel) is not None and db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
+        if a.ziel_hash is None and a.ziel_da is not False and _stat(a.ziel) is not None \
+                and db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
             a.ziel_hash = self.hash_von_vorhandener(a.ziel)
         if a.ziel_hash is not None:
             try:
@@ -784,6 +827,10 @@ class _Lauf:
         #    jede gehoert zu ihrer Hauptdatei.
         if a.zeile["dateityp"] == "sidecar":
             return None
+        anstehend = self.hash_anstehend.get(h)
+        if anstehend is not None and anstehend[1] == a.ergebnis.bytes \
+                and db.pfad_text(anstehend[0]) != db.pfad_text(a.schreibziel):
+            return anstehend[0]
         for eintrag in self.dbank.ziel_index_nach_hash(h):
             p = Path(db.text_pfad(eintrag["zielpfad"]))
             if db.pfad_text(p) == db.pfad_text(a.schreibziel):
@@ -796,7 +843,7 @@ class _Lauf:
                 return p
         return None
 
-    def _endgueltig(self, a: _Auftrag, anhang: int) -> None:
+    def _endgueltig(self, a: _Auftrag, anhang: int, vorgemerkt: bool = False) -> None:
         e = self.ergebnis
         endname = mit_anhang(a.ziel, anhang, a.stamm)
         if not self.direkt:
@@ -805,9 +852,11 @@ class _Lauf:
                 endname = mit_anhang(a.ziel, k, a.stamm)
                 # Vor dem Umbenennen festhalten, wo die Datei gleich liegt:
                 # Nach einem Absturz zwischen Umbenennen und "kopiert" findet
-                # der naechste Start sie so wieder (SPEC §5).
-                self.dbank.schreibpfad_setzen(a.zeile["quellpfad"], endname)
-                self.dbank.stapel_schreiben()
+                # der naechste Start sie so wieder (SPEC §5). Fuer den
+                # vorgemerkten Anhang hat das die Runde schon festgeschrieben.
+                if not vorgemerkt or k != anhang:
+                    self.dbank.schreibpfad_setzen(a.zeile["quellpfad"], endname)
+                    self.dbank.stapel_schreiben()
                 try:
                     pfade.umbenennen_ohne_ueberschreiben(a.schreibziel, endname)
                     break
@@ -838,7 +887,13 @@ class _Lauf:
             anhang = k
         self.in_arbeit.discard(db.pfad_text(a.ziel))
         self.dbank.kopiert_setzen(a.zeile["quellpfad"], endname, a.ergebnis.hash, self.lauf)
-        self.index_nachtragen(endname, a.ergebnis.hash)
+        # Groesse und Zeit der eben geschriebenen Datei sind bekannt (der
+        # Worker hat die Quellzeit uebernommen): kein stat je Datei noetig.
+        self.dbank.ziel_index_setzen(endname, a.ergebnis.bytes, a.ergebnis.mtime_ns / 1e9, a.ergebnis.hash, self.lauf)
+        anstehend = self.hash_anstehend.get(a.ergebnis.hash)
+        if anstehend is not None and db.pfad_text(anstehend[0]) == db.pfad_text(mit_anhang(a.ziel, anhang, a.stamm)) \
+                or (anstehend is not None and db.pfad_text(anstehend[0]) == db.pfad_text(endname)):
+            self.hash_anstehend.pop(a.ergebnis.hash, None)
         e.kopiert += 1
         e.bearbeitet += 1
         e.bytes_kopiert += a.ergebnis.bytes
@@ -885,7 +940,7 @@ class _Lauf:
     def abbrechen(self) -> None:
         self.stop.set()
         self.kopierer.shutdown(wait=True, cancel_futures=True)
-        for auftraege in self.offen:
+        for auftraege in [*self.offen, *self.bereit]:
             for a in auftraege:
                 if a.zukunft is not None and a.zukunft.done() and not a.zukunft.cancelled():
                     k = a.zukunft.result()
@@ -900,6 +955,7 @@ class _Lauf:
                     self._zuruecknehmen([a])
                 self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.offen.clear()
+        self.bereit.clear()
         self.nachpruefung.clear()   # Zeilen bleiben "kopiert"; aufraeumen holt sie nach
         self.hasher.shutdown(wait=True, cancel_futures=True)
 
@@ -1038,12 +1094,13 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
         # entsteht (gleicher Name aus zwei Quellen), warten bis zur naechsten
         # Runde - und werden in DIESER Runde nicht noch einmal gezogen.
         zurueckgestellt: list[tuple] = []
-        while len(L.offen) < L.max_offen:
+        while len(L.offen) + len(L.bereit) < L.max_offen:
             gruppe = _naechste(L, reihe)
             if gruppe is None:
                 break
             if not L.gruppe_einreichen(*gruppe):
                 zurueckgestellt.append(gruppe)
+        L.bereit_abschicken()
         L.wartend.extend(zurueckgestellt)
         L.nachpruefungen_verbuchen(alle=False)
         if not L.offen:
@@ -1058,9 +1115,16 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
         # Strg+C jederzeit ankommt).
         wait([a.zukunft for g in L.offen for a in g], timeout=1.0, return_when=FIRST_COMPLETED)
         fertig = [g for g in L.offen if all(a.zukunft.done() for a in g)]
+        vorbereitet: list[tuple[list[_Auftrag], int]] = []
         for g in fertig:
             L.offen.remove(g)
-            L.gruppe_abschliessen(g)
+            v = L.gruppe_abschliessen(g)
+            if v is not None:
+                vorbereitet.append(v)
+        if vorbereitet:
+            L.dbank.stapel_schreiben()      # ein Commit fuer alle Namen dieser Runde
+            for rest, anhang in vorbereitet:
+                L.gruppe_fertigstellen(rest, anhang)
 
 
 def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:

@@ -18,7 +18,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -42,7 +42,6 @@ PHASE_JE_BEFEHL: dict[str, int] = {
     "pruefen": 4,
     "bericht": 4,
     "aufraeumen": 5,
-    "start": 6,
 }
 
 # ------------------------------------------------------------- ExifTool ----
@@ -619,6 +618,325 @@ def befehl_bericht(args, konsole) -> int:
         datenbank.schliessen()
 
 
+# ------------------------------------------------- Gefuehrter Modus ----
+
+
+class _Abbruch(Exception):
+    """Der Nutzer hat eine Frage nicht beantwortet (Eingabe zu Ende)."""
+
+
+def _eingabe_moeglich() -> bool:
+    """Fragen gehen nur mit Terminal - oder ausdruecklich erzwungen (Tests)."""
+    if not sys.stdin:
+        return False
+    return sys.stdin.isatty() or os.environ.get("FOTOSORT_EINGABE_ERZWINGEN", "") == "1"
+
+
+def _fragen(konsole, frage: str, standard: str = "") -> str:
+    """Eine Frage stellen; Enter allein liefert den Vorschlag."""
+    konsole.print(frage, end="")
+    try:
+        antwort = input()
+    except EOFError as fehler:
+        konsole.print("")
+        raise _Abbruch() from fehler
+    antwort = antwort.strip()
+    return antwort if antwort else standard
+
+
+def _ja(konsole, frage: str, standard: bool = False) -> bool:
+    antwort = _fragen(konsole, frage).lower()
+    if not antwort:
+        return standard
+    return antwort in ("j", "ja", "y", "yes")
+
+
+def _weiter(konsole, frage: str) -> bool:
+    """Enter = ja; nur ein ausdrueckliches n/nein haelt an."""
+    antwort = _fragen(konsole, frage).lower()
+    return antwort not in ("n", "nein", "no")
+
+
+def _start_namensraum(args, befehl: str, **extra) -> argparse.Namespace:
+    return argparse.Namespace(befehl=befehl, ziel=args.ziel, config=args.config, **extra)
+
+
+def _start_archiv_lesen(args, konsole) -> dict:
+    """Bekannte Quellen, Zaehler und Profil-Standard aus dem Archiv (nur lesen)."""
+    archiv = archiv_oeffnen(args, konsole, anlegen=False)
+    d = archiv.datenbank
+    try:
+        zaehler = d.zaehler_je_status()
+        loeschbar = d.zu_loeschen_summe()
+        return {
+            "quellen": [z["wurzel"] for z in d.quellen_liste()],
+            "zaehler": zaehler,
+            "profil": str(archiv.konf.wert("leistung.profil") or "hdd"),
+            "analyse": d.anzahl_zu_analysieren(),
+            "kopieren": d.zu_kopieren_summe(),
+            "pruefen": d.zu_pruefen_summe(),
+            "aufraeumen": (sum(n for n, _ in loeschbar.values()), sum(b for _, b in loeschbar.values())),
+            "modelle": [m for m, _o, _n in d.analyse_zusammenfassung()["modelle"] if m],
+            "konf_pfad": archiv.konf_pfad,
+        }
+    finally:
+        d.schliessen()
+
+
+def _start_phase_text(zaehler: dict) -> str:
+    niedrigster = next((s for s in db.STUFEN if zaehler.get(s, 0) > 0), None)
+    return meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
+
+
+def _start_quellen_fragen(args, konsole, ziel: Path, bekannt: list[str]) -> list[str]:
+    """Quellordner abfragen, bis der Nutzer mit leerer Eingabe fertig ist."""
+    quellen: list[str] = []
+    for q in args.quelle or []:
+        quellen.append(str(q))
+    bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
+    leer_hintereinander = 0
+    while True:
+        weitere = bool(quellen or bekannt)
+        antwort = _fragen(konsole, meldungen.start_frage_quelle(weitere))
+        if not antwort:
+            if weitere:
+                return quellen
+            leer_hintereinander += 1
+            if leer_hintereinander >= 3:
+                raise _Abbruch()   # dreimal nichts: der Nutzer will nicht
+            konsole.print(meldungen.start_quelle_noetig())
+            continue
+        leer_hintereinander = 0
+        q = Path(antwort)
+        if not q.is_dir():
+            konsole.print(meldungen.quelle_existiert_nicht(q))
+            continue
+        lage = pfade.lage_pruefen(q, ziel) if ziel.exists() else "getrennt"
+        if lage == "gleich":
+            konsole.print(meldungen.quelle_gleich_ziel(pfade.aufloesen(q)))
+            continue
+        if lage == "quelle_in_ziel":
+            konsole.print(meldungen.quelle_in_ziel(pfade.aufloesen(q)))
+            continue
+        auf = pfade.aufloesen(q)
+        if auf in bekannt_auf or any(pfade.aufloesen(Path(x)) == auf for x in quellen):
+            konsole.print(meldungen.start_quelle_schon_dabei(auf))
+            continue
+        quellen.append(antwort)
+
+
+def _start_aliase(args, konsole, stand: dict) -> bool:
+    """Nach der Analyse: Aliase abfragen, eintragen, betroffene Dateien neu
+    analysieren. True, wenn etwas eingetragen wurde."""
+    neue: dict[str, str] = {}
+    bekannt = {m.lower(): m for m in stand["modelle"]}
+    while True:
+        modell = _fragen(konsole, meldungen.start_frage_alias())
+        if not modell:
+            break
+        if modell.lower() not in bekannt:
+            konsole.print(meldungen.start_alias_unbekannt(modell))
+            continue
+        name = _fragen(konsole, meldungen.start_frage_alias_ordner(modell))
+        if name:
+            neue[bekannt[modell.lower()]] = name
+    if not neue:
+        return False
+    config.aliase_ergaenzen(stand["konf_pfad"], neue)
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True)
+    try:
+        zurueck = archiv.datenbank.analyse_zuruecksetzen_nach_modell(list(neue))
+    finally:
+        archiv.datenbank.schliessen()
+    konsole.print(meldungen.start_aliase_geschrieben(stand["konf_pfad"], len(neue), zurueck))
+    return True
+
+
+def befehl_start(args, konsole) -> int:
+    """Phase 6: gefuehrt durch alle Phasen (SPEC Abschnitt 8).
+
+    Jeder Schritt laeuft ueber denselben Weg wie der einzelne Befehl und
+    ist fortsetzbar; ein erneuter Aufruf macht dort weiter, wo aufgehoert
+    wurde, und ueberspringt Schritte ohne Arbeit.
+    """
+    args.quelle = list(args.quelle or [])
+    # ExifTool zuerst (SPEC Abschnitt 2): mit der Konfiguration des Archivs,
+    # wenn es eins gibt, sonst mit den Standardwerten.
+    stand: dict | None = None
+    if args.ziel and Path(args.ziel).exists() and db.archiv_id_vorhanden(Path(args.ziel)):
+        stand = _start_archiv_lesen(args, konsole)
+    else:
+        exiftool_pruefen("start", config.Konfiguration(), konsole)
+    if not _eingabe_moeglich():
+        konsole.print(meldungen.start_keine_eingabe())
+        return FEHLER
+    konsole.print(meldungen.start_begruessung())
+    schlechtester = OK
+    try:
+        # 1. Ziel
+        if not args.ziel:
+            args.ziel = _fragen(konsole, meldungen.start_frage_ziel())
+            if not args.ziel:
+                konsole.print(meldungen.ziel_fehlt())
+                return FEHLENDE_ANGABE
+        ziel = Path(args.ziel)
+        if not ziel.exists():
+            konsole.print(meldungen.start_ziel_fehlt(ziel))
+            if not getattr(args, "ziel_anlegen", False) and not _ja(konsole, meldungen.start_frage_ziel_anlegen()):
+                konsole.print(meldungen.start_abgebrochen())
+                return ABGEBROCHEN
+            args.ziel_anlegen = True
+        elif stand is None and db.archiv_id_vorhanden(ziel):
+            stand = _start_archiv_lesen(args, konsole)
+        bekannt = stand["quellen"] if stand else []
+        if bekannt:
+            konsole.print(meldungen.start_quellen_bekannt(bekannt))
+
+        # 2. Quellen, Modus, Profil
+        neue_quellen = _start_quellen_fragen(args, konsole, ziel, bekannt)
+        verschieben = bool(getattr(args, "verschieben", False))
+        if not verschieben:
+            verschieben = _fragen(konsole, meldungen.start_frage_modus(), "k").lower().startswith("v")
+        profil_standard = stand["profil"] if stand else "hdd"
+        profil = getattr(args, "profil", None)
+        versuche = 0
+        while not profil:
+            antwort = _fragen(konsole, meldungen.start_frage_profil(profil_standard), profil_standard).lower()
+            if antwort in kopieren.PROFILE:
+                profil = antwort
+            else:
+                konsole.print(meldungen.profil_ungueltig(antwort, sorted(kopieren.PROFILE)))
+                versuche += 1
+                if versuche >= 3:
+                    raise _Abbruch()
+
+        # 3. Zusammenfassung
+        zaehler = stand["zaehler"] if stand else {}
+        konsole.print(meldungen.start_zusammenfassung(
+            ziel, bekannt + neue_quellen, verschieben, profil, _start_phase_text(zaehler)))
+        if not _weiter(konsole, meldungen.start_frage_ok()):
+            konsole.print(meldungen.start_abgebrochen())
+            return ABGEBROCHEN
+
+        def pruefen_rueckgabe(rc: int) -> bool:
+            """False = hier aufhoeren."""
+            nonlocal schlechtester
+            if rc in (ABGEBROCHEN, FEHLENDE_ANGABE):
+                schlechtester = rc
+                return False
+            if rc == FEHLER:
+                schlechtester = FEHLER
+                if not _ja(konsole, meldungen.start_fehler_frage()):
+                    konsole.print(meldungen.start_aufgehoert())
+                    return False
+            return True
+
+        # Schritt 1: Scan (immer - findet neue und geaenderte Dateien)
+        konsole.print(meldungen.start_schritt(1, "Quellen durchsuchen"))
+        if not _weiter(konsole, meldungen.start_frage_weiter("Quellen durchsuchen")):
+            konsole.print(meldungen.start_aufgehoert())
+            return schlechtester
+        quelle_arg = (bekannt + neue_quellen) if neue_quellen else None
+        rc = befehl_scan(_start_namensraum(args, "scan", quelle=quelle_arg,
+                                           ziel_anlegen=bool(getattr(args, "ziel_anlegen", False))), konsole)
+        if not pruefen_rueckgabe(rc):
+            return schlechtester
+
+        # Schritt 2: Analyse (+ Aliase)
+        stand = _start_archiv_lesen(args, konsole)
+        konsole.print(meldungen.start_schritt(2, "Analyse (Datum, Kamera, Zielordner)"))
+        if stand["analyse"] == 0:
+            konsole.print(meldungen.start_uebersprungen("Analyse"))
+        else:
+            if not _weiter(konsole, meldungen.start_frage_weiter("Analyse")):
+                konsole.print(meldungen.start_aufgehoert())
+                return schlechtester
+            rc = befehl_analyse(_start_namensraum(args, "analyse"), konsole)
+            if not pruefen_rueckgabe(rc):
+                return schlechtester
+            stand = _start_archiv_lesen(args, konsole)
+        while _start_aliase(args, konsole, stand):
+            rc = befehl_analyse(_start_namensraum(args, "analyse"), konsole)
+            if not pruefen_rueckgabe(rc):
+                return schlechtester
+            stand = _start_archiv_lesen(args, konsole)
+
+        # Schritt 3: Kopieren oder Verschieben
+        titel = "Verschieben" if verschieben else "Kopieren"
+        konsole.print(meldungen.start_schritt(3, titel))
+        if stand["kopieren"][0] == 0:
+            konsole.print(meldungen.start_uebersprungen(titel))
+        else:
+            rc = befehl_kopieren(_start_namensraum(
+                args, "kopieren", verschieben=verschieben, dry_run=True, profil=profil,
+                kopier_worker=None, hash_worker=None), konsole)
+            if not _weiter(konsole, meldungen.start_frage_weiter(titel)):
+                konsole.print(meldungen.start_aufgehoert())
+                return schlechtester
+            rc = befehl_kopieren(_start_namensraum(
+                args, "kopieren", verschieben=verschieben, dry_run=False, profil=profil,
+                kopier_worker=None, hash_worker=None), konsole)
+            if not pruefen_rueckgabe(rc):
+                return schlechtester
+            stand = _start_archiv_lesen(args, konsole)
+
+        # Schritt 4: Pruefen
+        konsole.print(meldungen.start_schritt(4, "Pruefen (Zieldateien vollstaendig neu lesen)"))
+        if stand["pruefen"][0] == 0:
+            konsole.print(meldungen.start_uebersprungen("Pruefen"))
+        else:
+            if not _weiter(konsole, meldungen.start_frage_weiter("Pruefen")):
+                konsole.print(meldungen.start_aufgehoert())
+                return schlechtester
+            rc = befehl_pruefen(_start_namensraum(args, "pruefen", profil=profil, hash_worker=None), konsole)
+            if not pruefen_rueckgabe(rc):
+                return schlechtester
+            stand = _start_archiv_lesen(args, konsole)
+
+        # Schritt 5: Aufraeumen und leere Ordner (nur auf ausdrueckliches Ja)
+        konsole.print(meldungen.start_schritt(5, "Quelle aufraeumen"))
+        n, b = stand["aufraeumen"]
+        aufraeumen_ja = n > 0 and _ja(konsole, meldungen.start_frage_aufraeumen(n, b))
+        if n == 0:
+            konsole.print(meldungen.start_uebersprungen("Quelle aufraeumen"))
+        leere = _ja(konsole, meldungen.start_frage_leere_ordner())
+        if aufraeumen_ja or leere:
+            rc = befehl_aufraeumen(_start_namensraum(
+                args, "aufraeumen", quelle=None, leere_ordner=leere, dry_run=False,
+                endgueltig=False, profil=profil, hash_worker=None), konsole)
+            if not pruefen_rueckgabe(rc):
+                return schlechtester
+            stand = _start_archiv_lesen(args, konsole)
+        konsole.print(meldungen.start_fertig(stand["zaehler"]))
+        return schlechtester
+    except _Abbruch:
+        konsole.print(meldungen.start_abgebrochen())
+        return ABGEBROCHEN
+
+
+def befehl_messen(args, konsole) -> int:
+    """Lese- und Schreibtempo messen (Phase 6). Kein Archiv, kein Lauf."""
+    quelle = Path(args.quelle)
+    ziel = Path(args.ziel)
+    if not quelle.is_dir():
+        konsole.print(meldungen.quelle_existiert_nicht(quelle))
+        return FEHLER
+    if not ziel.is_dir():
+        konsole.print(meldungen.ziel_existiert_nicht(ziel))
+        return FEHLER
+    try:
+        ergebnis = messen.ausfuehren(quelle, ziel, konsole, mb=args.mb)
+    except KeyboardInterrupt:
+        konsole.print("")
+        konsole.print(meldungen.messen_abgebrochen())
+        return ABGEBROCHEN
+    if not (ergebnis.lesen_gemessen or ergebnis.schreiben_gemessen):
+        konsole.print(meldungen.messen_nichts_gemessen())
+        return FEHLER
+    konsole.print(meldungen.messen_ergebnis(ergebnis))
+    return OK
+
+
 def befehl_spaetere_phase(args, konsole) -> int:
     konsole.print(meldungen.noch_nicht_gebaut(args.befehl, PHASE_JE_BEFEHL[args.befehl]))
     return SPAETERE_PHASE
@@ -716,12 +1034,19 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("start", help="gefuehrt durch alle Phasen")
-    p.add_argument("--quelle", metavar="PFAD", help="Quellordner")
+    p.add_argument("--quelle", metavar="PFAD", action="append", help="Quellordner; mehrfach angebbar (sonst wird gefragt)")
     p.add_argument(
         "--ziel-anlegen",
         action="store_true",
         help="einen noch nicht vorhandenen Zielordner wirklich anlegen",
     )
+    p.add_argument("--verschieben", action="store_true", help="verschieben statt kopieren (sonst wird gefragt)")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen (sonst wird gefragt)")
+    _gemeinsam(p)
+
+    p = unterbefehle.add_parser("messen", help="Lese- und Schreibtempo von Quelle und Ziel messen")
+    p.add_argument("--quelle", metavar="PFAD", required=True, help="Quellordner, aus dem gelesen wird")
+    p.add_argument("--mb", type=int, default=256, metavar="N", help="Datenmenge je Stufe in MB (Standard 256)")
     _gemeinsam(p)
 
     return eltern
@@ -757,7 +1082,8 @@ def main(argv: list[str] | None = None) -> int:
     # Jeder Befehl ausser --help braucht ein Ziel (SPEC Abschnitt 8).
     if not getattr(args, "ziel", None):
         args.ziel = os.environ.get("FOTOSORT_ZIEL", "").strip() or None
-    if not args.ziel:
+    # Ausnahme: der gefuehrte Modus fragt nach dem Ziel, statt abzubrechen.
+    if not args.ziel and args.befehl != "start":
         konsole.print(meldungen.ziel_fehlt())
         return FEHLENDE_ANGABE
 
@@ -767,7 +1093,7 @@ def main(argv: list[str] | None = None) -> int:
     # Archiv oeffnen, pruefen hier mit den Standardwerten.
     # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
     # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen"):
+    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen", "start", "messen"):
         gefunden, wo = exiftool_finden(config.Konfiguration())
         if not (gefunden and exiftool_startbar(gefunden)):
             if args.befehl in BRAUCHT_EXIFTOOL:
@@ -793,6 +1119,10 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_bericht(args, konsole)
         if args.befehl == "aufraeumen":
             return befehl_aufraeumen(args, konsole)
+        if args.befehl == "start":
+            return befehl_start(args, konsole)
+        if args.befehl == "messen":
+            return befehl_messen(args, konsole)
         return befehl_spaetere_phase(args, konsole)
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

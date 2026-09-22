@@ -237,7 +237,73 @@ Alle Funde sind behoben, jeder mit einem Test in `tests/test_pruefbefunde.py`:
 
 ## Phase 6 — Geführter Modus und Tempo
 
-- [ ] `fotosort start`, großer Testbaum, Profiler, `LIESMICH.md`
+Gebaut: `fotosort start` (geführter Ablauf mit Fragen, Zusammenfassung und OK zwischen den
+Phasen, Alias-Eingabe nach der Analyse, weitermachen bei Wiederaufruf), `fotosort messen`
+(Lese-/Schreibtempo, Vorschlag für `[leistung]`), `tests/tempo_phasen.py` (50.000 Dateien,
+jede Phase gemessen, wahlweise mit Profiler), drei Bremsen behoben, `LIESMICH.md`,
+`einrichten.bat`, `fotosort.bat`, `start.bat`.
+
+- [x] `fotosort start`, großer Testbaum, Profiler, `LIESMICH.md`
+- [x] **Drei Bremsen** (Profiler am 50.000-Dateien-Baum, Zahlen siehe unten):
+      1. Scan: `Path.resolve()` wurde je Datei dreimal gerufen (150.000 Aufrufe, drei Viertel
+         der Scan-Zeit). Jetzt wird der aufgelöste Pfad je Ordner mitgeführt; nur
+         Verknüpfungen werden noch aufgelöst.
+      2. Analyse: Die Gruppenbildung verglich jede Sidecar mit jeder Hauptdatei des Ordners
+         und baute dabei je Vergleich die Endungslisten aus der Konfiguration neu (5,8 Mio.
+         Aufrufe). Jetzt Nachschlagetabellen (Endung → Typ je Konfiguration; Sidecar-Kandidaten
+         über Name, Stammname und Präfix), entschieden wird weiter von `sidecar_gehoert_zu`.
+      3. Kopieren: je Gruppe zwei Datenbank-Commits und fünf `stat`-Aufrufe je Datei im
+         Hauptstrang. Jetzt ein Commit je Runde für alle Ansprüche und ein Commit je Runde für
+         alle Endnamen (die Regel „Anspruch vor dem ersten Schreiben, Name vor dem Umbenennen
+         festgeschrieben" gilt unverändert), der `stat` vom Einreichen wird wiederverwendet,
+         der Ziel-Index bekommt Größe und Zeit aus der eben geschriebenen Kopie.
+- [x] **Tempo-Punkt „doppelte Lesezeit im Verschieben-Modus"** gemessen (unten). Ergebnis:
+      Der Kopierweg des Verschiebens liest die Quelle nach dem Kopieren zweimal (Frischlesung
+      und zweite Lesung unmittelbar vor dem Löschen, siehe Phase 5). Es bleibt bei der
+      Sicherheit; die Zahlen stehen hier, damit der Nutzer entscheiden kann, ob ihm Verschieben
+      oder Kopieren + Prüfen + Aufräumen lieber ist.
+
+### Messwerte (Container, 4 Kerne, Dateisystem-Cache; 50.048 Dateien, 4,2 GB, JPEG/RAW/MP4/XMP gemischt)
+
+Die Zahlen gelten für diesen Container, nicht für eine echte Platte oder ein Netzlaufwerk; dort
+misst `fotosort messen`. Vorher = Stand nach Phase 5, nachher = Stand Phase 6.
+
+| Phase | vorher | nachher |
+|---|---|---|
+| scan | 43,4 s (1.153 Dateien/s) | 8,0 s (6.273 Dateien/s) |
+| analyse | 47,6 s (1.051 Dateien/s) | 39,4 s (1.271 Dateien/s) — der Rest ist ExifTool selbst (4 Prozesse) |
+| kopieren (ssd, 8 Worker) | 82,5 s (607 Dateien/s, 51 MB/s) | 62,5 s (801 Dateien/s, 67 MB/s) |
+| pruefen | 26,7 s (1.874 Dateien/s, 157 MB/s) | 25,3 s (1.979 Dateien/s, 166 MB/s) — unverändert, war nie eine Bremse |
+| aufraeumen --endgueltig | 48,5 s (1.032 Dateien/s) | 104,7 s (478 Dateien/s) — langsamer, siehe unten |
+| kopieren --verschieben (Kopierweg, wie anderes Laufwerk) | — | 160,1 s (313 Dateien/s, 26 MB/s); zum Vergleich kopieren + pruefen + aufraeumen --endgueltig nachher zusammen 192,5 s |
+
+**Warum Aufräumen und Verschieben langsamer wurden — und die Antwort auf „doppelte
+Lesezeit":** Seit der Prüfung von Phase 5 wird beim **endgültigen** Löschen (`--endgueltig` und
+`kopieren --verschieben` über den Kopierweg) die Quelle unmittelbar vor dem `unlink` ein zweites
+Mal vollständig gelesen — im Hauptstrang, nacheinander, damit zwischen Lesung und Löschung kein
+Fenster bleibt. Im Verschieben-Modus wird die Quelle damit dreimal gelesen (Kopieren, Frischlesung
+im Worker, zweite Lesung vor dem Löschen) und die Kopie einmal; das kostet hier 160 s statt 62 s
+für reines Kopieren. Der Standard des Aufräumens (Ordner `_geloescht_`) ist davon **nicht**
+betroffen: Dort wandert der aktuelle Inhalt mit, es genügt der Vergleich der Datei-Kennung, und
+das Tempo bleibt beim alten. Die Sicherheit steht nicht zur Disposition (CLAUDE.md, oberste
+Regel); eine spätere Beschleunigung wäre, die zweite Lesung samt `unlink` in den Worker zu legen
+(dann parallel), was die Löschstelle umbaut und deshalb nicht mehr in diese Phase gehört.
+
+### Entscheidungen für den Nutzer
+
+- **`fotosort start` fragt nach dem Ziel, statt ohne `--ziel` abzubrechen** (einzige Ausnahme
+  von SPEC §8). Nur so lässt sich `start.bat` per Doppelklick starten.
+- **Aliase aus dem geführten Modus werden in die config.toml geschrieben.** Das ist die einzige
+  Stelle, an der das Programm die Konfigurationsdatei anfasst; Kommentare bleiben, es wird nur
+  ein als TOML gültiges Ergebnis geschrieben, und nur nach ausdrücklicher Eingabe.
+- **Nach neuen Aliasen werden nur noch nicht kopierte Dateien neu analysiert** (Status
+  `analysiert` samt Gruppe zurück auf `gefunden`). Schon kopierte bleiben, wo sie sind.
+- **`fotosort messen` schreibt mit `fsync`** (jede Messdatei wird wirklich auf die Platte
+  gebracht), damit der Zwischenspeicher das Schreibtempo nicht schönt; das Lesen nutzt je Stufe
+  andere Dateien. Beim ersten Durchlauf kann der Cache trotzdem mitspielen — zweimal messen.
+- **Nicht gebaut (bewusst, nicht in der Aufgabenliste von Phase 6):** das Zeitlimit für einen
+  hängenden ExifTool-Stapel (siehe Phase 2, „Aus der Abnahme") und die Erkennung zweier
+  Laufwerksbuchstaben auf derselben Platte (unten, ungemessen). Beides bleibt offen.
 
 ### Aus der Prüfung
 

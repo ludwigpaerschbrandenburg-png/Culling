@@ -56,10 +56,28 @@ def bilden(namen: list[str], konf) -> tuple[list[Gruppe], list[str]]:
             gruppe_von[n] = g
 
     # Sidecars zuordnen: erst ueber die beste passende Hauptdatei.
+    # Tempo (Phase 6): Kandidaten ueber Nachschlagetabellen (voller Name,
+    # Stammname, Stammname als Praefix fuer Form 3) statt jede Sidecar gegen
+    # jede Hauptdatei zu halten; entschieden wird weiterhin ausschliesslich
+    # von sidecar_gehoert_zu, die Regeln bleiben dieselben.
+    nach_name: dict[str, list[str]] = {}
+    nach_stamm_klein: dict[str, list[str]] = {}
+    for h in haupt_kandidaten:
+        nach_name.setdefault(h.lower(), []).append(h)
+        nach_stamm_klein.setdefault(_stamm(h).lower(), []).append(h)
     ohne_haupt: list[str] = []
     for s in sidecars:
+        ss = _stamm(s).lower()
+        kandidaten: dict[str, None] = {}
+        for h in nach_name.get(ss, []):           # Form 2
+            kandidaten[h] = None
+        for h in nach_stamm_klein.get(ss, []):    # Form 1
+            kandidaten[h] = None
+        for laenge in range(1, len(ss)):          # Form 3: Hauptstamm ist Praefix
+            for h in nach_stamm_klein.get(ss[:laenge], []):
+                kandidaten[h] = None
         passende = [
-            h for h in haupt_kandidaten if dateitypen.sidecar_gehoert_zu(s, h, konf)
+            h for h in kandidaten if dateitypen.sidecar_gehoert_zu(s, h, konf)
         ]
         if not passende:
             ohne_haupt.append(s)

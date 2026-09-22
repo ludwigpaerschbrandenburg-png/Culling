@@ -45,7 +45,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
-│  └─ bericht.py             Text- und CSV-Bericht
+│  ├─ bericht.py             Text- und CSV-Bericht
+│  └─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
 └─ tests/
    ├─ testbaum.py            erzeugt den künstlichen Testbaum
    └─ test_*.py              ein Test je Modul
