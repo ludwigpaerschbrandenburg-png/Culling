@@ -34,19 +34,24 @@ SELBSTTEST_JS = """
 
 
 class _Api:
-    """Was die Seite im Fenster direkt aufrufen darf (window.pywebview.api)."""
+    """Was die Seite im Fenster direkt aufrufen darf (window.pywebview.api).
+
+    pywebview reicht jedes oeffentliche Attribut dieses Objekts an die Seite
+    durch - auch verschachtelt. Deshalb sind Fenster, Ergebnis und Ereignis
+    privat (Unterstrich): Die Seite darf nur die beiden Methoden rufen.
+    """
 
     def __init__(self) -> None:
-        self.fenster = None
-        self.ergebnis: str | None = None
-        self.fertig = threading.Event()
+        self._fenster = None
+        self._ergebnis: str | None = None
+        self._fertig = threading.Event()
 
     def ordner_waehlen(self, start: str = "") -> str:
         import webview
 
-        if self.fenster is None:
+        if self._fenster is None:
             return ""
-        auswahl = self.fenster.create_file_dialog(webview.FileDialog.FOLDER, directory=str(start or ""))
+        auswahl = self._fenster.create_file_dialog(webview.FileDialog.FOLDER, directory=str(start or ""))
         if not auswahl:
             return ""
         if isinstance(auswahl, (list, tuple)):
@@ -54,8 +59,8 @@ class _Api:
         return str(auswahl)
 
     def selbsttest_ergebnis(self, text: str) -> None:
-        self.ergebnis = str(text)
-        self.fertig.set()
+        self._ergebnis = str(text)
+        self._fertig.set()
 
 
 def _selbsttest_http(adresse: str, konsole) -> int:
@@ -77,13 +82,13 @@ def _selbsttest_im_fenster(fenster, api: _Api, rc: list, konsole, zeit: float = 
         try:
             fenster.evaluate_js(SELBSTTEST_JS)
         except Exception as fehler:  # noqa: BLE001
-            api.ergebnis = f"FEHLER {fehler}"
-            api.fertig.set()
-        if not api.fertig.wait(zeit):
+            api._ergebnis = f"FEHLER {fehler}"
+            api._fertig.set()
+        if not api._fertig.wait(zeit):
             rc[0] = FEHLER
             konsole.print(meldungen.ob_selbsttest(False, "die Seite hat sich nicht gemeldet"))
         else:
-            ergebnis = api.ergebnis or ""
+            ergebnis = api._ergebnis or ""
             ok = False
             einzelheit = ergebnis
             if not ergebnis.startswith("FEHLER"):
@@ -127,7 +132,7 @@ def starten(ohne_fenster: bool, port: int, selbsttest: bool, ziel: str | None, k
         ab.fenster = True
         api = _Api()
         fenster = webview.create_window(TITEL, adresse, js_api=api, width=1120, height=820, min_size=(760, 560))
-        api.fenster = fenster
+        api._fenster = fenster
         rc = [OK]
         if selbsttest:
             gestartet = [False]
@@ -140,7 +145,7 @@ def starten(ohne_fenster: bool, port: int, selbsttest: bool, ziel: str | None, k
             fenster.events.loaded += bei_laden
 
             def waechter() -> None:
-                if not api.fertig.wait(120):
+                if not api._fertig.wait(120):
                     rc[0] = FEHLER
                     konsole.print(meldungen.ob_selbsttest(False, "Fenster oder Seite haben nicht geladen"))
                     try:
