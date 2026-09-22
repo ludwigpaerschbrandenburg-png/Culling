@@ -366,6 +366,10 @@ der CI wirklich durch `--version`, scan, analyse, kopieren, pruefen), Workflow `
 `PATH` gefunden (SPEC §2). `fotosort.bat` erkennt selbst, ob es im Paket oder im Quellcode liegt.
 
 - [x] Paket, Artefakt, Release v0.1, Prüfung in der CI
+- [x] **Release anlegen ohne Tag-Push:** Aus der Entwicklungsumgebung lassen sich keine Tags
+      pushen (Verbindung bricht ab). Deshalb kann der Workflow auch von Hand gestartet werden
+      („Run workflow" mit `release_tag`, z. B. `v0.2`); er legt Tag und Release dann selbst auf
+      dem aktuellen Stand an. Ein gepushter Tag `v*` funktioniert weiterhin genauso.
 - [ ] **Signatur:** Das Programm ist nicht signiert; SmartScreen warnt beim ersten Start (LIESMICH
       §1 sagt, was zu klicken ist). Eine Signatur bräuchte ein Zertifikat.
 - [ ] **ExifTool-Version:** Der Bau nimmt die jeweils aktuelle Version von exiftool.org; die
