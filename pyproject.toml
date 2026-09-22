@@ -19,10 +19,10 @@ dependencies = [
     "rich",
     "tomli-w",
     "tzdata",
-    # Oberflaeche (Phase 7): Server fuer die Seite, Fenster
+    # Oberflaeche (Phase 7): Desktop-Fenster (Qt), Server der Browser-Fassung
+    "PySide6-Essentials",
     "fastapi",
     "uvicorn",
-    "pywebview",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +35,7 @@ fotosort = "fotosort.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"fotosort.oberflaeche" = ["static/*", "static/fonts/*"]
+"fotosort.oberflaeche" = ["static/*", "static/fonts/*", "static/*.png"]
 
 [tool.setuptools.dynamic]
 version = { attr = "fotosort.__version__" }

@@ -398,6 +398,16 @@ Version 0.2.0, Release v0.2.
 - [x] Zusammenfassung je Schritt mit „Weiter“, Alias-Tabelle nach der Analyse, Aufräumen-Seite mit Wort
 - [x] Listen Fehler/Duplikate/ohne Datum seitenweise (100 je Seite), Bericht und config.toml per Knopf
 - [x] Fenster schließen bricht den Lauf nicht ab; laufender Schritt wird beim Öffnen übernommen
+- [x] **Desktop-Programm mit Qt** (v0.4): Nach dem Test von v0.3 (Absturz beim ersten Start, weil
+      der Protokollordner fehlte; kein Fenster, weil pythonnet/WebView2 nicht luden) ist die
+      Windows-Oberfläche ein richtiges Programm: `oberflaeche/desktop.py` (PySide6), `stil.py`
+      (Nocturne als Qt-Stylesheet, Inter als TrueType), `meldungsfenster.py` (Startfehler als
+      Windows-Meldung mit Rat und Protokollpfad). pywebview und pythonnet sind entfernt; die
+      Browser-Fassung bleibt als `fenster --ohne-fenster` für Phase 8. Paket: `fotosort.exe` (Fenster,
+      ohne Konsole, Symbol) und `fotosort-konsole.exe` (Befehle, Arbeitsprozesse). `start.bat` und
+      `fotosort.bat` ohne Klammerblöcke (Pfade mit Leerzeichen und Klammern). CI-Prüfung wie auf
+      einem frischen PC: Paket in „fotosort-windows (1)\fotosort", leeres `%LOCALAPPDATA%`, Start
+      nur über `start.bat`, Fenster in 20 s, Durchlauf über die Oberfläche (offscreen), Befehle.
 - [x] **Design übernommen** (v0.3): Übergabe in `docs/design/` (Nocturne-Tokens, Hauptansicht). Eine
       Ansicht mit Titelzeile, Phasenleiste, Fortschrittstafel, Karten und Statusleiste; Startseite,
       Kamera-Tabelle (`.table` mit tippbarem Alias), Aufräumen-Karte und geblätterte Listen im
@@ -408,10 +418,12 @@ Version 0.2.0, Release v0.2.
 
 ### Entscheidungen für den Nutzer
 
-- [ ] **WebView2-Laufzeit:** Das Fenster braucht die WebView2-Laufzeit von Microsoft Edge. Auf
-      Windows 11 und aktuellem Windows 10 ist sie vorhanden. Fehlt sie, meldet das Programm das
-      im `fenster.log`; Ausweg ist `fotosort.bat fenster --ohne-fenster` und die genannte Adresse
-      im Browser. Soll das Paket die Laufzeit selbst mitbringen (etwa 1,5 MB Installer)?
+- [ ] **Paketgröße:** Mit Qt ist das Paket etwa doppelt so groß wie vorher (Qt-Bibliotheken).
+      Reicht das, oder soll das Paket noch verkleinert werden (Module ausschließen, UPX)?
+- [ ] **Zwei Programme im Paket:** `fotosort.exe` (Fenster) und `fotosort-konsole.exe` (Befehle mit
+      Ausgabe, wird von `fotosort.bat` und vom Fenster für die Arbeitsprozesse genutzt). Ein
+      einzelnes Programm ginge, dann aber entweder ohne Konsolenausgabe oder mit schwarzem Fenster
+      hinter der Oberfläche. So lassen?
 - [ ] **„Weitermachen“ scannt nicht neu.** Der Knopf springt zum offenen Schritt. Wer inzwischen
       Dateien in die Quelle gelegt hat, drückt „Los geht's“ — das durchsucht immer zuerst.
 - [ ] **Pause greift bei der nächsten Fortschrittsmeldung,** also nach der laufenden Datei (bei der

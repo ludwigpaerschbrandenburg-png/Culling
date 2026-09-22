@@ -48,20 +48,25 @@ Culling/ (Repository-Wurzel)
 │  ├─ bericht.py             Text- und CSV-Bericht
 │  ├─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
 │  ├─ steuerung.py           Statusdatei und Steuerdatei je Schritt (Phase 7): Stand ≤ 2×/s, Pause, Abbruch
-│  └─ oberflaeche/           Phase 7: die Oberfläche mit Fenster
+│  └─ oberflaeche/           Phase 7: die Oberfläche
 │     ├─ ablauf.py           Zustand, Arbeitsprozess (fotosort arbeit), Zusammenfassungen und Listen
-│     ├─ server.py           FastAPI-Schnittstelle (nur 127.0.0.1, Origin-Prüfung), uvicorn im Strang
-│     ├─ fenster.py          Server starten, pywebview-Fenster, Ordnerdialog, Selbsttest
+│     ├─ desktop.py          das Desktop-Fenster (PySide6/Qt): Seiten, Ordnerdialoge, Selbsttest, Durchlauf
+│     ├─ stil.py             Nocturne als Qt-Stylesheet, Inter-Schrift laden, Programmsymbol
+│     ├─ meldungsfenster.py  Startfehler als verständliches Meldungsfenster (ctypes), excepthook
+│     ├─ server.py           FastAPI-Schnittstelle der Browser-Fassung (nur 127.0.0.1, Origin-Prüfung)
+│     ├─ fenster.py          Einstieg: Desktop-Fenster oder --ohne-fenster (Server für Phase 8)
 │     └─ static/             index.html, app.js, app.css (Layout), styles.css (Design-Tokens, docs/design/),
 │                             fonts.css + fonts/ (Inter als woff2, offline) — eine Seite, kein Rahmenwerk
 ├─ docs/design/             Design-Uebergabe der Oberflaeche: DESIGN.md, index.html, app.css, styles.css
-├─ docs/oberflaeche/         Bildschirmfotos jeder Ansicht (Playwright, kuenstlicher Testbaum)
+├─ docs/oberflaeche/         Bildschirmfotos jeder Ansicht (fenster --durchlauf --fotos, Qt offscreen, Testbaum)
 ├─ paket/
 │  ├─ fotosort_start.py      Einstieg fuer PyInstaller
-│  ├─ fotosort.spec          PyInstaller-Spec: fotosort.exe (Konsole) und fotosort-fenster.exe auf einem _internal
+│  ├─ fotosort.spec          PyInstaller-Spec: fotosort.exe (Fenster, Symbol) und fotosort-konsole.exe auf einem _internal
+│  ├─ fotosort.ico           Programmsymbol (aus stil.symbol() erzeugt)
 │  ├─ exiftool_holen.py      ExifTool (Windows, 64 Bit, mit exiftool_files) von exiftool.org holen
 │  ├─ bauen.py               PyInstaller-Ordnervariante bauen, Paketordner zusammenstellen
-│  └─ pruefen.py             gepacktes Programm ausprobieren (--version, scan … pruefen, Fenster-Selbsttest, Arbeitsprozess)
+│  └─ pruefen.py             gepacktes Programm wie auf einem frischen PC ausprobieren (start.bat aus Ordner mit
+│                             Leerzeichen, Fenster in 20 s, Durchlauf über das Fenster, Befehle, Arbeitsprozess)
 ├─ .github/workflows/
 │  ├─ tests.yml              Testsuite auf ubuntu-latest und windows-latest
 │  └─ paket.yml              Windows-Paket bauen und pruefen; Artefakt je Push, Release bei Tag v*
@@ -345,7 +350,7 @@ und kaputtgehen kann. Darum bewusst wenige:
 | `rich` | Fortschrittsbalken, Tabellen | Ein Balken mit Restzeit ist bei stundenlangen Läufen kein Luxus. Selbstgebaut wäre das mehr Code als die Bibliothek. |
 | `tomli-w` | `config.toml` schreiben | Python kann TOML seit 3.11 **lesen** (`tomllib`), aber nicht schreiben. Wird nur beim ersten Start gebraucht. |
 | `fastapi`, `uvicorn` | Oberfläche (Phase 7) | Der Server hinter der Seite: kleine JSON-Anfragen, nur auf 127.0.0.1. FastAPI liefert Routing und Fehlerbehandlung, uvicorn den Server in einem eigenen Strang des Programms. Kein Rahmenwerk auf der Seite selbst. |
-| `pywebview` | Fenster (Phase 7) | Zeigt die Seite in einem eigenen Fenster statt im Browser und bietet den normalen Ordnerdialog des Systems. Unter Windows nutzt es die WebView2-Laufzeit von Microsoft Edge (über `pythonnet`); im Container (Phase 8) wird es nicht gebraucht, dort läuft `--ohne-fenster`. |
+| `PySide6-Essentials` | Desktop-Fenster (Phase 7) | Qt: ein richtiges Windows-Programm mit Taskleisten-Symbol und den normalen Ordnerdialogen, ohne Browser und ohne weitere Laufzeit auf dem PC. pywebview/pythonnet (WebView2) fielen in v0.3 auf dem echten PC aus. Nur „Essentials" (Core, Gui, Widgets), nicht das volle Qt. Im Container (Phase 8) wird es nicht gebraucht, dort läuft `--ohne-fenster`. |
 | `pytest`, `httpx` | Tests | Standard; `httpx` nur für den Testclient der Schnittstelle. Nur zum Entwickeln, nicht im Betrieb. |
 
 Ausdrücklich **nicht**:

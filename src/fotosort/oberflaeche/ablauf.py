@@ -49,12 +49,12 @@ def oberflaeche_ordner() -> Path:
 
 
 def _kommando() -> list[str]:
-    """Wie der Arbeitsprozess gestartet wird: im Paket ueber fotosort.exe
-    (die Konsolenfassung, auch aus dem Fensterprogramm heraus), sonst ueber
-    denselben Python-Interpreter."""
+    """Wie der Arbeitsprozess gestartet wird: im Paket ueber fotosort-konsole.exe
+    (die Fassung mit Konsole, auch aus dem Fensterprogramm heraus; ohne sie das
+    eigene Programm), sonst ueber denselben Python-Interpreter."""
     if getattr(sys, "frozen", False):
         exe = Path(sys.executable)
-        konsole = exe.with_name("fotosort.exe" if exe.suffix.lower() == ".exe" else "fotosort")
+        konsole = exe.with_name("fotosort-konsole.exe" if exe.suffix.lower() == ".exe" else "fotosort-konsole")
         return [str(konsole if konsole.is_file() else exe)]
     return [sys.executable, "-m", "fotosort"]
 
@@ -207,6 +207,7 @@ class Ablauf:
             return pid_lebt(self.lauf.pid) or frisch
 
     def _log_anfang(self, schritt: str) -> None:
+        self.ordner.mkdir(parents=True, exist_ok=True)
         try:
             if self.log_datei.exists() and self.log_datei.stat().st_size > LOG_GRENZE:
                 alt = self.log_datei.with_suffix(".alt.log")

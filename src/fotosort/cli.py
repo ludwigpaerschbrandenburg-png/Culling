@@ -1066,13 +1066,27 @@ def befehl_arbeit(args, konsole) -> int:
 
 
 def befehl_fenster(args, konsole) -> int:
-    """Phase 7: die Oberflaeche - eigenes Fenster (pywebview) oder nur der
-    Server fuer den Browser (--ohne-fenster)."""
-    from .oberflaeche import fenster
-    return fenster.starten(
-        ohne_fenster=bool(args.ohne_fenster), port=args.port, selbsttest=bool(args.selbsttest),
-        ziel=args.ziel, konsole=konsole,
-    )
+    """Phase 7: die Oberflaeche - das Desktop-Fenster (PySide6) oder nur der
+    Server fuer den Browser (--ohne-fenster). Jeder Fehler vor dem Start
+    erscheint als verstaendliches Meldungsfenster, nie als Absturz."""
+    from .oberflaeche import fenster, meldungsfenster
+    durchlauf = tuple(args.durchlauf) if getattr(args, "durchlauf", None) else None
+    try:
+        return fenster.starten(
+            ohne_fenster=bool(args.ohne_fenster), port=args.port, selbsttest=bool(args.selbsttest),
+            ziel=args.ziel, konsole=konsole, durchlauf=durchlauf, fotos=getattr(args, "fotos", None),
+        )
+    except FotosortFehler:
+        raise
+    except Exception as fehler:  # noqa: BLE001 - verstaendlich zeigen statt Stapelabzug
+        protokoll = None
+        try:
+            protokoll = fenster_protokoll()
+        except OSError:
+            pass
+        meldungsfenster.startfehler(fehler, protokoll)
+        konsole.print(meldungsfenster.starttext(fehler, protokoll))
+        return FEHLER
 
 
 def befehl_messen(args, konsole) -> int:
@@ -1207,9 +1221,11 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("fenster", help="die Oberflaeche mit Fenster und Knoepfen oeffnen")
-    p.add_argument("--ohne-fenster", action="store_true", help="nur den Server starten und die Adresse fuer den Browser nennen")
+    p.add_argument("--ohne-fenster", action="store_true", help="nur den Server der Browser-Fassung starten und die Adresse nennen")
     p.add_argument("--port", type=int, default=0, help="Anschluss fuer den Server (0 = frei waehlen)")
-    p.add_argument("--selbsttest", action="store_true", help="Fenster oeffnen, Seite laden, wieder schliessen (fuer die CI)")
+    p.add_argument("--selbsttest", action="store_true", help="Fenster oeffnen, Zustand lesen, wieder schliessen (fuer die CI)")
+    p.add_argument("--durchlauf", nargs=2, metavar=("ZIEL", "QUELLE"), help="den ganzen Ablauf ueber das Fenster fahren (CI, Bildschirmfotos)")
+    p.add_argument("--fotos", metavar="ORDNER", help="beim Durchlauf ein Bildschirmfoto je Ansicht in diesen Ordner legen")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("arbeit", help="ein Schritt im Auftrag der Oberflaeche (intern)")
@@ -1240,13 +1256,25 @@ def _konsole(fehlerausgabe: bool = False):
     )
 
 
+def fenster_protokoll() -> Path:
+    """Die Protokolldatei des Fensterprogramms (ohne Konsole geht alles dorthin).
+    Der Ordner wird angelegt, bevor jemand hineinschreibt."""
+    from .oberflaeche import ablauf
+    ordner = ablauf.oberflaeche_ordner()
+    ordner.mkdir(parents=True, exist_ok=True)
+    return ordner / "fenster.log"
+
+
 def _ohne_konsole_umleiten() -> None:
     """Gepacktes Fensterprogramm: Es gibt keine Konsole, sys.stdout ist None.
-    Alles, was das Programm sagt, landet dann in einer Protokolldatei."""
+    Alles, was das Programm sagt, landet dann in einer Protokolldatei. Geht
+    auch das nicht (Ordner nicht anlegbar), wird verworfen statt abgebrochen."""
     if sys.stdout is not None and sys.stderr is not None:
         return
-    from .oberflaeche import ablauf
-    protokoll = open(ablauf.oberflaeche_ordner() / "fenster.log", "a", encoding="utf-8", errors="replace")
+    try:
+        protokoll = open(fenster_protokoll(), "a", encoding="utf-8", errors="replace")
+    except OSError:
+        protokoll = open(os.devnull, "w", encoding="utf-8")
     if sys.stdout is None:
         sys.stdout = protokoll
     if sys.stderr is None:

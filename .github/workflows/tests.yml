@@ -26,11 +26,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: ExifTool installieren (Linux)
+      - name: ExifTool und Qt-Grundlagen installieren (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libimage-exiftool-perl
+          sudo apt-get install -y libimage-exiftool-perl libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
           exiftool -ver
 
       - name: ExifTool installieren (Windows)
@@ -47,5 +47,7 @@ jobs:
 
       - name: Tests
         # Haengt ein Test, bricht er nach 5 Minuten mit Stapelabzug ab,
-        # statt den Lauf stundenlang zu blockieren.
+        # statt den Lauf stundenlang zu blockieren. Das Qt-Fenster laeuft ohne Anzeige.
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q -p no:cacheprovider --timeout=300 -o faulthandler_timeout=290

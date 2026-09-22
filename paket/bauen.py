@@ -4,9 +4,10 @@ Paketordner zusammenstellen.
 Aufruf (im Repository-Ordner, mit installiertem fotosort und PyInstaller):
     python paket/bauen.py --exiftool <ordner mit exiftool.exe und exiftool_files> [--ausgabe build/paket]
 
-Ergebnis: <ausgabe>/fotosort/ mit fotosort.exe (Konsole) und fotosort-fenster.exe
-(Fenster, Phase 7; unter Linux ohne .exe), _internal/ (Python und Bibliotheken),
-exiftool/ (mitgeliefertes ExifTool), fotosort.bat, start.bat, LIESMICH.md, VERSION.txt.
+Ergebnis: <ausgabe>/fotosort/ mit fotosort.exe (das Fenster, PySide6, ohne Konsole) und
+fotosort-konsole.exe (Befehle mit Ausgabe; unter Linux ohne .exe), _internal/ (Python, Qt
+und Bibliotheken), exiftool/ (mitgeliefertes ExifTool), fotosort.bat, start.bat, LIESMICH.md,
+VERSION.txt.
 """
 
 from __future__ import annotations
@@ -36,11 +37,11 @@ def bauen(ausgabe: Path, exiftool: Path | None) -> Path:
     subprocess.run(befehl, check=True)
     paket = dist / "fotosort"
     endung = ".exe" if sys.platform.startswith("win") else ""
-    for name in ("fotosort", "fotosort-fenster"):
+    for name in ("fotosort", "fotosort-konsole"):
         exe = paket / (name + endung)
         if not exe.is_file():
             raise SystemExit(f"PyInstaller hat {exe} nicht erzeugt.")
-    for name in ("index.html", "fonts.css", "fonts/Inter-latin.woff2"):
+    for name in ("index.html", "fonts.css", "fonts/Inter-latin.woff2", "fonts/Inter-Regular.ttf"):
         if not (paket / "_internal" / "fotosort" / "oberflaeche" / "static" / name).is_file():
             raise SystemExit(f"Die Seite der Oberflaeche (static/{name}) fehlt im Paket.")
 

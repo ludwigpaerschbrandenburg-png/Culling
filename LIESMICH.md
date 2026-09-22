@@ -21,24 +21,23 @@ schon im Paket enthalten.
 
 1. Auf der Release-Seite des Projekts die Datei **`fotosort-windows.zip`** herunterladen.
 2. Die ZIP-Datei entpacken (Rechtsklick, „Alle extrahieren…"), zum Beispiel nach
-   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort-fenster.exe`,
-   `fotosort.exe`, `fotosort.bat`, dieser Anleitung und den Unterordnern `_internal` und
-   `exiftool`.
-3. **`start.bat` doppelklicken.** Es öffnet sich ein Fenster mit Knöpfen und Ordnerauswahl
-   (Abschnitt 2). Genauso geht ein Doppelklick auf `fotosort-fenster.exe`.
+   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort.exe`,
+   `fotosort-konsole.exe`, `fotosort.bat`, dieser Anleitung und den Unterordnern `_internal` und
+   `exiftool`. Der Ordner darf überall liegen, auch mit Leerzeichen oder Klammern im Namen.
+3. **`start.bat` doppelklicken.** Es öffnet sich das Programmfenster mit Knöpfen und
+   Ordnerauswahl (Abschnitt 2). Genauso geht ein Doppelklick auf `fotosort.exe`.
 
 **Wenn Windows beim ersten Start warnt:** Zeigt SmartScreen das blaue Fenster „Der
 Computer wurde durch Windows geschützt", klicken Sie auf „Weitere Informationen" und dann
-auf „Trotzdem ausführen". Meldet der Virenscanner `fotosort-fenster.exe` oder `fotosort.exe`,
+auf „Trotzdem ausführen". Meldet der Virenscanner `fotosort.exe` oder `fotosort-konsole.exe`,
 ist das ein Fehlalarm, der bei selbst gebauten Programmen ohne Herstellersignatur vorkommt;
 lassen Sie die Datei als Ausnahme zu. Beides fragt Windows nur beim ersten Mal.
 
-**Wenn sich kein Fenster öffnet:** Das Fenster braucht die „WebView2-Laufzeit" von Microsoft
-Edge, die auf Windows 11 und aktuellem Windows 10 vorhanden ist. Fehlt sie, steht der Grund in
-`C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\fenster.log`. Ausweg: In einem
-schwarzen Fenster (Eingabeaufforderung) im Programmordner `fotosort.bat fenster --ohne-fenster`
-eingeben und die genannte Adresse im Browser öffnen – dieselbe Oberfläche, nur den Ordnerpfad
-tippen Sie dann selbst.
+**Wenn sich kein Fenster öffnet:** Dann zeigt das Programm ein Meldungsfenster mit dem Grund,
+einem Rat und dem Ort des Protokolls
+(`C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\fenster.log`). Meist hilft es, die
+ZIP-Datei noch einmal vollständig zu entpacken. Das Fenster braucht keine zusätzliche
+Software auf dem PC.
 
 Ob alles zusammenpasst, zeigt `fotosort.bat --version` im schwarzen Fenster: Es nennt die
 Programmversion und das mitgelieferte ExifTool.
@@ -57,16 +56,16 @@ bevor es um Ihre Bilder geht.
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
-3. `start.bat` doppelklicken. Es öffnet sich das Fenster (dunkel, oben die Titelzeile mit
-   dem Zielordner, unten eine Statusleiste). Bilder jeder Ansicht liegen im Ordner
-   `docs/oberflaeche` des Projekts.
+3. `start.bat` doppelklicken. Es öffnet sich das Programmfenster (dunkel, oben die
+   Titelzeile mit dem Zielordner, unten eine Statusleiste). Bilder jeder Ansicht liegen im
+   Ordner `docs/oberflaeche` des Projekts.
 
 Auf der Startseite tragen Sie ein:
 
 | Feld | Was Sie tun |
 |---|---|
-| **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` wählen (oder den Pfad eintippen). Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
-| **Quellordner** | „Auswählen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Mehrere Quellen sind möglich. |
+| **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
+| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. |
 | **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
 | **Zielordner liegt auf** | „hdd" lassen (Festplatte); bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
 
@@ -172,8 +171,8 @@ die Statuswörter in den Zählern).
 ### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
 
 Wer lieber Fragen im Textfenster beantwortet, ruft im Programmordner `fotosort.bat start`
-auf (Eingabeaufforderung öffnen: in der Adresszeile des Explorers `cmd` eintippen). Die
-Fragen dort:
+auf (Eingabeaufforderung öffnen: in der Adresszeile des Explorers `cmd` eintippen;
+`fotosort.bat` benutzt dafür `fotosort-konsole.exe`). Die Fragen dort:
 
 | Frage | Was Sie eingeben |
 |---|---|
@@ -438,8 +437,9 @@ neben der alten den Anhang `_1`.
   `fotosort ziel-index --neu-aufbauen` (das Archiv neu einlesen) melden sich mit
   „Er kommt in Phase 3" und tun noch nichts. Der Weg von Hand steht in Abschnitt 8.
 - Der Betrieb auf dem TrueNAS-Server (im Browser, mit eigenem Ordner-Browser statt des
-  Windows-Dialogs) ist eine spätere Phase. Die Oberfläche läuft dort schon jetzt mit
-  `fotosort fenster --ohne-fenster`; der Ordnerpfad wird dann eingetippt.
+  Windows-Dialogs) ist eine spätere Phase. Die Browser-Fassung der Oberfläche läuft dort schon
+  jetzt mit `fotosort fenster --ohne-fenster`; der Ordnerpfad wird dann eingetippt. Auf dem
+  Windows-PC ist sie nicht gedacht – dort gibt es das Programmfenster.
 
 ---
 

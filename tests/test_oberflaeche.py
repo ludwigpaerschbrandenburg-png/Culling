@@ -451,5 +451,5 @@ def test_fenster_kommando_und_umgebung(monkeypatch):
     assert env["PYTHONUTF8"] == "1"
     assert str(Path(cli.__file__).resolve().parent.parent) in env["PYTHONPATH"]
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(Path("/x/fotosort-fenster.exe")))
-    assert ablauf_modul._kommando() == [str(Path("/x/fotosort-fenster.exe"))]   # fotosort.exe fehlt: sich selbst nehmen
+    monkeypatch.setattr(sys, "executable", str(Path("/x/fotosort.exe")))
+    assert ablauf_modul._kommando() == [str(Path("/x/fotosort.exe"))]   # fotosort-konsole.exe fehlt: sich selbst nehmen

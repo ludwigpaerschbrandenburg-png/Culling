@@ -1,10 +1,16 @@
 # Bildschirmfotos der Oberfläche
 
-Jede Ansicht des Fensters, erzeugt mit Playwright (Chromium, 1180 × 800) am künstlichen
-Testbaum aus SPEC §11 — nie mit echten Fotos. Erzeugt `fotos.js` in diesem Ordner gegen
-`fotosort fenster --ohne-fenster --port 47812` (Ablauf: Startseite → Scan → Analyse →
-Kopieren → Prüfen → Aufräumen; der „laufende Schritt“ ist ein eingespielter Beispielstand,
-weil der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen).
+Jede Ansicht des Programmfensters (PySide6/Qt, 1180 × 800), erzeugt am künstlichen Testbaum
+aus SPEC §11 — nie mit echten Fotos. So entstehen sie, ohne Bildschirm (Qt offscreen):
+
+```
+QT_QPA_PLATFORM=offscreen fotosort fenster --durchlauf <Ziel> <Quelle> --fotos docs/oberflaeche
+```
+
+Der Durchlauf bedient das Fenster selbst: Startseite → Scan → Analyse → Kopieren → Prüfen →
+Aufräumen. Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
+der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen. Dieselbe Prüfung läuft in
+der CI gegen das Windows-Paket.
 
 | Bild | Ansicht |
 |---|---|
@@ -19,6 +25,6 @@ weil der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen).
 | [09](09-aufraeumen-bestaetigt.png) | Aufräumen: Bestätigungswort getippt, Knopf aktiv |
 | [10](10-liste-duplikate.png) | Liste (Duplikate), seitenweise |
 | [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt |
-| [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?“ |
+| [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).

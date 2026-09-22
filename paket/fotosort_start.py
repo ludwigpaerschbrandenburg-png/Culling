@@ -1,12 +1,47 @@
 """Einstieg fuer das mit PyInstaller gepackte Programm (paket/bauen.py).
 
-Nichts weiter als der normale Einstieg der Kommandozeile; die Datei gibt es
-nur, weil PyInstaller ein Skript und kein Modul als Startpunkt braucht.
+Der normale Einstieg der Kommandozeile - und ein Fangnetz: Geht vor oder
+beim Start etwas schief, erscheint ein verstaendliches Meldungsfenster mit
+Grund, Rat und dem Ort des Protokolls. Nie "Unhandled exception in script".
 """
 
 import sys
 
-from fotosort.cli import main
+
+def _fangnetz(fehler: BaseException) -> int:
+    try:
+        from fotosort import cli
+        from fotosort.oberflaeche import meldungsfenster
+        protokoll = None
+        try:
+            protokoll = cli.fenster_protokoll()
+        except Exception:  # noqa: BLE001
+            pass
+        meldungsfenster.startfehler(fehler, protokoll)
+    except Exception:  # noqa: BLE001 - selbst das Fangnetz reisst: das Noetigste zeigen
+        import traceback
+        text = "fotosort konnte nicht starten.\n\n" + "".join(traceback.format_exception(fehler))[-1500:]
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(None, text, "fotosort konnte nicht starten", 0x10)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            print(text, file=sys.stderr or sys.stdout)
+        except Exception:  # noqa: BLE001
+            pass
+    return 1
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        from fotosort.cli import main
+        rc = main()
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        rc = 130
+    except BaseException as fehler:  # noqa: BLE001 - alles, was den Start verhindert
+        rc = _fangnetz(fehler)
+    sys.exit(rc)

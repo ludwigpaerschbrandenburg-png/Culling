@@ -1621,3 +1621,48 @@ def ob_phase_kurz(niedrigster: str | None, dateien_erfasst: bool) -> str:
         "geprueft": "Kopiert und geprüft; die Quelle kann aufgeräumt werden.",
         "quelle_geloescht": "Alles erledigt; höchstens leere Ordner sind noch zu entfernen.",
     }.get(niedrigster, "")
+
+
+def ob_startfehler(grund: str, protokoll) -> str:
+    zeilen = [
+        "Das Programm konnte nicht starten.",
+        "",
+        f"Grund: {grund}",
+        "",
+        "Was Sie tun können:",
+        "  1. Die ZIP-Datei noch einmal vollständig entpacken und start.bat erneut starten.",
+        "  2. Den Ordner nicht aus der ZIP-Vorschau heraus starten, sondern erst entpacken.",
+        "  3. Bleibt es dabei: das Protokoll an den Entwickler schicken.",
+    ]
+    if protokoll:
+        zeilen += ["", f"Protokoll: {protokoll}"]
+    return "\n".join(zeilen)
+
+
+def ob_laufzeitfehler(grund: str, protokoll) -> str:
+    zeilen = [
+        "Im Fenster ist ein unerwarteter Fehler aufgetreten. Ihre Dateien sind davon nicht betroffen;",
+        "ein laufender Schritt arbeitet weiter.",
+        "",
+        f"Grund: {grund}",
+        "",
+        "Sie können das Fenster schließen und über start.bat neu öffnen.",
+    ]
+    if protokoll:
+        zeilen += ["", f"Protokoll: {protokoll}"]
+    return "\n".join(zeilen)
+
+
+def ob_qt_fehlt(grund: str) -> str:
+    return (
+        "Das Fenster braucht die Bibliothek PySide6 (Qt). Sie fehlt oder lässt sich nicht laden:\n"
+        f"{grund}\n"
+        "Im fertigen Paket ist sie enthalten - dann die ZIP-Datei noch einmal vollständig entpacken.\n"
+        "Aus dem Quellcode: einrichten.bat erneut ausführen (installiert PySide6-Essentials)."
+    )
+
+
+def ob_durchlauf(ok: bool, einzelheit: str) -> str:
+    if ok:
+        return f"Durchlauf bestanden: Startseite, Scan, Analyse, Kopieren, Prüfen, Aufräumen über das Fenster. {einzelheit}"
+    return f"Durchlauf FEHLGESCHLAGEN: {einzelheit}"
