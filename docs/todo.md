@@ -23,9 +23,10 @@ nur verändernde Befehle legen einen Lauf an (§6), Ereignisarten (§6), `--ziel
 ### Aus der Prüfung
 
 - [ ] **Erkennung des Dateisystemtyps unter Windows festklopfen.** Linux über `/proc/mounts`
-      ist erprobt. Windows über `GetDriveType` (`DRIVE_REMOTE`) und das UNC-Präfix ist hier
-      nicht prüfbar und muss beim ersten Lauf unter Windows nachgezogen werden. Betrifft
-      SPEC §6 (Netzlaufwerk) und §4 Phase 3 (gleiches Laufwerk).
+      ist erprobt. Windows über `GetDriveType` (`DRIVE_REMOTE`) und das UNC-Präfix läuft seit der
+      Windows-CI auf der lokalen NTFS-Platte des Läufers (`tests/test_pfade.py`, Windows-Tests);
+      ein echtes Netzlaufwerk (SMB, Laufwerksbuchstabe auf eine Freigabe) gibt es dort nicht —
+      das prüft der erste Lauf mit dem NAS. Betrifft SPEC §6 (Netzlaufwerk) und §4 Phase 3.
 
 ---
 
@@ -343,15 +344,12 @@ Kein Fund der Stufe „Verlust möglich". Alle Funde sind behoben (Tests in `tes
       Volume-zu-Disk-Zuordnung (`IOCTL_STORAGE_GET_DEVICE_NUMBER`). Erst messen, ob es
       überhaupt ins Gewicht fällt.
 
-- [ ] **Doppelte Lesezeit im Verschieben-Modus messen.** Seit SPEC §5 wird vor jeder Löschung
-      auch die Quelldatei frisch gelesen, nicht nur die Zieldatei. Das ist richtig und schließt
-      einen Verlustpfad — aber im Verschieben-Modus wird die Quelle damit zweimal vollständig
-      gelesen: einmal beim Kopieren, einmal vor dem Löschen. Hier wird gemessen, wie viel das
-      an echten Datenmengen ausmacht, bevor über eine Änderung überhaupt nachgedacht wird.
-      Reihenfolge ist wichtig: **erst messen, dann bewerten.** Die Sicherheit steht nicht zur
-      Disposition, solange die Messung nicht zeigt, dass es um wirklich relevante Zeit geht —
-      und selbst dann wäre die Frage, ob man die Zeit anders holt (etwa durch eine engere
-      Kopplung von Kopieren und Prüfen im selben Durchgang), nicht ob man die Prüfung streicht.
+- [x] **Doppelte Lesezeit im Verschieben-Modus messen.** Gemessen (siehe „Messwerte" oben,
+      `tests/tempo_phasen.py --szenario verschieben`): 160 s statt 62 s für reines Kopieren bei
+      4,2 GB im Container — Verschieben liest die Quelle dreimal (Kopieren, Frischlesung, zweite
+      Lesung vor dem Löschen). Bewertung: Die Sicherheit bleibt; eine spätere Beschleunigung
+      (zweite Lesung samt `unlink` im Worker) wäre ein Umbau der Löschstelle und braucht eine
+      eigene Entscheidung. Auf einer echten Platte misst `fotosort messen` bzw. der Testlauf.
 
 ---
 
