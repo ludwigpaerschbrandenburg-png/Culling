@@ -20,6 +20,11 @@ from test_kopieren import _cli, _ereignisse, _parts, _vorbereiten, _zeilen, _zie
 NUR_POSIX = pytest.mark.skipif(sys.platform.startswith("win"), reason="Linux-Dateisystem noetig")
 
 
+def _ist(pfad, datei: Path) -> bool:
+    """Vergleich ohne das Windows-Langpfad-Praefix, das pfade.lang() anhaengt."""
+    return pfade.kurz(Path(pfad)) == datei
+
+
 # --- Fund 1: Quelle und Ziel sind dieselbe Datei ------------------------------
 
 
@@ -50,7 +55,7 @@ def test_dieselbe_datei_auch_im_verschieben_modus(baum, quelle, ziel, nachschaue
     original = loeschen.frisch_lesen
 
     def hardlink_dann_lesen(q, z, byte_vergleich, stop=None, lauf=0):
-        if Path(q) == baum["analog"]:
+        if _ist(q, baum["analog"]):
             Path(z).unlink()
             os.link(q, z)
         return original(q, z, byte_vergleich, stop, lauf)
@@ -145,7 +150,7 @@ def test_schreibschutz_beim_loeschen_gibt_fehler_und_lauf_geht_weiter(baum, quel
     original = os.unlink
 
     def gesperrt(pfad, *a, **k):
-        if Path(pfad) == baum["analog"]:
+        if _ist(pfad, baum["analog"]):
             raise PermissionError(13, "Read-only file system", str(pfad))
         return original(pfad, *a, **k)
 
@@ -168,7 +173,7 @@ def test_schreibschutz_im_papierkorb_modus(baum, quelle, ziel, nachschauen, antw
     original = pfade.umbenennen_ohne_ueberschreiben
 
     def gesperrt(von, nach):
-        if Path(von) == baum["analog"]:
+        if _ist(von, baum["analog"]):
             raise PermissionError(13, "Permission denied", str(von))
         return original(von, nach)
 
@@ -188,7 +193,7 @@ def test_papierkorb_rueckfall_raeumt_eigene_kopie_bei_schreibschutz_weg(baum, qu
     original = os.unlink
 
     def gesperrt(pfad, *a, **k):
-        if Path(pfad) == baum["analog"]:
+        if _ist(pfad, baum["analog"]):
             raise PermissionError(13, "Permission denied", str(pfad))
         return original(pfad, *a, **k)
 
@@ -238,7 +243,7 @@ def _nach_lesung_veraendern(datei: Path, monkeypatch, modul):
 
     def lesen_dann_kippen(q, z, byte_vergleich, stop=None, lauf=0):
         L = original(q, z, byte_vergleich, stop, lauf)
-        if Path(q) == datei:
+        if _ist(q, datei):
             st = os.stat(q)
             b = bytearray(datei.read_bytes())
             b[-1] ^= 0xFF
@@ -318,7 +323,7 @@ def test_alte_kennung_nach_neukopie_traegt_nichts_nach(baum, quelle, ziel, nachs
     original = os.unlink
 
     def gesperrt(pfad, *a, **k):
-        if Path(pfad) == baum["analog"]:
+        if _ist(pfad, baum["analog"]):
             raise PermissionError(13, "Permission denied", str(pfad))
         return original(pfad, *a, **k)
 
@@ -369,7 +374,7 @@ def test_papierkorb_rueckfall_verweigert_bei_kaputter_kopie(baum, quelle, ziel, 
 
     def kopieren_dann_beschaedigen(q, z, *a, **k):
         h, n = original(q, z, *a, **k)
-        if Path(q) == baum["analog"]:
+        if _ist(q, baum["analog"]):
             Path(z).write_bytes(b"kaputt auf der Platte")   # Strom war gut, Platte nicht
         return h, n
 
