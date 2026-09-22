@@ -17,21 +17,41 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
 
 KOPF = {"User-Agent": "fotosort-paketbau (https://github.com/ludwigpaerschbrandenburg-png/Culling)"}
+# Ist exiftool.org gerade nicht erreichbar (kommt vor), wird diese bekannte
+# Version genommen - der Bau darf nicht an einer Versionsabfrage scheitern.
+ERSATZ_VERSION = "13.59"
+VERSUCHE = 3
 
 
-def _laden(url: str) -> bytes:
-    anfrage = urllib.request.Request(url, headers=KOPF)
-    with urllib.request.urlopen(anfrage, timeout=120) as antwort:
-        return antwort.read()
+def _laden(url: str, versuche: int = VERSUCHE) -> bytes:
+    """Mit Wiederholung: Zeitueberschreitungen zu exiftool.org sind haeufig."""
+    fehler: Exception | None = None
+    for versuch in range(1, versuche + 1):
+        try:
+            anfrage = urllib.request.Request(url, headers=KOPF)
+            with urllib.request.urlopen(anfrage, timeout=120) as antwort:
+                return antwort.read()
+        except Exception as f:  # noqa: BLE001 - jeder Netzfehler wird wiederholt
+            fehler = f
+            print(f"  Versuch {versuch}/{versuche} fehlgeschlagen: {url} ({f})", flush=True)
+            if versuch < versuche:
+                time.sleep(10 * versuch)
+    assert fehler is not None
+    raise fehler
 
 
 def aktuelle_version() -> str:
-    return _laden("https://exiftool.org/ver.txt").decode("ascii").strip()
+    try:
+        return _laden("https://exiftool.org/ver.txt").decode("ascii").strip()
+    except Exception as fehler:  # noqa: BLE001
+        print(f"Versionsabfrage bei exiftool.org fehlgeschlagen ({fehler}); nehme {ERSATZ_VERSION}.", flush=True)
+        return ERSATZ_VERSION
 
 
 def holen(ziel: Path, version: str | None) -> str:
