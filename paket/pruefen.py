@@ -32,6 +32,13 @@ def _lauf(befehl: list[str], umgebung: dict, cwd: Path) -> tuple[int, str]:
 
 
 def main() -> int:
+    # Windows-Konsole (cp1252) kann nicht jedes Zeichen der Programmausgabe
+    # darstellen: eigene Ausgabe auf UTF-8 mit Ersatzzeichen umstellen.
+    for strom in (sys.stdout, sys.stderr):
+        try:
+            strom.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     if len(sys.argv) != 3:
         print("Aufruf: pruefen.py <paketordner> <arbeitsordner>")
         return 2
@@ -56,6 +63,7 @@ def main() -> int:
     # kein ExifTool ueber PATH.
     umgebung = {k: v for k, v in os.environ.items() if k not in ("FOTOSORT_EXIFTOOL", "FOTOSORT_ZIEL")}
     umgebung["FOTOSORT_DATENBANK"] = str(arbeit / "datenbank")
+    umgebung["PYTHONUTF8"] = "1"   # das Programm schreibt in die Rohrleitung als UTF-8
     umgebung["PATH"] = os.pathsep.join(
         p for p in umgebung.get("PATH", "").split(os.pathsep) if shutil.which("exiftool", path=p) is None
     )
