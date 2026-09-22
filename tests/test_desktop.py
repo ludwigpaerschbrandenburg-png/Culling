@@ -89,13 +89,18 @@ def test_stil_schrift_und_symbol(app):
     assert "#161826" in stil.STYLESHEET and "Segoe UI" in stil.STYLESHEET
 
 
-def test_meldungsfenster_texte(tmp_path, capsys):
+def test_meldungsfenster_texte(tmp_path, monkeypatch):
+    # Unter Windows oeffnet zeigen() ein echtes Meldungsfenster und wartet auf Klick -
+    # im Test wird es abgefangen und nur der Text geprueft.
+    gezeigt: list[tuple[str, str]] = []
+    monkeypatch.setattr(meldungsfenster, "zeigen", lambda titel, text: gezeigt.append((titel, text)))
     protokoll = tmp_path / "ordner_fehlt" / "fenster.log"
     meldungsfenster.startfehler(RuntimeError("Python.Runtime.dll fehlt"), protokoll)
     text = protokoll.read_text(encoding="utf-8")
     assert "Startfehler" in text and "Python.Runtime.dll" in text
-    aus = capsys.readouterr().err
-    assert "konnte nicht starten" in aus and "Protokoll:" in aus and "entpacken" in aus
+    assert gezeigt and gezeigt[0][0] == "fotosort konnte nicht starten"
+    aus = gezeigt[0][1]
+    assert "konnte nicht starten" in aus and "Protokoll:" in aus and "entpacken" in aus and "Python.Runtime.dll" in aus
     assert "PySide6" in meldungen.ob_qt_fehlt("x")
 
 

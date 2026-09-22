@@ -46,7 +46,7 @@ jobs:
       - name: Paket bauen
         run: python paket/bauen.py --exiftool build/exiftool --ausgabe build/paket
 
-      - name: Paket pruefen (frischer PC: start.bat aus Ordner mit Leerzeichen, Fenster in 20 s, Durchlauf ueber das Fenster, Befehle)
+      - name: "Paket pruefen wie auf einem frischen PC (start.bat aus Ordner mit Leerzeichen, Fenster in 20 s, Durchlauf ueber das Fenster, Befehle)"
         run: python paket/pruefen.py build/paket/dist/fotosort build/pruefung
 
       - name: ZIP packen
