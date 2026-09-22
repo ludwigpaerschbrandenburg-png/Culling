@@ -92,7 +92,8 @@ if errorlevel 1 goto :start_fehler
 echo.
 echo FERTIG. fotosort ist eingerichtet.
 echo.
-echo   Gefuehrt starten:   start.bat  (Doppelklick, stellt Fragen)
+echo   Oberflaeche:        start.bat  (Doppelklick, oeffnet das Fenster mit Knoepfen)
+echo   Fragen im Textfenster: fotosort.bat start
 echo   Einzelne Befehle:   fotosort.bat scan --quelle D:\Chaos --ziel D:\Archiv
 echo   Anleitung:          LIESMICH.md
 echo.
