@@ -83,7 +83,7 @@ def dateien_sammeln(quelle: Path, je_stufe_bytes: int, stufen: int) -> list[list
 
 def _lesen(dateien: list[Path], worker: int, stop: threading.Event) -> tuple[int, int, float]:
     """(Bytes, Dateien, Sekunden) - alle Dateien vollstaendig lesen und hashen."""
-    begonnen = time.monotonic()
+    begonnen = time.perf_counter()
     gelesen = 0
     anzahl = 0
 
@@ -101,7 +101,7 @@ def _lesen(dateien: list[Path], worker: int, stop: threading.Event) -> tuple[int
                 anzahl += 1
             if stop.is_set():
                 break
-    return gelesen, anzahl, time.monotonic() - begonnen
+    return gelesen, anzahl, time.perf_counter() - begonnen
 
 
 def _schreiben(ordner: Path, worker: int, gesamt_bytes: int, stop: threading.Event,
@@ -113,7 +113,7 @@ def _schreiben(ordner: Path, worker: int, gesamt_bytes: int, stop: threading.Eve
     je_datei = max(hashes.BLOCK, gesamt_bytes // SCHREIB_DATEIEN)
     bloecke = max(1, je_datei // hashes.BLOCK)
     sperre = threading.Lock()
-    begonnen = time.monotonic()
+    begonnen = time.perf_counter()
 
     def eine(nummer: int) -> int:
         pfad = ordner / f"messung_{worker}_{nummer}.part"
@@ -136,7 +136,7 @@ def _schreiben(ordner: Path, worker: int, gesamt_bytes: int, stop: threading.Eve
 
     with ThreadPoolExecutor(max_workers=worker) as pool:
         summe = sum(pool.map(eine, range(SCHREIB_DATEIEN)))
-    return summe, time.monotonic() - begonnen
+    return summe, time.perf_counter() - begonnen
 
 
 def _aufraeumen(ordner: Path | None, angelegt: list[Path]) -> None:
@@ -196,7 +196,7 @@ def empfehlung(e: Ergebnis, quelle: Path, ziel: Path) -> None:
 
 def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,
                stufen: tuple[int, ...] = STUFEN) -> Ergebnis:
-    begonnen = time.monotonic()
+    begonnen = time.perf_counter()
     e = Ergebnis()
     stop = threading.Event()
     je_stufe = max(1, mb) * 1024 * 1024
@@ -227,12 +227,12 @@ def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,
             if lesen_moeglich:
                 b, n, sek = _lesen(koerbe[i], w, stop)
                 s.lese_bytes, s.lese_dateien = b, n
-                s.lesen_mb_s = b / 1e6 / sek if sek > 0 and b else None
+                s.lesen_mb_s = b / 1e6 / max(sek, 1e-6) if b else None
                 e.lesen_gemessen = e.lesen_gemessen or s.lesen_mb_s is not None
             if schreiben_moeglich and ordner is not None:
                 b, sek = _schreiben(ordner, w, je_stufe, stop, angelegt)
                 s.schreib_bytes = b
-                s.schreiben_mb_s = b / 1e6 / sek if sek > 0 and b else None
+                s.schreiben_mb_s = b / 1e6 / max(sek, 1e-6) if b else None
                 e.schreiben_gemessen = e.schreiben_gemessen or s.schreiben_mb_s is not None
                 _aufraeumen(None, angelegt)   # Platz freigeben, Ordner bleibt bis zum Ende
             e.stufen.append(s)
@@ -244,5 +244,5 @@ def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,
     finally:
         _aufraeumen(ordner, angelegt)
     empfehlung(e, quelle, ziel)
-    e.sekunden = time.monotonic() - begonnen
+    e.sekunden = time.perf_counter() - begonnen
     return e
