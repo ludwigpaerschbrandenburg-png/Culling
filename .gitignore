@@ -27,3 +27,8 @@ config.toml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Windows-Einrichtung (einrichten.bat)
+/.exiftool_pfad
+/exiftool.exe
+/exiftool_files/
