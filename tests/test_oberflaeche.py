@@ -27,9 +27,15 @@ ENDE = {"fertig", "abgebrochen", "fehler", "abgestuerzt"}
 
 
 @pytest.fixture
-def ob(tmp_path):
-    """Ablauf mit eigenem Ordner unter tmp_path, dazu der Client der Seite."""
+def ob(tmp_path, monkeypatch):
+    """Ablauf mit eigenem Ordner unter tmp_path, dazu der Client der Seite.
+    Bericht und Einstellungen werden nie wirklich im System geoeffnet: Unter
+    Windows ginge sonst Notepad auf, und eine CSV ohne zugeordnetes Programm
+    haelt den Test mit einem "Oeffnen mit"-Dialog an."""
+    geoeffnet: list = []
+    monkeypatch.setattr(cli, "_editor_oeffnen", lambda pfad: geoeffnet.append(Path(pfad)) or False)
     ab = ablauf_modul.Ablauf(ordner=tmp_path / "oberflaeche")
+    ab.geoeffnet = geoeffnet
     client = TestClient(server_modul.app_bauen(ab))
     return ab, client
 
@@ -240,7 +246,8 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     z = client.get("/api/zustand").json()
     assert z["archiv"]["bericht"]["name"] == b["bericht"]["name"] and z["archiv"]["lauf_nr"] >= 5 and z["archiv"]["sicherung"]
     e = _post(client, "/api/einstellungen_oeffnen")
-    assert Path(e["pfad"]).name == "config.toml"
+    assert Path(e["pfad"]).name == "config.toml" and e["geoeffnet"] is False
+    assert [p.name for p in ab.geoeffnet][-1] == "config.toml" and len(ab.geoeffnet) == 4   # 3x Bericht, 1x Einstellungen
 
 
 def test_weitermachen_erkennt_angefangenes_archiv(ob, quelle, ziel, tmp_path):
