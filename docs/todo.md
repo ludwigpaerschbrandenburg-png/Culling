@@ -272,7 +272,7 @@ misst `fotosort messen`. Vorher = Stand nach Phase 5, nachher = Stand Phase 6.
 |---|---|---|
 | scan | 43,4 s (1.153 Dateien/s) | 8,0 s (6.273 Dateien/s) |
 | analyse | 47,6 s (1.051 Dateien/s) | 39,4 s (1.271 Dateien/s) — der Rest ist ExifTool selbst (4 Prozesse) |
-| kopieren (ssd, 8 Worker) | 82,5 s (607 Dateien/s, 51 MB/s) | 62,5 s (801 Dateien/s, 67 MB/s) |
+| kopieren (ssd, 8 Worker) | 82,5 s (607 Dateien/s, 51 MB/s) | 61,0 s (820 Dateien/s, 69 MB/s; sauber nachgemessen) |
 | pruefen | 26,7 s (1.874 Dateien/s, 157 MB/s) | 25,3 s (1.979 Dateien/s, 166 MB/s) — unverändert, war nie eine Bremse |
 | aufraeumen --endgueltig | 48,5 s (1.032 Dateien/s) | 104,7 s (478 Dateien/s) — langsamer, siehe unten |
 | kopieren --verschieben (Kopierweg, wie anderes Laufwerk) | — | 160,1 s (313 Dateien/s, 26 MB/s); zum Vergleich kopieren + pruefen + aufraeumen --endgueltig nachher zusammen 192,5 s |
