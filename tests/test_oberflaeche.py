@@ -219,6 +219,84 @@ def test_archiv_verwerfen_verlangt_wort_und_laesst_bilder_in_ruhe(ob, quelle, zi
     assert ablauf_modul.Ablauf(ordner=ab.ordner).ziel == ""
 
 
+def test_archiv_verwerfen_geht_bei_kaputter_datenbank_nie_bei_sperre_oder_verknuepfung(ob, quelle, ziel, archiv_basis):
+    """Aus der Pruefung: Verwerfen muss gerade dann gehen, wenn die Datenbank
+    kaputt ist; nie, solange ein anderer Lauf das Archiv belegt; nie ueber eine
+    Verknuepfung; und ein Sidecar im Programmordner zaehlt wie ein Foto."""
+    ab, client = ob
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    assert _post(client, "/api/los")["gestartet"] == "scan"
+    assert _warten(client)["zustand"] == "fertig"
+    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
+    lokal = archiv_basis / kennung
+    im_ziel = ziel / ".fotosortierer"
+
+    # Fremder Lauf haelt die Sperre: Weigerung, nichts angefasst.
+    fremd = db.Archivsperre(db.sperr_pfad(lokal))
+    assert fremd.nehmen()
+    try:
+        assert "bereits ein Vorgang" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})
+        assert lokal.is_dir() and im_ziel.is_dir()
+    finally:
+        fremd.freigeben()
+
+    # Sidecar im Programmordner: Weigerung wie bei einem Foto.
+    xmp = im_ziel / "berichte" / "DSC00001.xmp"
+    xmp.parent.mkdir(parents=True, exist_ok=True)
+    xmp.write_text("<x/>", encoding="utf-8")
+    assert "DSC00001.xmp" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})
+    assert lokal.is_dir()
+    xmp.unlink()
+
+    # Verknuepfung statt Ordner: Weigerung vor der ersten Loeschung.
+    echt = ziel.parent / "woanders"
+    im_ziel.rename(echt)
+    try:
+        im_ziel.symlink_to(echt, target_is_directory=True)
+        verknuepft = True
+    except (OSError, NotImplementedError):
+        echt.rename(im_ziel)
+        verknuepft = False
+    if verknuepft:
+        assert "Verknüpfung" in _fehler(client, "/api/verwerfen", {"wort": "verwerfen"})
+        assert lokal.is_dir() and (echt / "archiv-id.txt").is_file()
+        im_ziel.unlink()
+        echt.rename(im_ziel)
+
+    # Kaputte Datenbank: genau dann muss Verwerfen gehen.
+    (lokal / "fotosort.db").write_bytes(b"kaputt" * 100)
+    for rest in ("fotosort.db-wal", "fotosort.db-shm"):
+        try:
+            (lokal / rest).unlink()
+        except FileNotFoundError:
+            pass
+    a = _post(client, "/api/verwerfen", {"wort": "verwerfen"})
+    assert a["verworfen"] is True and a["entfernt"] == 2
+    assert not lokal.exists() and not im_ziel.exists()
+
+
+def test_profil_der_oberflaeche_kommt_im_arbeitsprozess_an(ob, quelle, ziel, tmp_path, monkeypatch, capsys):
+    ab, client = ob
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    _post(client, "/api/einstellungen", {"profil": "ssd"})
+    assert _post(client, "/api/los")["gestartet"] == "scan"
+    assert _warten(client)["zustand"] == "fertig"
+    a = _post(client, "/api/schritt", {"schritt": "analyse"})
+    assert a["gestartet"] == "analyse" and ab.lauf.auftrag["profil"] == "ssd"
+    ab.steuern("abbrechen")
+    _warten(client)
+    # Derselbe Auftrag im eigenen Prozess: das Profil bestimmt die Prozesszahl.
+    auftrag = dict(ab.lauf_status() and steuerung.json_lesen(ab.auftrag_datei))
+    auftrag["status_datei"] = str(tmp_path / "s.json")
+    auftrag["steuer_datei"] = str(tmp_path / "st.json")
+    steuerung.json_schreiben(tmp_path / "auftrag.json", auftrag)
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    assert cli.main(["arbeit", "--auftrag", str(tmp_path / "auftrag.json")]) in (cli.OK, cli.FEHLER)
+    assert "2 ExifTool-Prozesse" in capsys.readouterr().out
+
+
 def test_fremde_herkunft_wird_abgelehnt(ob):
     ab, client = ob
     r = client.post("/api/ziel", json={"ziel": "x"}, headers={"origin": "http://boese.example"})

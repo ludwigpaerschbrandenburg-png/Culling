@@ -50,11 +50,13 @@ def _lauf(befehl: list[str], umgebung: dict, cwd: Path, zeit: int = 600) -> tupl
 
 
 class _FensterWaechter:
-    """Merkt sich unter Windows jedes sichtbare Fenster, das waehrend eines
-    Vorgangs neu aufgeht (Klasse, Titel, PID). Konsolenfenster haben die
-    Klasse ConsoleWindowClass."""
+    """Merkt sich unter Windows jedes Fenster, das waehrend eines Vorgangs neu
+    aufgeht (Klasse, Titel, PID, sichtbar). Konsolenfenster haben die Klasse
+    ConsoleWindowClass und werden auch unsichtbar gezaehlt - in einer Sitzung
+    ohne Bildschirm (CI) existiert das Fenster, ist aber nie sichtbar."""
 
     KONSOLE = "ConsoleWindowClass"
+    ABSTAND = 0.05
 
     def __init__(self) -> None:
         import ctypes
@@ -62,24 +64,27 @@ class _FensterWaechter:
         self.ctypes, self.wintypes = ctypes, wintypes
         self.u32 = ctypes.windll.user32
         self.rueckruf_typ = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-        self.anfang = self._sichtbare()
-        self.neue: dict[int, tuple[str, str, int]] = {}
+        self.anfang = self._fenster()
+        self.neue: dict[int, tuple[str, str, int, bool]] = {}
         self._laeuft = False
         self._thread = threading.Thread(target=self._schleife, daemon=True)
 
-    def _sichtbare(self) -> dict[int, tuple[str, str, int]]:
+    def _fenster(self) -> dict[int, tuple[str, str, int, bool]]:
+        """Alle Fenster der obersten Ebene: sichtbare jeder Klasse, Konsolenfenster
+        auch unsichtbar."""
         ctypes, wintypes, u32 = self.ctypes, self.wintypes, self.u32
-        gefunden: dict[int, tuple[str, str, int]] = {}
+        gefunden: dict[int, tuple[str, str, int, bool]] = {}
 
         def rueckruf(hwnd, _lp):
-            if u32.IsWindowVisible(hwnd):
-                klasse = ctypes.create_unicode_buffer(256)
-                u32.GetClassNameW(hwnd, klasse, 256)
+            klasse = ctypes.create_unicode_buffer(256)
+            u32.GetClassNameW(hwnd, klasse, 256)
+            sichtbar = bool(u32.IsWindowVisible(hwnd))
+            if sichtbar or klasse.value == self.KONSOLE:
                 titel = ctypes.create_unicode_buffer(512)
                 u32.GetWindowTextW(hwnd, titel, 512)
                 pid = wintypes.DWORD()
                 u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                gefunden[int(hwnd)] = (klasse.value, titel.value, int(pid.value))
+                gefunden[int(hwnd)] = (klasse.value, titel.value, int(pid.value), sichtbar)
             return True
 
         u32.EnumWindows(self.rueckruf_typ(rueckruf), 0)
@@ -87,36 +92,55 @@ class _FensterWaechter:
 
     def _schleife(self) -> None:
         while self._laeuft:
-            for hwnd, fenster in self._sichtbare().items():
+            for hwnd, fenster in self._fenster().items():
                 if hwnd not in self.anfang and hwnd not in self.neue:
                     self.neue[hwnd] = fenster
-            time.sleep(0.2)
+            time.sleep(self.ABSTAND)
 
     def start(self) -> "_FensterWaechter":
         self._laeuft = True
         self._thread.start()
         return self
 
-    def stop(self) -> list[tuple[str, str, int]]:
+    def stop(self) -> list[tuple[str, str, int, bool]]:
         self._laeuft = False
         self._thread.join(3)
         return list(self.neue.values())
 
-    def konsolen(self) -> list[tuple[str, str, int]]:
-        return [f for f in self.neue.values() if f[0] == self.KONSOLE]
+    def konsolen(self, nur_sichtbare: bool = False) -> list[tuple[str, str, int, bool]]:
+        return [f for f in self.neue.values() if f[0] == self.KONSOLE and (f[3] or not nur_sichtbare)]
 
 
-def _gegenprobe_konsolenfenster() -> bool:
-    """Wuerde diese Umgebung ein neues Konsolenfenster ueberhaupt sichtbar
-    machen? Ein Python mit CREATE_NEW_CONSOLE muss vom Waechter gesehen werden."""
+def _gegenprobe(flagge: int) -> tuple[int, int]:
+    """Ein Python-Kind mit dieser Erzeugungsflagge starten: (Konsolenfenster
+    insgesamt, davon sichtbar), die der Waechter dabei neu gesehen hat."""
     w = _FensterWaechter().start()
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"],
-                         creationflags=subprocess.CREATE_NEW_CONSOLE)  # type: ignore[attr-defined]
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"], creationflags=flagge)
     try:
         p.wait(timeout=60)
     finally:
         w.stop()
-    return bool(w.konsolen())
+    return len(w.konsolen()), len(w.konsolen(nur_sichtbare=True))
+
+
+def _gegenproben() -> str:
+    """Was die Fensterwache in dieser Umgebung beweisen kann.
+
+    "unsichtbar": Ein Kind mit CREATE_NEW_CONSOLE erzeugt ein Konsolenfenster
+    (auch wenn niemand es sieht), eines mit CREATE_NO_WINDOW keines - dann
+    zaehlt waehrend des Durchlaufs jedes neue Konsolenfenster, sichtbar oder
+    nicht. "sichtbar": nur sichtbare Fenster sind unterscheidbar. "": nichts
+    davon ist hier beobachtbar, die Wache kann nichts finden.
+    """
+    mit, mit_sichtbar = _gegenprobe(subprocess.CREATE_NEW_CONSOLE)  # type: ignore[attr-defined]
+    ohne, ohne_sichtbar = _gegenprobe(subprocess.CREATE_NO_WINDOW)  # type: ignore[attr-defined]
+    print(f"Gegenprobe: CREATE_NEW_CONSOLE -> {mit} Konsolenfenster ({mit_sichtbar} sichtbar), "
+          f"CREATE_NO_WINDOW -> {ohne} ({ohne_sichtbar} sichtbar).", flush=True)
+    if mit and not ohne:
+        return "unsichtbar"
+    if mit_sichtbar and not ohne_sichtbar:
+        return "sichtbar"
+    return ""
 
 
 def _pid_lebt(pid: int) -> bool:
@@ -229,11 +253,13 @@ def main() -> int:
     ziel_fenster.mkdir()
     fotos = arbeit / "fotos"
     waechter = None
+    beweiskraft = ""
     if WINDOWS:
-        gegenprobe = _gegenprobe_konsolenfenster()
-        print("Gegenprobe: ein neues Konsolenfenster ist hier "
-              + ("sichtbar - die Pruefung auf schwarze Fenster ist aussagekraeftig." if gegenprobe
-                 else "NICHT sichtbar - die Pruefung auf schwarze Fenster kann hier nichts finden."), flush=True)
+        beweiskraft = _gegenproben()
+        print({"unsichtbar": "Die Fensterwache zaehlt jedes neue Konsolenfenster, auch unsichtbare - aussagekraeftig.",
+               "sichtbar": "Die Fensterwache kann nur sichtbare Konsolenfenster erkennen.",
+               "": "Konsolenfenster sind in dieser Umgebung nicht beobachtbar - die Fensterwache kann hier nichts finden."}[beweiskraft],
+              flush=True)
         waechter = _FensterWaechter().start()
     rc, text = _lauf([str(konsole), "fenster", "--durchlauf", str(ziel_fenster), str(quelle), "--fotos", str(fotos)],
                      dict(umgebung, QT_QPA_PLATFORM="offscreen"), start_ordner, zeit=900)
@@ -241,13 +267,15 @@ def main() -> int:
         fehler.append(f"Durchlauf ueber das Fenster: Rueckgabewert {rc}")
     if waechter is not None:
         neue = waechter.stop()
-        konsolen = waechter.konsolen()
+        konsolen = waechter.konsolen(nur_sichtbare=(beweiskraft != "unsichtbar"))
         if konsolen:
             fehler.append(f"Waehrend des Durchlaufs gingen {len(konsolen)} Konsolenfenster auf: "
-                          + "; ".join(f"'{t}' (PID {pid})" for _k, t, pid in konsolen[:5]))
+                          + "; ".join(f"'{t}' (PID {pid}{', sichtbar' if sichtbar else ''})"
+                                      for _k, t, pid, sichtbar in konsolen[:5]))
         andere = [f for f in neue if f[0] != waechter.KONSOLE]
-        print(f"Waehrend des Durchlaufs neu sichtbar: {len(konsolen)} Konsolenfenster, {len(andere)} andere"
-              + (" (" + "; ".join(f"{k} '{t}'" for k, t, _p in andere[:5]) + ")" if andere else ""), flush=True)
+        print(f"Waehrend des Durchlaufs neu: {len(waechter.konsolen())} Konsolenfenster "
+              f"({len(waechter.konsolen(nur_sichtbare=True))} sichtbar), {len(andere)} andere sichtbare Fenster"
+              + (" (" + "; ".join(f"{k} '{t}'" for k, t, _p, _s in andere[:5]) + ")" if andere else ""), flush=True)
     bilder = sorted(fotos.glob("*.png")) if fotos.is_dir() else []
     if len(bilder) < 12:
         fehler.append(f"Durchlauf: nur {len(bilder)} Bilder statt 12")

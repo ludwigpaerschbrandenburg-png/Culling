@@ -180,3 +180,48 @@ def test_pool_ohne_with_block_meldet_das():
     p = metadaten.ExifToolPool(testbaum.exiftool_pfad(), 1)
     with pytest.raises(AssertionError):
         p.einreichen([("x.jpg", FOTO)])
+
+
+def nachgebautes_exiftool(tmp_path: Path) -> str:
+    """Startbarer Ersatz fuer ExifTool (tests/exiftool_haengt.py) als Skript
+    bzw. .cmd, damit der Pool ihn wie das echte Programm startet."""
+    import sys
+    skript = Path(__file__).with_name("exiftool_haengt.py")
+    if sys.platform.startswith("win"):
+        huelle = tmp_path / "exiftool_haengt.cmd"
+        huelle.write_text(f'@"{sys.executable}" "{skript}" %*\r\n', encoding="utf-8")
+    else:
+        huelle = tmp_path / "exiftool_haengt.sh"
+        huelle.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{skript}" "$@"\n', encoding="utf-8")
+        huelle.chmod(0o755)
+    return str(huelle)
+
+
+def test_haengender_stapel_kostet_nur_die_eine_datei(tmp_path, monkeypatch):
+    """Zeitlimit je Stapel (todo Phase 2): Der Prozess wird beendet und neu
+    gestartet, der Stapel Datei fuer Datei nachgelesen; nur die haengende Datei
+    bekommt einen Fehler, der Pool arbeitet danach weiter."""
+    monkeypatch.setattr(metadaten, "ZEITLIMIT_GRUND", 0.6)
+    monkeypatch.setattr(metadaten, "ZEITLIMIT_JE_DATEI", 0.0)
+    monkeypatch.setattr(metadaten, "STARTABSTAND", 0.0)
+    programm = nachgebautes_exiftool(tmp_path)
+    a, haengt, b = (str(tmp_path / n) for n in ("a.jpg", "haengt.jpg", "b.jpg"))
+    beginn = time.monotonic()
+    with metadaten.ExifToolPool(programm, 1) as pool:
+        ergebnis = pool.lesen([(a, FOTO), (haengt, FOTO), (b, FOTO)])
+        assert ergebnis[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        assert ergebnis[metadaten.schluessel(b)]["Model"] == "Nachbau"
+        assert "Zeitlimit" in ergebnis[metadaten.schluessel(haengt)]["Error"]
+        assert pool.zeitlimits == 2                     # Stapel und die eine Datei
+        # Der Pool ist danach voll brauchbar: neuer Prozess, normale Antwort.
+        assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        assert len(pool._alle) == 1
+    assert time.monotonic() - beginn < 8.0
+
+
+def test_ohne_zeitlimit_kein_waechter(baum):
+    """Das echte ExifTool antwortet innerhalb des Limits; ein normaler Stapel
+    laesst keinen Prozess zurueck und zaehlt kein Zeitlimit."""
+    with metadaten.ExifToolPool(testbaum.exiftool_pfad(), 1) as pool:
+        felder = pool.lesen([(str(baum["jpg"]), FOTO)])[metadaten.schluessel(baum["jpg"])]
+        assert felder["Model"] == "ILCE-7CM2" and pool.zeitlimits == 0

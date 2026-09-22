@@ -723,6 +723,13 @@ def _weiter(konsole, frage: str) -> bool:
     return antwort not in ("n", "nein", "no")
 
 
+def _mindestens_eins(text: str) -> int:
+    zahl = int(text)
+    if zahl < 1:
+        raise argparse.ArgumentTypeError(meldungen.zahl_mindestens_eins(text))
+    return zahl
+
+
 def _start_namensraum(args, befehl: str, **extra) -> argparse.Namespace:
     return argparse.Namespace(befehl=befehl, ziel=args.ziel, config=args.config, **extra)
 
@@ -1172,7 +1179,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p = unterbefehle.add_parser("analyse", help="Metadaten lesen und Ziel berechnen")
     p.add_argument("--profil", choices=sorted(kopieren.PROFILE),
                    help="bestimmt die Zahl der ExifTool-Prozesse (hdd/netzwerk 4, ssd Kerne bis 16)")
-    p.add_argument("--prozesse", type=int, default=None, help="Zahl der ExifTool-Prozesse fest vorgeben")
+    p.add_argument("--prozesse", type=_mindestens_eins, default=None, help="Zahl der ExifTool-Prozesse fest vorgeben (1 oder mehr)")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("kopieren", help="Dateien ins Ziel uebertragen")

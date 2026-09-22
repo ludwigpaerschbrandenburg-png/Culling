@@ -1372,9 +1372,9 @@ class Durchlauf(QObject):
                     return
                 self._foto("01-startseite-leer")
                 f.start.ziel_setzen(self.ziel)
-                f.quelle_hinzufuegen(self.quelle)
+                f.quelle_hinzufuegen(self.quelle, True)    # Rueckfragen kann niemand beantworten
                 self._foto("02-startseite-ausgefuellt")
-                f.los(False)
+                f.los(False, True)
                 self._naechste()
             elif st == 1:          # Scan laeuft -> Uebersicht
                 if f.in_ruhe():

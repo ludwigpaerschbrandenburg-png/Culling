@@ -576,16 +576,10 @@ class Ablauf:
             bekannt = self._bekannte_quellen() if archiv_da else []
             if not bekannt and not self.quellen:
                 raise FotosortFehler(meldungen.ob_quelle_noetig())
-            if not ziel.exists():
-                if not ziel.parent.is_dir():
-                    raise FotosortFehler(meldungen.ziel_eltern_fehlt(ziel, ziel.parent))
-                if not ziel_anlegen:
-                    return {"frage": "ziel_anlegen", "text": meldungen.ob_frage_ziel_anlegen(ziel)}
-            elif not archiv_da and not ziel_trotzdem:
-                n = ordner_eintraege(ziel)
-                if n:
-                    return {"frage": "ziel_nicht_leer", "n": n, "text": meldungen.ob_frage_ziel_nicht_leer(ziel, n)}
-            # Jede neue Quelle noch einmal pruefen - das Ziel kann sich geaendert haben.
+            if not ziel.exists() and not ziel.parent.is_dir():
+                raise FotosortFehler(meldungen.ziel_eltern_fehlt(ziel, ziel.parent))
+            # Erst alles pruefen, was ohne Rueckfrage scheitern kann (Quellen,
+            # ExifTool) - damit eine beantwortete Frage nicht noch einmal kommt.
             bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
             geprueft: list[str] = []
             for q in self.quellen:
@@ -596,16 +590,21 @@ class Ablauf:
             # ExifTool zuerst (SPEC Abschnitt 2), mit der Konfiguration des Archivs.
             konf = config.Konfiguration()
             if archiv_da:
-                try:
-                    stille = _StilleKonsole()
-                    archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
-                    archiv.datenbank.schliessen()
-                    konf = archiv.konf
-                except FotosortFehler:
-                    raise
+                stille = _StilleKonsole()
+                archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
+                archiv.datenbank.schliessen()
+                konf = archiv.konf
             gefunden, wo = cli.exiftool_finden(konf)
             if not gefunden or not cli.exiftool_startbar(gefunden):
                 raise FotosortFehler(meldungen.exiftool_fehlt(wo))
+            # Dann die Rueckfragen.
+            if not ziel.exists():
+                if not ziel_anlegen:
+                    return {"frage": "ziel_anlegen", "text": meldungen.ob_frage_ziel_anlegen(ziel)}
+            elif not archiv_da and not ziel_trotzdem:
+                n = ordner_eintraege(ziel)
+                if n:
+                    return {"frage": "ziel_nicht_leer", "n": n, "text": meldungen.ob_frage_ziel_nicht_leer(ziel, n)}
             quellen_arg = (bekannt + geprueft) if geprueft else []
             ergebnis = self.schritt_starten("scan", quellen=quellen_arg, ziel_anlegen=bool(ziel_anlegen))
             self.quellen = []   # nach dem Scan sind sie bekannte Quellen des Archivs
@@ -644,28 +643,67 @@ class Ablauf:
                 return {"frage": "verwerfen", "wort": erwartet, "text": meldungen.ob_frage_verwerfen(ziel, lokal, im_ziel)}
             if wort != erwartet:
                 raise FotosortFehler(meldungen.ob_wort_falsch(erwartet))
-            # Belegt ein anderer Lauf das Archiv, wird nichts angefasst.
-            if db.datenbank_pfad(lokal).is_file():
-                d = db.Datenbank.oeffnen(lokal, sperren=True)
-                d.schliessen()
-            # Sicherheitsnetz: In beiden Ordnern darf keine Foto-, RAW- oder
-            # Videodatei liegen - dort gehoeren nur Programmdaten hin.
-            konf_pfad = lokal / config.DATEINAME
-            konf = config.laden(konf_pfad) if konf_pfad.is_file() else config.Konfiguration()
+            # Alle Pruefungen vor der ersten Loeschung.
             for ordner in (lokal, im_ziel):
-                if not ordner.is_dir():
-                    continue
-                for p in ordner.rglob("*"):
-                    if p.is_file() and dateitypen.typ_von(p.name, konf) in (dateitypen.FOTO, dateitypen.RAW, dateitypen.VIDEO):
-                        raise FotosortFehler(meldungen.ob_verwerfen_bilddatei(p))
+                if ordner.is_symlink() or os.path.isjunction(ordner):
+                    raise FotosortFehler(meldungen.ob_verwerfen_verknuepfung(ordner))
+            # Belegt ein anderer Lauf das Archiv, wird nichts angefasst. Die Sperre
+            # wird direkt genommen, nicht ueber das Oeffnen der Datenbank: Verwerfen
+            # muss gerade dann gehen, wenn die Datenbank kaputt oder veraltet ist.
+            sperre = None
+            if lokal.is_dir():
+                sperre = db.Archivsperre(db.sperr_pfad(lokal))
+                if not sperre.nehmen():
+                    raise FotosortFehler(meldungen.archiv_belegt(lokal))
             fehler: list[str] = []
             entfernt = 0
-            for ordner in (lokal, im_ziel):
-                if not ordner.is_dir():
-                    continue
-                shutil.rmtree(ordner, onexc=lambda _fn, pfad, _exc: fehler.append(str(pfad)))
-                if not ordner.exists():
+            try:
+                # Sicherheitsnetz: In beiden Ordnern darf keine Foto-, RAW-, Video-
+                # oder Sidecar-Datei liegen - dort gehoeren nur Programmdaten hin.
+                konf_pfad = lokal / config.DATEINAME
+                konf = config.laden(konf_pfad) if konf_pfad.is_file() else config.Konfiguration()
+                for ordner in (lokal, im_ziel):
+                    if not ordner.is_dir():
+                        continue
+                    for p in ordner.rglob("*"):
+                        if p.is_file() and dateitypen.ist_echter_typ(dateitypen.typ_von(p.name, konf)):
+                            raise FotosortFehler(meldungen.ob_verwerfen_bilddatei(p))
+
+                def weg(pfad: Path) -> None:
+                    if pfad.is_dir() and not pfad.is_symlink():
+                        shutil.rmtree(pfad, onexc=lambda _fn, wo, _exc: fehler.append(str(wo)))
+                    else:
+                        try:
+                            pfad.unlink()
+                        except OSError:
+                            fehler.append(str(pfad))
+
+                if lokal.is_dir():
+                    for eintrag in lokal.iterdir():
+                        if sperre is None or eintrag != sperre.pfad:
+                            weg(eintrag)
+                if im_ziel.is_dir():
+                    weg(im_ziel)
+                    if not im_ziel.exists():
+                        entfernt += 1
+            finally:
+                if sperre is not None:
+                    sperre.freigeben()
+            if lokal.is_dir():
+                # Zuletzt die Sperrdatei und der Ordner selbst (unter Windows erst
+                # nach dem Freigeben moeglich).
+                if sperre is not None:
+                    try:
+                        sperre.pfad.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        fehler.append(str(sperre.pfad))
+                try:
+                    lokal.rmdir()
                     entfernt += 1
+                except OSError:
+                    fehler.append(str(lokal))
             if fehler:
                 raise FotosortFehler(meldungen.ob_verwerfen_unvollstaendig(fehler))
             # Startseite leer: kein Ziel, keine Quellen, kein alter Lauf.

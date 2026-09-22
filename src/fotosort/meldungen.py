@@ -663,6 +663,13 @@ def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict) -> str:
 # ---------------------------------------------------------- Analyse -----
 
 
+def zahl_mindestens_eins(text: str) -> str:
+    return f"'{text}' geht nicht: Es muss eine ganze Zahl ab 1 sein."
+
+
+EXIFTOOL_ZEITLIMIT = "ExifTool hat innerhalb des Zeitlimits nicht geantwortet (Datei uebersprungen, Prozess neu gestartet)"
+
+
 def analyse_beginnt(prozesse: int, offen: int) -> str:
     return (
         f"Analyse laeuft: {anzahl(offen)} Dateien zu bearbeiten,"
@@ -694,6 +701,8 @@ def analyse_ergebnis(e) -> str:
     ]
     if e.mehrdeutig:
         zeilen.append(f"  davon mehrdeutig (alphabetisch gewaehlt): {anzahl(e.mehrdeutig)}")
+    if getattr(e, "zeitlimits", 0):
+        zeilen.append(f"  ExifTool wegen Zeitlimit neu gestartet: {anzahl(e.zeitlimits)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         zeilen.append(f"  Durchsatz:       {e.bearbeitet / e.sekunden:,.1f} Dateien/s".replace(",", "."))
@@ -1548,9 +1557,16 @@ def ob_frage_verwerfen(ziel, lokal, im_ziel) -> str:
 
 def ob_verwerfen_bilddatei(pfad) -> str:
     return (
-        f"Nicht verworfen: Unter {pfad} liegt eine Foto-, RAW- oder Videodatei in einem Ordner, "
-        "der nur Programmdaten enthalten dürfte. Das Programm löscht dort nichts. Bitte die Datei "
-        "zuerst von Hand in Sicherheit bringen."
+        f"Nicht verworfen: Unter {pfad} liegt eine Foto-, RAW-, Video- oder Sidecar-Datei in einem "
+        "Ordner, der nur Programmdaten enthalten dürfte. Das Programm löscht dort nichts. Bitte die "
+        "Datei zuerst von Hand in Sicherheit bringen."
+    )
+
+
+def ob_verwerfen_verknuepfung(pfad) -> str:
+    return (
+        f"Nicht verworfen: {pfad} ist eine Verknüpfung auf einen anderen Ordner. Das Programm folgt "
+        "ihr nicht und löscht nichts. Bitte die Verknüpfung von Hand prüfen."
     )
 
 

@@ -46,13 +46,14 @@ mit eingebettetem XML und `ziel_vorbelegen()` erweitert.
 - [x] **Entscheidung: „Duplikate erkennen" in SPEC §4 Phase 2.** Entschieden: Duplikate erkennt
       Phase 3 über den Hash. §4 Phase 2 ist umformuliert; die Analyse zeigt nur die Schätzung
       „mögliche Duplikate" (gleiche Größe und Aufnahmezeit), die nichts entscheidet.
-- [ ] **Zeitlimit beim Lesen eines ExifTool-Stapels (Phase 6).** Bleibt ExifTool an einer
-      Datei hängen, steht der Lauf. Ein Zeitlimit je Stapel mit Neustart des Prozesses
-      gehört in die Robustheits-Runde.
-- [ ] **Eigene Vorlage mit Kamera im Datumsordner (`{jahr}-{monat}-{tag} {kamera}`).** Der
+- [x] **Zeitlimit beim Lesen eines ExifTool-Stapels.** Gebaut (Nacht-Auftrag Teil 4): 60 s plus
+      1 s je Datei des Stapels; danach wird der Prozess beendet und neu gestartet, der Stapel Datei
+      für Datei nachgelesen, nur die hängende Datei bekommt `fehler` (Zeitlimit). Test mit einem
+      nachgebauten ExifTool (`tests/exiftool_haengt.py`), das an einer Datei hängen bleibt.
+- [x] **Eigene Vorlage mit Kamera im Datumsordner (`{jahr}-{monat}-{tag} {kamera}`).** Der
       Zusatz-Abgleich gilt je Ebene mit Datumsfeld; in einer gemischten Ebene könnte
       `2026-01-01 Geburtstag` für `2026-01-01 A7C` gewählt werden. Mit der Standardvorlage
-      unmöglich; für eigene Vorlagen in der `LIESMICH.md` (Phase 6) erklären.
+      unmöglich; in der `LIESMICH.md` §9 („Eigene Ordnervorlage") erklärt.
 
 ### Offen, mit echten Dateien zu prüfen
 
@@ -85,21 +86,20 @@ Rückfall auf dem berechneten statt dem geschriebenen Namen) ist behoben und mit
 
 - [x] **Gruppe wird bei Inhalts-Duplikat eines Mitglieds getrennt.** Der Bericht (Phase 4) weist
       jedes Duplikat mit Partnerdatei aus.
-- [ ] **Gruppenmitglieder in späteren Status (Phase 4/5).** Wird eine Hauptdatei nach dem Kopieren
+- [ ] **Gruppenmitglieder in späteren Status.** Wird eine Hauptdatei nach dem Kopieren
       neu analysiert (zweiter Scan, geänderte Quelle), ziehen nur Mitglieder mit Status
-      `analysiert` mit; schon kopierte bleiben, wo sie sind. Beim Bericht entscheiden, ob das
-      als Ereignis gemeldet wird.
-- [ ] **Gruppenanhang im Wettlauf mit einem Fremdprozess (Phase 6).** Legt ein anderes Programm
+      `analysiert` mit; schon kopierte bleiben, wo sie sind. Ob das als eigenes Ereignis in den
+      Bericht soll, ist eine Entscheidung des Nutzers (bisher: nur über den Status je Datei
+      sichtbar). Nichts geht verloren.
+- [x] **Gruppenanhang im Wettlauf mit einem Fremdprozess.** Legt ein anderes Programm
       genau zwischen Anhang-Bestimmung und Umbenennen eine Datei unter `X_1` an, bekommt nur
-      das betroffene Mitglied `_2`, die übrigen behalten `_1`. Nichts geht verloren, aber die
-      Gruppe hat dann zwei Anhänge. Innerhalb des Programms kann das nicht passieren (Zielnamen
-      „in Arbeit" warten). Mit `fotosort ziel-index` und dem Bericht sichtbar machen.
-- [ ] **Windows-Zweig des nicht überschreibenden Umbenennens (`MoveFileExW`) ist im Container
-      nicht prüfbar** und muss beim ersten Lauf unter Windows mit dem künstlichen Testbaum
-      nachgezogen werden (`tests/test_pfade.py`, `tests/test_kopieren.py`).
-- [ ] **Verschieben (`--verschieben`) kommt in Phase 5.** Der Schalter ist vorhanden und
-      verweist dorthin; Umbenennen auf demselben Laufwerk und die Löschbedingung aus SPEC §5
-      werden dort gebaut.
+      das betroffene Mitglied `_2`, die übrigen behalten `_1`. Nichts geht verloren; seit der
+      Prüfung von Phase 5 steht der Fall als Ereignis `anhang_abweichend` im Bericht.
+- [x] **Windows-Zweig des nicht überschreibenden Umbenennens (`MoveFileExW`):** läuft seit der
+      Windows-CI bei jedem Push auf `windows-latest` mit (`tests/test_pfade.py`,
+      `tests/test_kopieren.py`, ohne Windows-Ausnahme), NTFS auf dem Läufer.
+- [x] **Verschieben (`--verschieben`)** ist in Phase 5 gebaut (Umbenennen auf demselben
+      Laufwerk, Löschbedingung aus SPEC §5).
 - [ ] **Durchsatz auf echten Platten messen (Phase 6).** Die Zahlen aus `tests/tempo_kopieren.py`
       stammen aus dem Container mit Dateisystem-Cache und sagen nichts über HDD, SSD oder SMB.
       Die Profil-Werte (hdd 2, netzwerk 4, ssd 8) sind Startwerte, die auf dem Ryzen und gegen
@@ -421,11 +421,15 @@ Version 0.2.0, Release v0.2.
 - [x] **Schwarze Fenster:** Je ExifTool-Prozess ging ein Konsolenfenster auf (über 30), der
       Virenscanner schlug an. Ursache: Ein Konsolenprogramm, das aus einem Programm ohne Konsole
       (Fenster, losgelöster Arbeitsprozess) gestartet wird, bekommt von Windows eine neue Konsole.
-      Behoben: `prozesse.py` gibt jedem Hilfsprozess `CREATE_NO_WINDOW` und `SW_HIDE`
-      (ExifTool-Pool, ExifTool-Prüfung, `--version`, Arbeitsprozess). Die Paketprüfung beobachtet
-      während des Durchlaufs alle sichtbaren Fenster (`EnumWindows`) und scheitert bei jedem neuen
-      Konsolenfenster; eine Gegenprobe mit `CREATE_NEW_CONSOLE` zeigt vorher, ob die Umgebung
-      solche Fenster überhaupt sichtbar macht.
+      Behoben: `prozesse.py` gibt ExifTool-Pool, ExifTool-Prüfung und `--version`
+      `CREATE_NO_WINDOW` + `SW_HIDE`, dem Arbeitsprozess `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
+      + `SW_HIDE`. Die Paketprüfung beobachtet während des Durchlaufs alle Fenster (`EnumWindows`,
+      alle 50 ms, Konsolenfenster auch unsichtbar) und scheitert bei jedem neuen Konsolenfenster;
+      zwei Gegenproben (`CREATE_NEW_CONSOLE`, `CREATE_NO_WINDOW`) zeigen vorher, was die Umgebung
+      beobachtbar macht. **Vorbehalt:** Auf dem GitHub-Läufer ohne Bildschirm war beim ersten Lauf
+      kein Konsolenfenster sichtbar (die Wache meldet das ehrlich und findet dann nichts); die
+      Flaggen selbst prüft `tests/test_prozesse.py` unter Windows. Der Beweis „keine schwarzen
+      Fenster" kommt vom nächsten Test auf dem echten PC.
 - [x] **32 Prozesse auf einer Festplatte, 8 Dateien/s:** Die Prozesszahl war „Anzahl Kerne“.
       Jetzt nach Profil: `hdd` 4, `netzwerk` 4, `ssd` Kerne bis 16; `metadaten_prozesse` und
       `analyse --prozesse N` bleiben als feste Vorgabe, `analyse --profil` gibt das Profil an
@@ -443,8 +447,18 @@ Version 0.2.0, Release v0.2.
       ohne Archiv-Kennung → Frage vor dem Scan. Fenster und Browser-Fassung.
 - [x] **„Archiv verwerfen…“** auf der Startseite (Karte des angefangenen Archivs): entfernt den
       lokalen Archiv-Ordner und `.fotosortierer` im Ziel, nie kopierte Dateien, nie eine Quelle;
-      Wort `verwerfen`; nicht bei laufendem Schritt oder belegtem Archiv; Sicherheitsnetz gegen
-      Bilddateien in den Programmordnern. Danach Startseite leer.
+      Wort `verwerfen`; nicht bei laufendem Schritt oder belegtem Archiv (Archivsperre direkt, ohne
+      die Datenbank zu öffnen — geht auch bei kaputter Datenbank); nie über eine Verknüpfung;
+      Sicherheitsnetz gegen Foto-, RAW-, Video- und Sidecar-Dateien in den Programmordnern, alle
+      Prüfungen vor der ersten Löschung. Danach Startseite leer.
+- [x] **Prüf-Agent zu Teil 2** (ein unabhängiger Prüfer): kein Verlustpfad. Behoben: Verwerfen
+      öffnete die Datenbank zum Sperren und scheiterte damit bei kaputter/veralteter Datenbank
+      (unbehandelter `sqlite3`-Fehler); Verknüpfung als `.fotosortierer` wurde erst nach dem Löschen
+      des lokalen Ordners erkannt (Sackgasse); Sidecars fehlten im Sicherheitsnetz; `--prozesse -2`
+      wurde angenommen; der Durchlauf (`--durchlauf`) hätte an den neuen Rückfragen gehangen;
+      „Ziel nicht leer" wurde vor der Quellen-/ExifTool-Prüfung gefragt (doppelte Frage); Fensterwache
+      alle 200 ms hätte ein kurzes `exiftool -ver` verpassen können; vier Doku-Abweichungen. Jeder
+      Punkt mit Test.
 - [x] **Datenmenge je Quelle** im Scan-Ergebnis (Fenster, `status`, Befehl `scan`) zählt nur
       erfasste Dateien (Foto, RAW, Video, Sidecar), nicht die „sonstigen“.
 - [x] **Unterbrechungen in jeder Kombination geprüft** (`tests/test_unterbrechungen.py`, dazu ein

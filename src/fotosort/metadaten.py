@@ -22,7 +22,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from . import dateitypen, prozesse
+from . import dateitypen, meldungen, prozesse
 
 # Nur die Felder, die die Datumsermittlung (SPEC Abschnitt 3) und der
 # Kamera-Ordner brauchen. Gruppenpraefixe weggelassen: ExifTool liefert
@@ -63,9 +63,23 @@ PROZESSE_HOECHSTENS = 16
 # bremsen sich gegenseitig und lassen Virenscanner anschlagen.
 STARTABSTAND = 0.2
 
+# Zeitlimit je Stapel: Grundzeit plus je Datei. Bleibt ExifTool an einer
+# Datei haengen, wird der Prozess beendet und neu gestartet; der Stapel wird
+# danach Datei fuer Datei gelesen, damit nur die eine Datei als Fehler endet.
+ZEITLIMIT_GRUND = 60.0
+ZEITLIMIT_JE_DATEI = 1.0
+
+
+def zeitlimit(anzahl: int) -> float:
+    return ZEITLIMIT_GRUND + ZEITLIMIT_JE_DATEI * max(1, anzahl)
+
 
 class MetadatenFehler(Exception):
     """ExifTool konnte eine Datei nicht lesen."""
+
+
+class ZeitlimitUeberschritten(MetadatenFehler):
+    """ExifTool hat innerhalb des Zeitlimits nicht geantwortet und wurde beendet."""
 
 
 def schluessel(pfad) -> str:
@@ -123,6 +137,7 @@ class _Prozess:
     def __init__(self, programm: str) -> None:
         self.programm = programm
         self.zaehler = 0
+        self.abgewuergt = False
         self.prozess = subprocess.Popen(
             [programm, "-stay_open", "True", "-@", "-"],
             stdin=subprocess.PIPE,
@@ -131,8 +146,19 @@ class _Prozess:
             **prozesse.unsichtbar(),
         )
 
-    def lesen(self, pfade_typ: list[tuple[str, str]]) -> dict[str, dict]:
-        """Einen Stapel gleichen Dateityps lesen. Pfad -> Felder."""
+    def _abwuergen(self) -> None:
+        self.abgewuergt = True
+        try:
+            self.prozess.kill()
+        except OSError:
+            pass
+
+    def lesen(self, pfade_typ: list[tuple[str, str]], limit: float | None = None) -> dict[str, dict]:
+        """Einen Stapel gleichen Dateityps lesen. Pfad -> Felder.
+
+        Mit limit (Sekunden) wird der Prozess beendet, wenn die Antwort nicht
+        rechtzeitig kommt (ZeitlimitUeberschritten); er ist danach unbrauchbar.
+        """
         if not pfade_typ:
             return {}
         typ = pfade_typ[0][1]
@@ -144,18 +170,31 @@ class _Prozess:
         zeilen = _argumente(typ) + [p for p, _ in pfade_typ]
         eingabe = "\n".join(zeilen) + f"\n-execute{nummer}\n"
         assert self.prozess.stdin is not None and self.prozess.stdout is not None
-        self.prozess.stdin.write(eingabe.encode("utf-8", "surrogateescape"))
-        self.prozess.stdin.flush()
+        waechter = threading.Timer(limit, self._abwuergen) if limit else None
+        if waechter is not None:
+            waechter.daemon = True
+            waechter.start()
+        try:
+            try:
+                self.prozess.stdin.write(eingabe.encode("utf-8", "surrogateescape"))
+                self.prozess.stdin.flush()
+            except OSError as fehler:
+                raise MetadatenFehler(f"ExifTool nimmt keine Eingabe an: {fehler}") from fehler
 
-        ende = f"{{ready{nummer}}}".encode()
-        puffer = bytearray()
-        while True:
-            zeile = self.prozess.stdout.readline()
-            if not zeile:
-                raise MetadatenFehler("ExifTool hat sich unerwartet beendet")
-            if zeile.rstrip(b"\r\n") == ende:
-                break
-            puffer.extend(zeile)
+            ende = f"{{ready{nummer}}}".encode()
+            puffer = bytearray()
+            while True:
+                zeile = self.prozess.stdout.readline()
+                if not zeile:
+                    if self.abgewuergt:
+                        raise ZeitlimitUeberschritten(meldungen.EXIFTOOL_ZEITLIMIT)
+                    raise MetadatenFehler("ExifTool hat sich unerwartet beendet")
+                if zeile.rstrip(b"\r\n") == ende:
+                    break
+                puffer.extend(zeile)
+        finally:
+            if waechter is not None:
+                waechter.cancel()
 
         text = puffer.decode("utf-8", "surrogateescape").strip()
         ergebnis: dict[str, dict] = {}
@@ -191,6 +230,7 @@ class ExifToolPool:
         self._schloss = threading.Lock()
         self._executor: ThreadPoolExecutor | None = None
         self._naechster_start = 0.0
+        self.zeitlimits = 0          # wie oft ein Prozess wegen Zeitlimit ersetzt wurde
 
     def __enter__(self) -> "ExifToolPool":
         self._executor = ThreadPoolExecutor(max_workers=self.prozesse, thread_name_prefix="exiftool")
@@ -219,8 +259,31 @@ class ExifToolPool:
                 self._alle.append(p)
         return p
 
+    def _ersetzen(self, p: _Prozess) -> None:
+        """Einen abgewuergten Prozess vergessen; der naechste Aufruf startet neu."""
+        p.beenden()
+        with self._schloss:
+            if p in self._alle:
+                self._alle.remove(p)
+            self.zeitlimits += 1
+        if getattr(self._lokal, "prozess", None) is p:
+            self._lokal.prozess = None
+
     def _lesen(self, pfade_typ: list[tuple[str, str]]) -> dict[str, dict]:
-        return self._prozess().lesen(pfade_typ)
+        p = self._prozess()
+        try:
+            return p.lesen(pfade_typ, zeitlimit(len(pfade_typ)))
+        except ZeitlimitUeberschritten:
+            self._ersetzen(p)
+        if len(pfade_typ) <= 1:
+            # Diese eine Datei ist es: Sie bekommt einen Fehler, alles andere geht weiter.
+            return {schluessel(pf): {"Error": meldungen.EXIFTOOL_ZEITLIMIT} for pf, _t in pfade_typ}
+        # Den Stapel Datei fuer Datei nachlesen: nur die haengende Datei kostet
+        # noch ein Zeitlimit, die uebrigen sind in Sekundenbruchteilen gelesen.
+        ergebnis: dict[str, dict] = {}
+        for eintrag in pfade_typ:
+            ergebnis.update(self._lesen([eintrag]))
+        return ergebnis
 
     def einreichen(self, pfade_typ: list[tuple[str, str]]) -> Future:
         """Einen Stapel (alle vom selben Dateityp) im Hintergrund lesen."""

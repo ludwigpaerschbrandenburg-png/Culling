@@ -80,8 +80,8 @@ gelöscht oder überschrieben; die Fotos kommen zu dem, was schon da liegt).
 Programms zu diesem Zielordner – die Datenbank auf dem Rechner und den Ordner `.fotosortierer`
 im Ziel mit Sicherung und Berichten. **Kopierte Fotos und Videos bleiben unangetastet, die
 Quellordner ebenso.** Das Programm verlangt dafür das getippte Wort `verwerfen`, tut es nicht,
-solange ein Schritt läuft, und weigert sich, wenn in einem der beiden Ordner eine Bilddatei
-liegt. Danach ist die Startseite leer. Sinnvoll nach einem Probelauf, den Sie nicht mehr
+solange ein Schritt läuft, und weigert sich, wenn in einem der beiden Ordner eine Bild-, Video-
+oder Sidecar-Datei liegt. Es geht auch dann, wenn die Datenbank kaputt ist – dafür ist es da. Danach ist die Startseite leer. Sinnvoll nach einem Probelauf, den Sie nicht mehr
 brauchen, oder wenn ein Archiv neu begonnen werden soll.
 
 Danach zeigt das Fenster die **Übersicht**: oben die Pfade (Quellen → Ziel) und die
@@ -209,7 +209,7 @@ Gedächtnis (die Datenbank, Abschnitt 7).
 ```
 fotosort.bat scan       --quelle D:\Chaos --quelle E:\Karte --ziel D:\Archiv
 fotosort.bat scan       --ziel D:\Archiv                    (alle bekannten Quellen erneut)
-fotosort.bat analyse    --ziel D:\Archiv
+fotosort.bat analyse    --ziel D:\Archiv                    (ExifTool-Prozesse nach Profil; --prozesse N erzwingt eine Zahl)
 fotosort.bat kopieren   --ziel D:\Archiv --dry-run          (nur zeigen, was passieren wuerde)
 fotosort.bat kopieren   --ziel D:\Archiv
 fotosort.bat kopieren   --ziel D:\Archiv --verschieben      (Original nach gelungener Pruefung loeschen)
@@ -440,6 +440,9 @@ neben der alten den Anhang `_1`.
 - **Keine schwarzen Fenster:** Während der Analyse laufen mehrere ExifTool-Programme im
   Hintergrund. Sie öffnen kein eigenes Fenster (seit v0.5). Meldet der Virenscanner trotzdem
   `exiftool.exe` aus dem Programmordner, ist das ein Fehlalarm auf das mitgelieferte ExifTool.
+- **Hängt ExifTool an einer Datei,** wartet das Programm gut eine Minute, beendet es dann und
+  startet es neu; nur diese eine Datei bekommt den Status `fehler` (Grund: Zeitlimit), alle
+  anderen werden normal gelesen.
 - **Eigene Ordnervorlage:** Steht `{kamera}` in derselben Ebene wie das Datum
   (`{jahr}-{monat}-{tag} {kamera}`), kann ein Tagesordner mit Zusatz für die falsche
   Kamera wiederverwendet werden. Mit der Standardvorlage passiert das nicht.

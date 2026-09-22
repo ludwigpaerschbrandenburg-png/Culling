@@ -33,6 +33,9 @@ def test_analyse_prozesse_nach_profil_und_vorgabe(capsys, quelle, ziel):
     assert args.profil == "ssd" and args.prozesse is None
     with pytest.raises(SystemExit):
         eltern.parse_args(["analyse", "--ziel", str(ziel), "--profil", "turbo"])
+    for falsch in ("0", "-2", "zwei"):
+        with pytest.raises(SystemExit):
+            eltern.parse_args(["analyse", "--ziel", str(ziel), "--prozesse", falsch])
 
 
 def test_alle_unterbefehle_aus_der_spec_gibt_es():

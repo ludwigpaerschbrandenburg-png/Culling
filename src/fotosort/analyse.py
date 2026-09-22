@@ -39,6 +39,7 @@ class Ergebnis:
     wiederverwendet: int = 0
     stapel: int = 0
     prozesse: int = 0
+    zeitlimits: int = 0
     sekunden: float = 0.0
     abgebrochen: bool = False
     mehrdeutig_gemeldet: set = field(default_factory=set)
@@ -91,6 +92,7 @@ def ausfuehren(
         except KeyboardInterrupt:
             ergebnis.abgebrochen = True
         finally:
+            ergebnis.zeitlimits = pool.zeitlimits
             dbank.stapel_schreiben()
             anzeige.stop()
 
