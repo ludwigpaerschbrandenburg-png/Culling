@@ -33,7 +33,8 @@ Culling/ (Repository-Wurzel)
 │  │
 │  ├─ scan.py                Phase 1: Quelle durchlaufen, zählen
 │  ├─ analyse.py             Phase 2: Gruppen, Metadaten, Datum, Ziel je Datei
-│  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2; Prozesszahl nach Profil, gestaffelter Start
+│  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2; Prozesszahl nach Profil, gestaffelter Start;
+│  │                          Start über perl.exe + exiftool.pl, wo die Windows-Fassung das erlaubt (exiftool_befehl)
 │  ├─ prozesse.py            Popen-Argumente für Hilfsprozesse: unter Windows kein Konsolenfenster (CREATE_NO_WINDOW, SW_HIDE)
 │  ├─ datum.py               Aufnahmedatum bestimmen        ← reine Logik
 │  ├─ kamera.py              Modell → Ordnername, Aliase    ← reine Logik
@@ -46,6 +47,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
+│  ├─ restzeit.py            Restzeit: erst nach 60 s und 3 %, gleitende Minute, 5-s-Takt, abgerundet (Fenster und Konsole)
 │  ├─ bericht.py             Text- und CSV-Bericht
 │  ├─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
 │  ├─ steuerung.py           Statusdatei und Steuerdatei je Schritt (Phase 7): Stand ≤ 2×/s, Pause, Abbruch
@@ -60,17 +62,19 @@ Culling/ (Repository-Wurzel)
 │                             fonts.css + fonts/ (Inter als woff2, offline) — eine Seite, kein Rahmenwerk
 ├─ docs/design/             Design-Uebergabe der Oberflaeche: DESIGN.md, index.html, app.css, styles.css
 ├─ docs/oberflaeche/         Bildschirmfotos jeder Ansicht (fenster --durchlauf --fotos, Qt offscreen, Testbaum)
-├─ paket/
-│  ├─ fotosort_start.py      Einstieg fuer PyInstaller
-│  ├─ fotosort.spec          PyInstaller-Spec: fotosort.exe (Fenster, Symbol) und fotosort-konsole.exe auf einem _internal
-│  ├─ fotosort.ico           Programmsymbol (aus stil.symbol() erzeugt)
-│  ├─ exiftool_holen.py      ExifTool (Windows, 64 Bit, mit exiftool_files) von exiftool.org holen
-│  ├─ bauen.py               PyInstaller-Ordnervariante bauen, Paketordner zusammenstellen
-│  └─ pruefen.py             gepacktes Programm wie auf einem frischen PC ausprobieren (start.bat aus Ordner mit
-│                             Leerzeichen, Fenster in 20 s, Durchlauf über das Fenster, Befehle, Arbeitsprozess)
+├─ paket/                    Windows-Paket ohne PyInstaller (SPEC §8 „Windows-Paket"): nur signiertes Python + perl.exe
+│  ├─ fotosort_start.py      Einstieg im Paket (lib\fotosort_start.py), mit Fangnetz für Startfehler
+│  ├─ windows-bibliotheken.txt  Bibliotheken des Pakets, fest mit Version und SHA-256
+│  ├─ exiftool_holen.py      ExifTool (Windows, 64 Bit, mit exiftool_files) holen; Starter und perl.exe prüfen
+│  ├─ bauen.py               eingebettetes Python (python.org, SHA-256) + lib\ + exiftool\ zusammenstellen, Qt kürzen,
+│  │                          vorkompilieren; läuft auf jedem System
+│  ├─ paketinhalt.py         erlaubte Programme; Importtabellen aller exe/dll/pyd: fehlt eine Bibliothek?
+│  └─ pruefen.py             das Paket wie auf einem frischen PC ausprobieren (Signaturen, start.bat aus Ordner mit
+│                             Leerzeichen, Fenster über pythonw.exe in 20 s, ExifTool über perl.exe, Durchlauf,
+│                             Befehle über fotosort.bat, Arbeitsprozess über pythonw.exe)
 ├─ .github/workflows/
 │  ├─ tests.yml              Testsuite auf ubuntu-latest und windows-latest
-│  └─ paket.yml              Windows-Paket bauen und pruefen; Artefakt je Push, Release bei Tag v*
+│  └─ paket.yml              Windows-Paket bauen und pruefen; Artefakt je Push, Release bei Tag v* oder release_tag
 └─ tests/
    ├─ testbaum.py            erzeugt den künstlichen Testbaum
    └─ test_*.py              ein Test je Modul
@@ -353,6 +357,8 @@ und kaputtgehen kann. Darum bewusst wenige:
 | `fastapi`, `uvicorn` | Oberfläche (Phase 7) | Der Server hinter der Seite: kleine JSON-Anfragen, nur auf 127.0.0.1. FastAPI liefert Routing und Fehlerbehandlung, uvicorn den Server in einem eigenen Strang des Programms. Kein Rahmenwerk auf der Seite selbst. |
 | `PySide6-Essentials` | Desktop-Fenster (Phase 7) | Qt: ein richtiges Windows-Programm mit Taskleisten-Symbol und den normalen Ordnerdialogen, ohne Browser und ohne weitere Laufzeit auf dem PC. pywebview/pythonnet (WebView2) fielen in v0.3 auf dem echten PC aus. Nur „Essentials" (Core, Gui, Widgets), nicht das volle Qt. Im Container (Phase 8) wird es nicht gebraucht, dort läuft `--ohne-fenster`. |
 | `pytest`, `httpx` | Tests | Standard; `httpx` nur für den Testclient der Schnittstelle. Nur zum Entwickeln, nicht im Betrieb. |
+
+**Im Windows-Paket** (seit v0.6, `paket/windows-bibliotheken.txt`) stehen nur `blake3`, `rich`, `tomli-w`, `tzdata`, `PySide6-Essentials` und `shiboken6`, jeweils fest mit Version und SHA-256. `fastapi`/`uvicorn` fehlen dort (die Browser-Fassung ist für den Server; `fenster.py` lädt sie erst bei `--ohne-fenster`), ebenso `pygments`/`markdown-it-py`, die `rich` nur für Extras braucht, die fotosort nicht nutzt (`tests/test_paket.py` prüft, dass Konsole, Balken und Fenster-Modul ohne sie laden). Gebaut wird ohne PyInstaller: das eingebettete Python von python.org plus diese Bibliotheken als gewöhnliche Dateien (`paket/bauen.py`).
 
 Ausdrücklich **nicht**:
 

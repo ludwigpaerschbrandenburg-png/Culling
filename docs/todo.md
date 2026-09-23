@@ -358,24 +358,37 @@ Kein Fund der Stufe „Verlust möglich". Alle Funde sind behoben (Tests in `tes
 
 ## Windows-Paket (eigenständiges Programm)
 
-Gebaut: `paket/bauen.py` mit `paket/fotosort.spec` (PyInstaller, Ordner-Variante, kein Einzel-exe
-wegen Startzeit und Virenscanner; seit Phase 7 zwei Programme auf einem gemeinsamen `_internal`:
-`fotosort.exe` mit Konsole und `fotosort-fenster.exe` ohne), `paket/exiftool_holen.py` (ExifTool
-64 Bit mit dem Ordner `exiftool_files`, den die Windows-Fassung neben der exe braucht),
-`paket/pruefen.py` (das gepackte Programm läuft in der CI wirklich durch `--version`, scan,
-analyse, kopieren, pruefen, den Fenster-Selbsttest beider Programme und einen Schritt als
-Arbeitsprozess), Workflow `paket.yml` (Artefakt `fotosort-windows` je Push, Release mit
-`fotosort-windows.zip` bei Tag `v*` oder `release_tag`).
+**Seit v0.6 ohne PyInstaller.** Aus dem Test von v0.5: Norton prüfte jede der selbst gebauten
+exe-Dateien bei jedem Start und hielt sie bis zu 60 Sekunden fest; ein Skript über `python.exe`
+beanstandete es nie. Jetzt startet im Paket nur das offizielle, signierte Python von python.org
+und das Perl von ExifTool (SPEC §8 „Windows-Paket"):
+`paket/bauen.py` (eingebettetes Python 3.12.10 mit geprüfter SHA-256, Bibliotheken fest mit
+Prüfsumme aus `paket/windows-bibliotheken.txt`, Qt gekürzt, vorkompiliert, ExifTool ohne
+Starter), `paket/paketinhalt.py` (nur `python.exe`, `pythonw.exe`, `perl.exe` erlaubt; Importtabellen
+aller exe/dll/pyd: jede Abhängigkeit liegt im Paket oder in Windows), `paket/exiftool_holen.py`
+(ExifTool 64 Bit, prüft Starter und `perl.exe exiftool.pl` auf dieselbe Version),
+`paket/pruefen.py` (frischer PC in der CI: Signaturen, Fenster über `pythonw.exe` in 20 s,
+ExifTool über `perl.exe`, Durchlauf über das Fenster mit Fensterwache, Arbeitsschritte über
+`pythonw.exe`, Befehle über `fotosort.bat`, Arbeitsprozess), Workflow `paket.yml` (Artefakt
+`fotosort-windows` je Push, Release mit `fotosort-windows.zip` bei Tag `v*` oder `release_tag`).
 `fotosort --version` nennt Programm- und ExifTool-Version; das mitgelieferte ExifTool wird vor
 `PATH` gefunden (SPEC §2). `fotosort.bat` erkennt selbst, ob es im Paket oder im Quellcode liegt.
+Größe: etwa 42 MB als ZIP (v0.5 mit PyInstaller: 74 MB), 107 MB entpackt.
 
 - [x] Paket, Artefakt, Release v0.1, Prüfung in der CI
 - [x] **Release anlegen ohne Tag-Push:** Aus der Entwicklungsumgebung lassen sich keine Tags
       pushen (Verbindung bricht ab). Deshalb kann der Workflow auch von Hand gestartet werden
       („Run workflow" mit `release_tag`, z. B. `v0.2`); er legt Tag und Release dann selbst auf
       dem aktuellen Stand an. Ein gepushter Tag `v*` funktioniert weiterhin genauso.
-- [ ] **Signatur:** Das Programm ist nicht signiert; SmartScreen warnt beim ersten Start (LIESMICH
-      §1 sagt, was zu klicken ist). Eine Signatur bräuchte ein Zertifikat.
+- [x] **Ohne PyInstaller (v0.6):** keine eigenen exe mehr; gestartet werden nur `python.exe` und
+      `pythonw.exe` (signiert von der Python Software Foundation) und `perl.exe` von ExifTool.
+      ExifTool läuft direkt über `perl.exe exiftool.pl` – der Starter `exiftool.exe` lädt nur
+      `perl532.dll` und tut dasselbe, ohne Umgebungsvariablen (seine Zeichenketten geprüft); lange
+      Pfade behandelt ExifTool selbst (`WindowsLongPath`). Die Windows-Tests der CI nutzen dasselbe
+      ExifTool auf demselben Weg. Ordner-Ausnahmen für Defender, Norton und Avast in der LIESMICH.
+- [x] **Signatur:** Eine eigene Signatur ist nicht mehr nötig: Es gibt keine eigenen Programme mehr,
+      und die gestarteten sind signiert (Python) bzw. weit verbreitet (Perl von ExifTool). Ob Norton
+      damit zufrieden ist, zeigt erst der Test auf dem echten PC.
 - [ ] **ExifTool-Version:** Der Bau nimmt die jeweils aktuelle Version von exiftool.org; die
       benutzte steht in `exiftool\VERSION.txt` im Paket. Zum Festnageln `--version` in
       `paket/exiftool_holen.py` bzw. im Workflow angeben.
@@ -390,7 +403,8 @@ Arbeitsprozess, Zusammenfassungen und Listen aus der Datenbank), `server.py` (Fa
 Ordnerdialog, Selbsttest) und `static/` (eine Seite ohne Rahmenwerk). `steuerung.py` im Kern:
 Statusdatei (≤ 2×/s, Herzschlag 2 s) und Steuerdatei (Pause/Weiter/Abbruch) je Schritt;
 `fotosort arbeit --auftrag` führt einen Schritt als eigenen, losgelösten Prozess aus. Windows-Paket
-mit `fotosort-fenster.exe` (ohne Konsole) neben `fotosort.exe`; `start.bat` öffnet das Fenster;
+mit `fotosort-fenster.exe` (ohne Konsole) neben `fotosort.exe` (seit v0.6 ersetzt durch das eingebettete
+Python, siehe „Windows-Paket"); `start.bat` öffnet das Fenster;
 die CI startet das Fenster im Selbsttest und lässt einen Schritt als Arbeitsprozess laufen.
 Version 0.2.0, Release v0.2.
 
@@ -478,6 +492,17 @@ Version 0.2.0, Release v0.2.
       Fortschrittsmeldung, frühestens 0,5 s nach der vorigen — ein Schritt, der schneller fertig
       ist, läuft einfach zu Ende.
 
+### Aus dem Test von v0.5 (Version 0.6)
+
+- [x] **Restzeit sprang von 3 auf 11 Minuten**, weil sie aus dem Anfangstempo hochrechnete (die
+      ersten Dateien kommen aus dem Zwischenspeicher). Jetzt `restzeit.py` für alle Phasen, im
+      Fenster und im Konsolenbalken: erste 60 s bzw. unter 3 % „wird berechnet“, danach gleitender
+      Durchschnitt der letzten 60 s, höchstens alle 5 s neu, abgerundet (Minuten, unter 2 min auf
+      10 s), Pausen zählen nicht, die Uhr beginnt mit der ersten Fortschrittsmeldung. Tests mit
+      künstlicher Uhr (`tests/test_restzeit.py`), auch für den Fall „schneller Anfang, dann langsam“.
+- [x] **Norton hielt jede PyInstaller-exe bis zu 60 s fest** – Windows-Paket ohne PyInstaller, siehe
+      Abschnitt „Windows-Paket“.
+
 ### Entscheidungen für den Nutzer
 
 - [ ] **4 ExifTool-Prozesse für Festplatte und Netzlaufwerk** sind eine begründete Schätzung, keine
@@ -492,12 +517,22 @@ Version 0.2.0, Release v0.2.
       `fenster.log`) und lässt die kopierten Dateien im Ziel liegen. Wer das Ziel komplett leeren
       will, löscht die Ordner selbst — das Programm löscht nie Bilder aus dem Ziel.
 
-- [ ] **Paketgröße:** Mit Qt ist das Paket etwa doppelt so groß wie vorher (Qt-Bibliotheken).
-      Reicht das, oder soll das Paket noch verkleinert werden (Module ausschließen, UPX)?
-- [ ] **Zwei Programme im Paket:** `fotosort.exe` (Fenster) und `fotosort-konsole.exe` (Befehle mit
-      Ausgabe, wird von `fotosort.bat` und vom Fenster für die Arbeitsprozesse genutzt). Ein
-      einzelnes Programm ginge, dann aber entweder ohne Konsolenausgabe oder mit schwarzem Fenster
-      hinter der Oberfläche. So lassen?
+- [x] **Paketgröße:** Seit v0.6 etwa 42 MB als ZIP (vorher 74 MB): Qt nur mit QtCore/QtGui/QtWidgets,
+      ohne Werkzeuge, Übersetzungen, QML und Software-OpenGL.
+- [x] **Zwei Programme im Paket:** erledigt mit v0.6 – es gibt keine eigenen Programme mehr, nur
+      `python\pythonw.exe` (Fenster, Arbeitsschritte) und `python\python.exe` (`fotosort.bat`).
+- [ ] **Python im Paket ist 3.12.10** – die letzte 3.12, für die python.org fertige Windows-Dateien
+      anbietet, und die Version, mit der alle Tests laufen. Sicherheitskorrekturen für 3.12 gibt es
+      seitdem nur noch als Quellcode. Für ein Programm, das nur lokale Dateien liest, ist das kein
+      Risiko; ein Umstieg auf 3.13/3.14 ginge, dann aber mit allen Tests auf der neuen Version.
+      Gewünscht?
+- [ ] **Browser-Fassung nicht im Windows-Paket** (fastapi, uvicorn fehlen; `fenster --ohne-fenster`
+      sagt das verständlich). Sie ist für den Server gedacht (Phase 8). So lassen?
+- [ ] **Die erste Restzeit nach einer Minute** stützt sich auf die ganze erste Minute – war der Anfang
+      sehr schnell (Zwischenspeicher), steigt die Zahl in der Minute danach noch etwas an und bleibt
+      dann ruhig. So wie gewünscht umgesetzt (60 s / 3 %, gleitende Minute, 5-s-Takt, abgerundet);
+      falls es auf der Festplatte noch springt, wäre der nächste Schritt, die erste Minute ganz
+      aus dem Durchschnitt zu lassen.
 - [ ] **„Weitermachen“ scannt nicht neu.** Der Knopf springt zum offenen Schritt. Wer inzwischen
       Dateien in die Quelle gelegt hat, drückt „Los geht's“ — das durchsucht immer zuerst.
 - [ ] **Pause greift bei der nächsten Fortschrittsmeldung,** also nach der laufenden Datei (bei der

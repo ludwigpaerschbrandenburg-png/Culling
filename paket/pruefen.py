@@ -208,8 +208,15 @@ def _signatur(pfad: Path) -> tuple[str, str]:
     befehl = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
               f"$s = Get-AuthenticodeSignature -LiteralPath '{literal}'; "
               "Write-Output ([string]$s.Status + '|' + [string]$s.SignerCertificate.Subject)"]
-    aus = subprocess.run(befehl, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    # Ohne PSModulePath: Aus PowerShell 7 heraus (die CI-Schritte laufen in pwsh)
+    # erbt Windows PowerShell sonst dessen Modulpfad und findet
+    # Get-AuthenticodeSignature nicht.
+    umgebung = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+    aus = subprocess.run(befehl, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                         env=umgebung)
     status, _, wer = aus.stdout.strip().partition("|")
+    if not status:
+        print(f"  (PowerShell: rc={aus.returncode} {aus.stderr.strip()[-500:]})", flush=True)
     return status, wer
 
 

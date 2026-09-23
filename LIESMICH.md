@@ -20,18 +20,31 @@ Das fertige Windows-Programm braucht keine Installation. Python und ExifTool sin
 schon im Paket enthalten.
 
 1. Auf der Release-Seite des Projekts die Datei **`fotosort-windows.zip`** herunterladen.
-2. Die ZIP-Datei entpacken (Rechtsklick, „Alle extrahieren…"), zum Beispiel nach
-   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort.exe`,
-   `fotosort-konsole.exe`, `fotosort.bat`, dieser Anleitung und den Unterordnern `_internal` und
-   `exiftool`. Der Ordner darf überall liegen, auch mit Leerzeichen oder Klammern im Namen.
-3. **`start.bat` doppelklicken.** Es öffnet sich das Programmfenster mit Knöpfen und
-   Ordnerauswahl (Abschnitt 2). Genauso geht ein Doppelklick auf `fotosort.exe`.
+2. **Vor dem Entpacken freigeben** – das erspart Rückfragen von Windows: Rechtsklick auf die
+   ZIP-Datei, „Eigenschaften", unten bei „Sicherheit" das Häkchen **„Zulassen"** setzen, „OK".
+   Gibt es das Häkchen nicht, ist nichts zu tun.
+3. Die ZIP-Datei entpacken (Rechtsklick, „Alle extrahieren…"), zum Beispiel nach
+   `C:\fotosort`. Es entsteht ein Ordner `fotosort` mit `start.bat`, `fotosort.bat`, dieser
+   Anleitung und den Unterordnern `python`, `lib` und `exiftool`. Der Ordner darf überall
+   liegen, auch mit Leerzeichen oder Klammern im Namen.
+4. **`start.bat` doppelklicken.** Es öffnet sich das Programmfenster mit Knöpfen und
+   Ordnerauswahl (Abschnitt 2). Ein schwarzes Fenster blitzt dabei kurz auf und schließt
+   sich gleich wieder – das ist `start.bat` selbst.
 
-**Wenn Windows beim ersten Start warnt:** Zeigt SmartScreen das blaue Fenster „Der
-Computer wurde durch Windows geschützt", klicken Sie auf „Weitere Informationen" und dann
-auf „Trotzdem ausführen". Meldet der Virenscanner `fotosort.exe` oder `fotosort-konsole.exe`,
-ist das ein Fehlalarm, der bei selbst gebauten Programmen ohne Herstellersignatur vorkommt;
-lassen Sie die Datei als Ausnahme zu. Beides fragt Windows nur beim ersten Mal.
+**Was im Paket startet:** nur das offizielle Python von python.org im Ordner `python`
+(`pythonw.exe` für das Fenster und seine Arbeitsschritte, `python.exe` für `fotosort.bat`),
+digital signiert von der Python Software Foundation – dasselbe Programm, mit dem auch jedes
+andere Python-Skript läuft. Dazu `perl.exe` im Ordner `exiftool\exiftool_files`: Das ist
+ExifTool, das die Aufnahmedaten aus den Bildern liest. Eigens gebaute Programmdateien (.exe)
+gibt es seit Version 0.6 nicht mehr. Im Ordner `lib` liegen fotosort selbst und die
+Bibliotheken, die es braucht. Installiert wird nichts, und außerhalb des Ordners ändert das
+Programm nur seinen Datenordner (Abschnitt 7).
+
+**Wenn Windows beim ersten Start fragt:** Erscheint „Sicherheitswarnung – Möchten Sie diese
+Datei ausführen?" oder das blaue Fenster „Der Computer wurde durch Windows geschützt", wurde
+die ZIP-Datei nicht wie in Schritt 2 freigegeben. Dann „Ausführen" bzw. „Weitere
+Informationen" und „Trotzdem ausführen" klicken – oder den Ordner löschen, die ZIP-Datei
+freigeben und neu entpacken.
 
 **Wenn sich kein Fenster öffnet:** Dann zeigt das Programm ein Meldungsfenster mit dem Grund,
 einem Rat und dem Ort des Protokolls
@@ -39,8 +52,47 @@ einem Rat und dem Ort des Protokolls
 ZIP-Datei noch einmal vollständig zu entpacken. Das Fenster braucht keine zusätzliche
 Software auf dem PC.
 
+### Wenn der Virenscanner anschlägt
+
+Das Paket startet nur Programme, die Virenscanner kennen: das signierte Python und das Perl
+von ExifTool. Hält ein Virenscanner fotosort trotzdem auf – der Start dauert sehr lange, oder
+es kommt eine Meldung zu `pythonw.exe`, `python.exe` oder `perl.exe` aus dem fotosort-Ordner –,
+richten Sie für den **ganzen fotosort-Ordner** (zum Beispiel `C:\fotosort`) eine Ausnahme ein.
+Nur für diesen Ordner, nicht für die Fotoordner und nicht für ganze Laufwerke. Die Menünamen
+unterscheiden sich je nach Version etwas; sinngemäß heißen sie so:
+
+**Microsoft Defender (in Windows eingebaut):**
+1. Startmenü öffnen, „Windows-Sicherheit" eintippen und öffnen.
+2. „Viren- & Bedrohungsschutz" wählen.
+3. Unter „Einstellungen für Viren- & Bedrohungsschutz" auf „Einstellungen verwalten" klicken.
+4. Ganz nach unten zu „Ausschlüsse" blättern und „Ausschlüsse hinzufügen oder entfernen"
+   wählen; Windows fragt nach der Erlaubnis – „Ja".
+5. „Ausschluss hinzufügen", dann „Ordner", den fotosort-Ordner wählen, „Ordner auswählen".
+
+**Norton (Norton 360, Norton AntiVirus):**
+1. Norton öffnen und „Einstellungen" wählen (bei neueren Versionen vorher bei
+   „Gerätesicherheit" auf „Öffnen" klicken).
+2. „Antivirus" wählen, dann den Reiter „Scans und Risiken".
+3. Zum Abschnitt „Ausschlüsse / Niedrige Risiken" blättern.
+4. Beim Eintrag „Von Auto-Protect, Skriptsteuerung, SONAR und Download-Insight
+   auszuschließende Elemente" auf „Konfigurieren" klicken, dann „Ordner hinzufügen", den
+   fotosort-Ordner wählen, „OK". **Das ist der wichtige Eintrag** – er betrifft die Prüfung
+   beim Start, die bis zu einer Minute dauern kann.
+5. Dasselbe beim Eintrag „Von Scans auszuschließende Elemente".
+6. Mit „Anwenden" und „Schließen" bestätigen.
+
+**Avast (Avast Free Antivirus, Avast One):**
+1. Avast öffnen, oben rechts auf „Menü" (☰) und dann auf „Einstellungen" klicken.
+2. „Allgemein" und dann „Ausnahmen" wählen.
+3. „Ausnahme hinzufügen" klicken, den fotosort-Ordner über „Durchsuchen" wählen oder den Pfad
+   eintippen (zum Beispiel `C:\fotosort\*`), dann „Ausnahme hinzufügen".
+
+Danach `start.bat` erneut doppelklicken. Wer das Programm weitergibt: Die Ausnahme gilt nur
+auf dem eigenen PC. Der Empfänger richtet sie auf seinem Rechner selbst ein, falls sein
+Virenscanner anschlägt.
+
 Ob alles zusammenpasst, zeigt `fotosort.bat --version` im schwarzen Fenster: Es nennt die
-Programmversion und das mitgelieferte ExifTool.
+Programmversion und das mitgelieferte ExifTool („gestartet ueber perl.exe").
 
 Wer das Programm aus dem Quellcode einrichten will, findet den Weg mit Python und
 ExifTool im Anhang am Ende dieser Anleitung.
@@ -182,7 +234,7 @@ die Statuswörter in den Zählern).
 
 Wer lieber Fragen im Textfenster beantwortet, ruft im Programmordner `fotosort.bat start`
 auf (Eingabeaufforderung öffnen: in der Adresszeile des Explorers `cmd` eintippen;
-`fotosort.bat` benutzt dafür `fotosort-konsole.exe`). Die Fragen dort:
+`fotosort.bat` benutzt dafür das mitgelieferte `python\python.exe`). Die Fragen dort:
 
 | Frage | Was Sie eingeben |
 |---|---|
@@ -250,7 +302,18 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
 ## 4. Was während eines Laufs zu sehen ist
 
 Im Fenster zeigt jeder Schritt einen Balken mit erledigten Dateien und Datenmenge, MB pro
-Sekunde und der geschätzten Restzeit, höchstens zweimal je Sekunde erneuert. **Pause** hält
+Sekunde und der geschätzten Restzeit, höchstens zweimal je Sekunde erneuert.
+
+**Die Restzeit** erscheint erst, wenn der Schritt eine Minute gearbeitet und mindestens 3 %
+geschafft hat; bis dahin steht dort „wird berechnet". Der Grund: Die ersten Dateien liefert
+Windows oft aus seinem Zwischenspeicher, viel schneller als den Rest – eine Schätzung aus
+diesem Anfang wäre viel zu kurz. Danach rechnet das Programm mit dem Tempo der letzten Minute,
+erneuert die Zahl höchstens alle 5 Sekunden und rundet ab: auf ganze Minuten, unter 2 Minuten
+auf 10 Sekunden. Pausen zählen nicht mit. Ging in der letzten Minute gar nichts voran (etwa bei
+einem sehr großen Video), bleibt die letzte Zahl stehen. Beim Scan gibt es keine Restzeit, weil
+die Gesamtzahl der Dateien erst am Ende feststeht.
+
+**Pause** hält
 nach der laufenden Datei an, **Fortsetzen** macht weiter, **Abbrechen** beendet den Schritt
 sauber – das Bisherige bleibt gespeichert, der nächste Lauf macht dort weiter. Reagiert ein
 Schritt nicht auf „Abbrechen", erscheint nach einer Weile „Sofort beenden". Im schwarzen
@@ -361,6 +424,8 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 - `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = automatisch.
   `fotosort.bat messen` schlägt passende Werte vor.
 - `exiftool_pfad` – Pfad zu `exiftool.exe`, falls ein anderes ExifTool benutzt werden soll.
+  Liegt daneben der Ordner `exiftool_files`, startet das Programm dort `perl.exe` mit
+  `exiftool.pl` direkt – dasselbe, was `exiftool.exe` selbst täte, nur ohne den Umweg.
   Normalerweise nicht nötig: Das fertige Paket findet sein mitgeliefertes ExifTool selbst,
   und aus dem Quellcode heraus gibt `fotosort.bat` den von `einrichten.bat` gemerkten Pfad mit.
 
@@ -399,8 +464,10 @@ Lauf hat seine Sperre hinterlassen. Erst prüfen, ob noch ein Fenster offen ist;
 den Befehl erneut versuchen.
 
 **„ExifTool wurde nicht gefunden":** Im fertigen Paket liegt ExifTool im Unterordner
-`exiftool` neben `fotosort.exe`. Kommt die Meldung trotzdem, ist der Ordner beim Entpacken
-verloren gegangen: die ZIP-Datei noch einmal vollständig entpacken. Aus dem Quellcode
+`exiftool\exiftool_files` (`perl.exe` und `exiftool.pl`). Kommt die Meldung trotzdem, ist der
+Ordner beim Entpacken verloren gegangen oder vom Virenscanner in Quarantäne genommen worden:
+die ZIP-Datei noch einmal vollständig entpacken und gegebenenfalls die Ausnahme aus
+Abschnitt 1 einrichten. Aus dem Quellcode
 heraus: Anhang lesen und `einrichten.bat` erneut starten.
 
 **„Es gibt eine Archiv-Kennung, aber die lokale Datenbank fehlt":** Das passiert,
@@ -437,9 +504,10 @@ neben der alten den Anhang `_1`.
 - **Sidecars** (`.xmp` usw.) wandern immer zusammen mit ihrer Hauptdatei.
 - **Videos ohne Zeitzone** werden aus Weltzeit umgerechnet; steht `heimat_zeitzone`
   falsch, rutscht eine Abendaufnahme in den nächsten Tag.
-- **Keine schwarzen Fenster:** Während der Analyse laufen mehrere ExifTool-Programme im
-  Hintergrund. Sie öffnen kein eigenes Fenster (seit v0.5). Meldet der Virenscanner trotzdem
-  `exiftool.exe` aus dem Programmordner, ist das ein Fehlalarm auf das mitgelieferte ExifTool.
+- **Keine schwarzen Fenster:** Während der Analyse laufen mehrere ExifTool-Programme
+  (`perl.exe`) im Hintergrund. Sie öffnen kein eigenes Fenster (seit v0.5). Meldet der
+  Virenscanner trotzdem `perl.exe` aus dem Programmordner, ist das ein Fehlalarm auf das
+  mitgelieferte ExifTool – Abschnitt 1, „Wenn der Virenscanner anschlägt".
 - **Hängt ExifTool an einer Datei,** wartet das Programm gut eine Minute, beendet es dann und
   startet es neu; nur diese eine Datei bekommt den Status `fehler` (Grund: Zeitlimit), alle
   anderen werden normal gelesen.
@@ -478,7 +546,10 @@ Nur nötig, wenn Sie nicht das fertige Paket, sondern den Quellcode benutzen wol
    (braucht Internet) und meldet FERTIG. Es kann beliebig oft laufen.
 5. Danach funktionieren `start.bat` und `fotosort.bat` genauso wie im fertigen Paket.
 
-**Das Paket selbst bauen** (wie es die GitHub-Actions tun): `python paket/exiftool_holen.py
-build/exiftool`, dann `python paket/bauen.py --exiftool build/exiftool`, dann
-`python paket/pruefen.py build/paket/dist/fotosort build/pruefung`. Das Ergebnis liegt unter
-`build/paket/dist/fotosort`.
+**Das Paket selbst bauen** (wie es die GitHub-Actions tun; geht mit Python 3.12 auf jedem
+System, auch Linux, braucht Internet): `python paket/exiftool_holen.py build/exiftool`, dann
+`python paket/bauen.py --exiftool build/exiftool`, dann
+`python paket/pruefen.py build/paket/fotosort build/pruefung`. Das Ergebnis liegt unter
+`build/paket/fotosort`. Der Bau holt das eingebettete Python von python.org und die
+Bibliotheken aus `paket/windows-bibliotheken.txt`, jeweils mit geprüfter Prüfsumme; starten
+lässt sich das Ergebnis nur unter Windows.

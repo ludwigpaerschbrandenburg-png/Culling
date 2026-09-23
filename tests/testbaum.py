@@ -131,7 +131,12 @@ def _mp4_mit_sony_xml(utc_sekunden_1904: int, creation: str, modell: str) -> byt
 def exiftool_pfad() -> str:
     """ExifTool finden; ohne ExifTool bricht der Erzeuger ab."""
     aus_umgebung = os.environ.get("FOTOSORT_EXIFTOOL", "").strip()
-    gefunden = shutil.which(aus_umgebung) if aus_umgebung else shutil.which("exiftool")
+    if aus_umgebung:
+        # Eine vorhandene Datei gilt so, wie sie ist - etwa exiftool.pl, das
+        # shutil.which unter Windows nie findet (.pl steht nicht in PATHEXT).
+        gefunden = shutil.which(aus_umgebung) or (aus_umgebung if Path(aus_umgebung).is_file() else None)
+    else:
+        gefunden = shutil.which("exiftool")
     if not gefunden:
         raise RuntimeError(
             "ExifTool wurde nicht gefunden. Der Testbaum braucht es, um die\n"
