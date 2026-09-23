@@ -33,12 +33,14 @@ jobs:
           sudo apt-get install -y libimage-exiftool-perl libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
           exiftool -ver
 
-      - name: ExifTool installieren (Windows)
+      # Unter Windows dasselbe ExifTool wie im Paket, und die Tests starten es
+      # wie das Paket: perl.exe mit exiftool.pl direkt (metadaten.exiftool_befehl).
+      - name: ExifTool holen (Windows, wie im Paket)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install exiftool -y --no-progress
-          exiftool -ver
+          python paket/exiftool_holen.py build/exiftool
+          "$((Resolve-Path build/exiftool).Path)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Abhaengigkeiten installieren
         run: |

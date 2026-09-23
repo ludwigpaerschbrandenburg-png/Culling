@@ -1455,7 +1455,7 @@ class Durchlauf(QObject):
         if zustand == "laeuft":
             daten = {"schritt": "kopieren", "zustand": "laeuft", "pid": os.getpid(), "beginn": jetzt - 312, "aktualisiert": jetzt,
                      "dateien": 1284, "gesamt": 3912, "bytes": int(18.6 * 1024 ** 3), "gesamt_bytes": int(48.2 * 1024 ** 3),
-                     "bytes_pro_s": 186 * 1024 ** 2, "restzeit_s": 720, "sekunden": 312, "lauf": 3, "rc": None, "hinweis": ""}
+                     "bytes_pro_s": 186 * 1024 ** 2, "restzeit_s": 720, "restzeit_zustand": "geschaetzt", "sekunden": 312, "lauf": 3, "rc": None, "hinweis": ""}
             steuerung.json_schreiben(ab.auftrag_datei, {"schritt": "kopieren", "ziel": self.ziel})
             steuerung.json_schreiben(ab.status_datei, daten)
             self.f.lauf_starten("kopieren")
@@ -1483,6 +1483,23 @@ class Durchlauf(QObject):
 # ------------------------------------------------------------------ Start --
 
 
+APP_ID = "fotosort.fotosortierer"
+
+
+def eigene_taskleiste() -> None:
+    """Unter Windows: eigene Kennung fuer die Taskleiste. Das Fenster laeuft im
+    Paket unter pythonw.exe; ohne eigene Kennung zeigte die Taskleiste das
+    Python-Symbol und legte das Fenster mit anderen Python-Programmen zusammen.
+    So erscheint es als "fotosort" mit dem eigenen Symbol."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except (AttributeError, OSError):  # pragma: no cover - nur Windows
+        pass
+
+
 def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, str] | None = None,
             fotos: str | None = None, konsole=None) -> int:
     """Das Desktop-Fenster oeffnen. Rueckgabe wie ein Befehl (0 gut)."""
@@ -1494,6 +1511,7 @@ def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, st
         pass
     if (selbsttest or durchlauf) and not os.environ.get("QT_QPA_PLATFORM") and not sys.platform.startswith("win") and not os.environ.get("DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    eigene_taskleiste()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("fotosort")
     app.setApplicationDisplayName("fotosort")

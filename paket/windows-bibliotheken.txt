@@ -1,0 +1,19 @@
+# Bibliotheken des Windows-Pakets (paket/bauen.py), fest mit Version und
+# Pruefsumme: Jeder Bau nimmt genau diese Dateien von PyPI, fuer Windows 64 Bit
+# und Python 3.12 (installiert ohne weitere Abhaengigkeiten, --no-deps).
+#
+# Nicht dabei, mit Absicht:
+# - fastapi, uvicorn: die Browser-Fassung; unter Windows gibt es das Fenster.
+# - pygments, markdown-it-py, mdurl: rich braucht sie nur fuer Quelltext-
+#   Hervorhebung, Markdown und bunte Fehlerberichte - fotosort nutzt davon
+#   nichts (nur Console, Progress, Table). tests/test_paket.py prueft das.
+#
+# Neue Versionen: pip download --platform win_amd64 --python-version 3.12 \
+#   --implementation cp --only-binary=:all: <paket>==<version>, dann die
+#   SHA-256 der .whl-Datei hier eintragen.
+blake3==1.0.9 --hash=sha256:15566065ff90ab3da46ec0be1417406f00507af902b6fb0fbc6563e77f02fc42
+rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+tomli-w==1.2.0 --hash=sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90
+tzdata==2026.4 --hash=sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81
+PySide6-Essentials==6.11.2 --hash=sha256:c8a29def77032773a30879f7f24415b5395ad08592d147c170824ef4c735dfc1
+shiboken6==6.11.2 --hash=sha256:6ab0eba1c904455df621f9a6df3ca2bb896bab8670572d2bc4e37804ae91f19a

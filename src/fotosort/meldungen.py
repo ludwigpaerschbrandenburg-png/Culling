@@ -68,6 +68,13 @@ def exiftool_fehlt(gesucht: str = "") -> str:
     )
 
 
+def exiftool_mitgeliefert_wo(pfad) -> str:
+    """Woher ExifTool kommt, wenn es im Programmordner mitgeliefert ist."""
+    if str(pfad).lower().endswith(".pl"):
+        return f"{pfad} (im Programmordner mitgeliefert, gestartet ueber perl.exe)"
+    return f"{pfad} (im Programmordner mitgeliefert)"
+
+
 def exiftool_hinweis(gesucht: str = "") -> str:
     """Weicher Hinweis fuer Befehle, die ohne ExifTool auskommen."""
     wo = gesucht or "ueber PATH"
@@ -812,8 +819,32 @@ def kopieren_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, b
     )
 
 
-def restzeit(sekunden: float) -> str:
-    return f"noch etwa {dauer(sekunden)}"
+def restzeit_kurz(sekunden: float) -> str:
+    """Eine schon abgerundete Restzeit (restzeit.abrunden) als kurzer Text."""
+    s = int(max(0, sekunden))
+    if s < 10:
+        return "unter 10 s"
+    stunden, rest = divmod(s, 3600)
+    minuten, sek = divmod(rest, 60)
+    if stunden:
+        return f"{stunden} h {minuten} min"
+    if minuten and sek:
+        return f"{minuten} min {sek} s"
+    if minuten:
+        return f"{minuten} min"
+    return f"{sek} s"
+
+
+RESTZEIT_WIRD_BERECHNET = "wird berechnet"
+
+
+def restzeit(sekunden: float | None, zustand: str = "geschaetzt") -> str:
+    """Restzeit fuer die Konsole: "noch etwa 11 min", "Restzeit wird berechnet"."""
+    if zustand == "wird_berechnet":
+        return f"Restzeit {RESTZEIT_WIRD_BERECHNET}"
+    if sekunden is None or zustand != "geschaetzt":
+        return ""
+    return f"noch etwa {restzeit_kurz(sekunden)}"
 
 
 def kopieren_nichts_zu_tun() -> str:
@@ -1507,6 +1538,16 @@ def ob_laeuft_schon(schritt: str) -> str:
     return f"Es läuft gerade noch ein Schritt ({SCHRITT_NAME.get(schritt, schritt)}). Bitte warten, bis er fertig ist."
 
 
+def ob_restzeit(sekunden, zustand: str) -> str:
+    """Restzeit im Fenster: "wird berechnet", "11 min", "1 min 40 s", "unter 10 s" -
+    oder nichts, wenn die Gesamtmenge unbekannt ist (Scan)."""
+    if zustand == "wird_berechnet":
+        return RESTZEIT_WIRD_BERECHNET
+    if zustand != "geschaetzt" or sekunden is None:
+        return ""
+    return restzeit_kurz(float(sekunden))
+
+
 def ob_kein_lauf() -> str:
     return "Im Moment läuft nichts, das sich anhalten oder abbrechen ließe."
 
@@ -1712,6 +1753,15 @@ def ob_laufzeitfehler(grund: str, protokoll) -> str:
     if protokoll:
         zeilen += ["", f"Protokoll: {protokoll}"]
     return "\n".join(zeilen)
+
+
+def ob_server_fehlt(grund: str) -> str:
+    return (
+        "Die Browser-Fassung (--ohne-fenster) braucht die Bibliotheken fastapi und uvicorn. "
+        f"Sie fehlen:\n{grund}\n"
+        "Das Windows-Paket enthält sie nicht – dort gibt es das Programmfenster (start.bat). "
+        "Die Browser-Fassung ist für den Betrieb auf dem Server gedacht."
+    )
 
 
 def ob_qt_fehlt(grund: str) -> str:

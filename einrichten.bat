@@ -87,7 +87,7 @@ echo Installiere fotosort und seine Bausteine, braucht Internet, dauert etwa ein
 ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
 ".venv\Scripts\python.exe" -m pip install --quiet -e .
 if errorlevel 1 goto :install_fehler
-".venv\Scripts\fotosort.exe" --help >nul 2>&1
+".venv\Scripts\python.exe" -X utf8 -m fotosort --help >nul 2>&1
 if errorlevel 1 goto :start_fehler
 echo.
 echo FERTIG. fotosort ist eingerichtet.

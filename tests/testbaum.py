@@ -148,8 +148,10 @@ def _exiftool(befehle: list[list[str]]) -> None:
         zeilen.extend(befehl)
         zeilen.append("-execute")
     eingabe = "\n".join(zeilen) + "\n"
+    from fotosort import metadaten   # derselbe Start wie im Programm (perl.exe direkt, wo es geht)
+
     fertig = subprocess.run(
-        [programm, "-stay_open", "False", "-@", "-"],
+        metadaten.exiftool_befehl(programm) + ["-stay_open", "False", "-@", "-"],
         input=eingabe,
         capture_output=True,
         text=True,

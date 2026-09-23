@@ -460,7 +460,8 @@ def test_steuerung_pause_und_abbruch(tmp_path, monkeypatch):
     assert steuerung.json_lesen(status)["zustand"] == "laeuft"
     st.melden(5, 10, 500, 1000)
     d = steuerung.json_lesen(status)
-    assert d["dateien"] == 5 and d["gesamt"] == 10 and d["bytes"] == 500 and d["restzeit_s"] is not None
+    assert d["dateien"] == 5 and d["gesamt"] == 10 and d["bytes"] == 500
+    assert d["restzeit_s"] is None and d["restzeit_zustand"] == "wird_berechnet"   # erste Minute
 
     # Pause: melden() haelt an, bis "weiter" kommt; der Stand sagt "pause".
     steuerung.wunsch_schreiben(steuer, pause=True)
@@ -604,12 +605,21 @@ def test_fenster_selbsttest_ohne_fenster(capsys):
     assert "Selbsttest bestanden" in aus and "http://127.0.0.1:" in aus
 
 
-def test_fenster_kommando_und_umgebung(monkeypatch):
+def test_fenster_kommando_und_umgebung(monkeypatch, tmp_path):
     befehl = ablauf_modul._kommando()
-    assert befehl[-2:] == ["-m", "fotosort"] and befehl[0] == sys.executable
+    assert befehl[-4:] == ["-X", "utf8", "-m", "fotosort"]
+    if not sys.platform.startswith("win"):
+        assert befehl[0] == sys.executable
     env = ablauf_modul._umgebung()
     assert env["PYTHONUTF8"] == "1"
     assert str(Path(cli.__file__).resolve().parent.parent) in env["PYTHONPATH"]
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(Path("/x/fotosort.exe")))
-    assert ablauf_modul._kommando() == [str(Path("/x/fotosort.exe"))]   # fotosort-konsole.exe fehlt: sich selbst nehmen
+    # Windows-Paket: Der Arbeitsprozess laeuft ueber pythonw.exe neben python.exe
+    # (ohne Konsole) - auch wenn das Programm selbst ueber python.exe laeuft.
+    python = tmp_path / "python" / "python.exe"
+    python.parent.mkdir()
+    python.write_bytes(b"")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "executable", str(python))
+    assert ablauf_modul._kommando() == [str(python), "-X", "utf8", "-m", "fotosort"]   # ohne pythonw.exe
+    (python.parent / "pythonw.exe").write_bytes(b"")
+    assert ablauf_modul._kommando() == [str(python.parent / "pythonw.exe"), "-X", "utf8", "-m", "fotosort"]

@@ -16,7 +16,10 @@ import urllib.request
 from .. import meldungen
 from . import ablauf as ablauf_modul
 from . import meldungsfenster
-from . import server as server_modul
+
+# Der Server der Browser-Fassung (fastapi, uvicorn) wird erst geladen, wenn er
+# gebraucht wird: Das Windows-Paket enthaelt ihn nicht (dort gibt es das
+# Fenster), und das Fenster darf nicht an einer fehlenden Bibliothek scheitern.
 
 OK = 0
 FEHLER = 1
@@ -38,6 +41,11 @@ def _selbsttest_http(adresse: str, konsole) -> int:
 
 def server_starten(port: int, selbsttest: bool, ziel: str | None, konsole) -> int:
     """Nur der Server (Browser-Fassung): Adresse nennen, bis Strg+C laufen."""
+    try:
+        from . import server as server_modul
+    except ImportError as fehler:
+        konsole.print(meldungen.ob_server_fehlt(f"{type(fehler).__name__}: {fehler}"))
+        return FEHLER
     ab = ablauf_modul.Ablauf(ziel=ziel)
     app = server_modul.app_bauen(ab)
     srv = server_modul.Server(app, port)

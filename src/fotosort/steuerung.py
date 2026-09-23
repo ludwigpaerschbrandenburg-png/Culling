@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
+
+from . import restzeit
 
 ZUSTAND_LAEUFT = "laeuft"
 ZUSTAND_PAUSE = "pause"
@@ -61,6 +64,7 @@ class Steuerung:
         self.gesamt_bytes = 0
         self.lauf: int | None = None
         self.hinweis = ""
+        self.restzeit = restzeit.Restzeit()
         self._zuletzt = 0.0
         self._sperre = threading.Lock()
         self._herz: threading.Thread | None = None
@@ -72,15 +76,16 @@ class Steuerung:
         jetzt = time.time()
         verstrichen = max(1e-9, jetzt - self.begonnen)
         rate = self.bytes / verstrichen
-        rest = None
-        if self.gesamt_bytes and self.bytes and self.bytes < self.gesamt_bytes:
-            rest = (self.gesamt_bytes - self.bytes) * verstrichen / self.bytes
-        elif self.gesamt and self.dateien and self.dateien < self.gesamt and not self.gesamt_bytes:
-            rest = (self.gesamt - self.dateien) * verstrichen / self.dateien
+        # Restzeit (restzeit.py): nach der Datenmenge, sonst nach der Zahl der Dateien.
+        if self.gesamt_bytes:
+            rest, rest_zustand = self.restzeit.melden(self.bytes, self.gesamt_bytes)
+        else:
+            rest, rest_zustand = self.restzeit.melden(self.dateien, self.gesamt)
         return {
             "schritt": self.schritt,
             "zustand": self.zustand,
             "pid": os.getpid(),
+            "programm": sys.executable,     # im Windows-Paket: python\\pythonw.exe
             "beginn": self.begonnen,
             "aktualisiert": jetzt,
             "dateien": self.dateien,
@@ -89,6 +94,7 @@ class Steuerung:
             "gesamt_bytes": self.gesamt_bytes,
             "bytes_pro_s": rate,
             "restzeit_s": rest,
+            "restzeit_zustand": rest_zustand,
             "sekunden": verstrichen,
             "lauf": self.lauf,
             "rc": rc,
@@ -138,15 +144,21 @@ class Steuerung:
             raise KeyboardInterrupt
         if wunsch.get("pause"):
             self.zustand = ZUSTAND_PAUSE
+            with self._sperre:
+                self.restzeit.pause()      # die Restzeit-Uhr steht in der Pause
             self.schreiben()
-            while True:
-                time.sleep(0.5)
-                wunsch = json_lesen(self.steuer_datei) or {}
-                if wunsch.get("abbrechen"):
-                    self.zustand = ZUSTAND_LAEUFT
-                    raise KeyboardInterrupt
-                if not wunsch.get("pause"):
-                    break
+            try:
+                while True:
+                    time.sleep(0.5)
+                    wunsch = json_lesen(self.steuer_datei) or {}
+                    if wunsch.get("abbrechen"):
+                        self.zustand = ZUSTAND_LAEUFT
+                        raise KeyboardInterrupt
+                    if not wunsch.get("pause"):
+                        break
+            finally:
+                with self._sperre:
+                    self.restzeit.weiter()
             self.zustand = ZUSTAND_LAEUFT
             self.schreiben()
 

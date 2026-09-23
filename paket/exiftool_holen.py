@@ -1,6 +1,9 @@
 """ExifTool fuer Windows (64 Bit) von exiftool.org holen und fuer das Paket
-ablegen: <ziel>/exiftool.exe neben <ziel>/exiftool_files (Perl-Laufzeit und
-Bibliotheken, die die Windows-Fassung braucht) plus VERSION.txt.
+ablegen: <ziel>/exiftool_files (perl.exe, exiftool.pl, Perl-Laufzeit und
+Bibliotheken) plus VERSION.txt; daneben der Starter <ziel>/exiftool.exe, den
+das Paket aber nicht mitnimmt - es startet perl.exe mit exiftool.pl direkt
+(paket/bauen.py, metadaten.exiftool_befehl). Die Tests unter Windows nehmen
+diesen Ordner ebenfalls (.github/workflows/tests.yml).
 
 Aufruf:
     python paket/exiftool_holen.py <zielordner> [--version 13.36]
@@ -18,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -37,6 +41,14 @@ def _laden(url: str, versuche: int = VERSUCHE) -> bytes:
             anfrage = urllib.request.Request(url, headers=KOPF)
             with urllib.request.urlopen(anfrage, timeout=120) as antwort:
                 return antwort.read()
+        except urllib.error.HTTPError as f:
+            if f.code == 404:       # gibt es dort nicht - Wiederholen hilft nicht
+                raise
+            fehler = f
+            print(f"  Versuch {versuch}/{versuche} fehlgeschlagen: {url} ({f})", flush=True)
+            if versuch < versuche:
+                time.sleep(10 * versuch)
+            continue
         except Exception as f:  # noqa: BLE001 - jeder Netzfehler wird wiederholt
             fehler = f
             print(f"  Versuch {versuch}/{versuche} fehlgeschlagen: {url} ({f})", flush=True)
@@ -101,14 +113,24 @@ def holen(ziel: Path, version: str | None) -> str:
 
 
 def pruefen(ziel: Path) -> None:
-    exe = ziel / "exiftool.exe"
+    """Beide Wege muessen dieselbe Version liefern: der Starter exiftool.exe
+    und perl.exe mit exiftool.pl direkt (so startet das Paket ExifTool)."""
+    perl = ziel / "exiftool_files" / "perl.exe"
+    skript = ziel / "exiftool_files" / "exiftool.pl"
+    if not perl.is_file() or not skript.is_file():
+        raise SystemExit(f"exiftool_files mit perl.exe und exiftool.pl fehlt unter {ziel}")
     if not sys.platform.startswith("win"):
-        print(f"Nicht unter Windows: {exe} wird nicht gestartet.")
+        print(f"Nicht unter Windows: {perl} wird nicht gestartet.")
         return
-    aus = subprocess.run([str(exe), "-ver"], capture_output=True, text=True, timeout=120)
-    if aus.returncode != 0 or not aus.stdout.strip():
-        raise SystemExit(f"exiftool.exe startet nicht: rc={aus.returncode} {aus.stderr.strip()}")
-    print(f"exiftool.exe startet: Version {aus.stdout.strip()}")
+    versionen = {}
+    for name, befehl in (("exiftool.exe", [str(ziel / "exiftool.exe")]), ("perl.exe exiftool.pl", [str(perl), str(skript)])):
+        aus = subprocess.run(befehl + ["-ver"], capture_output=True, text=True, timeout=120)
+        if aus.returncode != 0 or not aus.stdout.strip():
+            raise SystemExit(f"{name} startet nicht: rc={aus.returncode} {aus.stderr.strip()}")
+        versionen[name] = aus.stdout.strip()
+        print(f"{name} startet: Version {versionen[name]}")
+    if len(set(versionen.values())) != 1:
+        raise SystemExit(f"Starter und perl.exe liefern verschiedene Versionen: {versionen}")
 
 
 def main() -> int:

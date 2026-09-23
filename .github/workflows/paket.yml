@@ -1,8 +1,9 @@
 name: Windows-Paket
 
-# Baut bei jedem Push das eigenstaendige Windows-Programm (PyInstaller,
-# Ordner-Variante, mit mitgeliefertem ExifTool), probiert es aus und legt es
-# als Artefakt "fotosort-windows" ab. Bei einem Tag v* entsteht ausserdem ein
+# Baut bei jedem Push das Windows-Paket (offizielles eingebettetes Python von
+# python.org, Bibliotheken, ExifTool - keine eigenen exe-Dateien), probiert es
+# aus wie auf einem frischen PC und legt es als Artefakt "fotosort-windows" ab.
+# Bei einem Tag v* oder von Hand mit release_tag entsteht ausserdem ein
 # GitHub-Release mit fotosort-windows.zip als Anhang.
 
 on:
@@ -35,31 +36,33 @@ jobs:
         with:
           python-version: "3.12"
 
+      # fotosort selbst nur fuer die Pruefung (Testbaum-Erzeuger); das Paket
+      # bekommt seine Bibliotheken fest aus paket/windows-bibliotheken.txt.
       - name: Abhaengigkeiten installieren
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pyinstaller
+          python -m pip install -e .
 
       - name: ExifTool (64 Bit, mit Perl-Bibliotheken) holen
         run: python paket/exiftool_holen.py build/exiftool
 
-      - name: Paket bauen
+      - name: "Paket bauen (eingebettetes Python, keine eigenen exe)"
         run: python paket/bauen.py --exiftool build/exiftool --ausgabe build/paket
 
-      - name: "Paket pruefen wie auf einem frischen PC (start.bat aus Ordner mit Leerzeichen, Fenster in 20 s, Durchlauf ueber das Fenster, Befehle)"
-        run: python paket/pruefen.py build/paket/dist/fotosort build/pruefung
+      - name: "Paket pruefen wie auf einem frischen PC (Signaturen, start.bat aus Ordner mit Leerzeichen, Fenster in 20 s ueber pythonw.exe, ExifTool ueber perl.exe, Durchlauf, Befehle)"
+        run: python paket/pruefen.py build/paket/fotosort build/pruefung
 
       - name: ZIP packen
         shell: pwsh
         run: |
-          Compress-Archive -Path build/paket/dist/fotosort -DestinationPath build/fotosort-windows.zip -Force
+          Compress-Archive -Path build/paket/fotosort -DestinationPath build/fotosort-windows.zip -Force
           Get-Item build/fotosort-windows.zip | Select-Object Name, Length
 
       - name: Artefakt ablegen (fotosort-windows.zip)
         uses: actions/upload-artifact@v4
         with:
           name: fotosort-windows
-          path: build/paket/dist/fotosort
+          path: build/paket/fotosort
           if-no-files-found: error
 
       # Bei einem gepushten Tag v* oder von Hand gestartet mit release_tag:
@@ -73,12 +76,13 @@ jobs:
           name: fotosort ${{ github.event.inputs.release_tag || github.ref_name }}
           files: build/fotosort-windows.zip
           body: |
-            Eigenstaendiges Windows-Programm, nichts zu installieren.
+            Windows-Programm zum Entpacken, nichts zu installieren.
 
-            1. `fotosort-windows.zip` herunterladen und entpacken, zum Beispiel nach `C:\fotosort`.
-            2. Im entpackten Ordner `start.bat` doppelklicken - es oeffnet sich das Programmfenster mit Knoepfen und Ordnerauswahl.
-            3. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - danach fuehrt das Fenster Schritt fuer Schritt.
-            4. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
+            1. `fotosort-windows.zip` herunterladen. Tipp: vor dem Entpacken Rechtsklick auf die ZIP-Datei, "Eigenschaften", unten "Zulassen" anhaken, OK - dann fragt Windows beim Start nicht nach.
+            2. Entpacken, zum Beispiel nach `C:\fotosort`.
+            3. Im entpackten Ordner `start.bat` doppelklicken - es oeffnet sich das Programmfenster mit Knoepfen und Ordnerauswahl.
+            4. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - danach fuehrt das Fenster Schritt fuer Schritt.
+            5. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
 
-            ExifTool ist im Ordner `exiftool` mitgeliefert (Version siehe `exiftool\VERSION.txt`).
+            Gestartet wird nur das offizielle, signierte Python von python.org (Ordner `python`) und ExifTool (Ordner `exiftool`, Version siehe `exiftool\VERSION.txt`) - keine eigenen exe-Dateien. Meldet ein Virenscanner trotzdem etwas: LIESMICH, Abschnitt "Wenn der Virenscanner anschlaegt".
             Bitte zuerst mit Kopien einiger Fotos ausprobieren.

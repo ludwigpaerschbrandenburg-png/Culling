@@ -50,23 +50,28 @@ def oberflaeche_ordner() -> Path:
 
 
 def _kommando() -> list[str]:
-    """Wie der Arbeitsprozess gestartet wird: im Paket ueber fotosort-konsole.exe
-    (die Fassung mit Konsole, auch aus dem Fensterprogramm heraus; ohne sie das
-    eigene Programm), sonst ueber denselben Python-Interpreter."""
-    if getattr(sys, "frozen", False):
-        exe = Path(sys.executable)
-        konsole = exe.with_name("fotosort-konsole.exe" if exe.suffix.lower() == ".exe" else "fotosort-konsole")
-        return [str(konsole if konsole.is_file() else exe)]
-    return [sys.executable, "-m", "fotosort"]
+    """Wie der Arbeitsprozess gestartet wird: mit demselben Python wie das
+    Programm, unter Windows ueber pythonw.exe daneben (ohne Konsole). Im
+    Windows-Paket ist das das mitgelieferte, signierte python\\pythonw.exe -
+    kein eigenes Programm, das ein Virenscanner erst pruefen muesste.
+    -X utf8: Ausgaben und Protokoll in UTF-8 (das eingebettete Python liest
+    keine Umgebungsvariablen wie PYTHONUTF8)."""
+    exe = Path(sys.executable)
+    if sys.platform.startswith("win"):
+        ohne_konsole = exe.with_name("pythonw.exe")
+        if ohne_konsole.is_file():
+            exe = ohne_konsole
+    return [str(exe), "-X", "utf8", "-m", "fotosort"]
 
 
 def _umgebung() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
-    if not getattr(sys, "frozen", False):
-        quelle = str(Path(__file__).resolve().parent.parent.parent)
-        bisher = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = quelle + (os.pathsep + bisher if bisher else "")
+    # Aus dem Quellcode heraus liegt fotosort unter src/; im Paket steht lib\\
+    # schon im Suchpfad des eingebetteten Pythons (python312._pth).
+    quelle = str(Path(__file__).resolve().parent.parent.parent)
+    bisher = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = quelle + (os.pathsep + bisher if bisher else "")
     return env
 
 
@@ -278,7 +283,7 @@ class Ablauf:
             steuerung.json_schreiben(self.status_datei, {
                 "schritt": schritt, "zustand": ZUSTAND_STARTET, "pid": 0, "beginn": jetzt, "aktualisiert": jetzt,
                 "dateien": 0, "gesamt": 0, "bytes": 0, "gesamt_bytes": 0, "bytes_pro_s": 0.0,
-                "restzeit_s": None, "sekunden": 0.0, "lauf": None, "rc": None, "hinweis": "",
+                "restzeit_s": None, "restzeit_zustand": "", "sekunden": 0.0, "lauf": None, "rc": None, "hinweis": "",
             })
             self._log_anfang(schritt)
             befehl = _kommando() + ["arbeit", "--auftrag", str(self.auftrag_datei)]
@@ -345,6 +350,7 @@ class Ablauf:
                 "anteil": anteil,
                 "bytes_pro_s": float(st.get("bytes_pro_s") or 0.0),
                 "restzeit_s": rest,
+                "restzeit_zustand": str(st.get("restzeit_zustand") or ""),
                 "sekunden": float(st.get("sekunden") or 0.0),
                 "rc": st.get("rc"),
                 "hinweis": str(st.get("hinweis") or ""),
@@ -353,7 +359,7 @@ class Ablauf:
                     "bytes": meldungen.groesse(bytes_) + (f" von {meldungen.groesse(gesamt_bytes)}" if gesamt_bytes else ""),
                     "rate": (f"{float(st.get('bytes_pro_s') or 0.0) / (1024 * 1024):.1f}".replace(".", ",") + " MB/s")
                     if bytes_ else "",
-                    "restzeit": meldungen.dauer(float(rest)) if rest is not None else "",
+                    "restzeit": meldungen.ob_restzeit(rest, str(st.get("restzeit_zustand") or "")),
                     "dauer": meldungen.dauer(float(st.get("sekunden") or 0.0)),
                 },
             }

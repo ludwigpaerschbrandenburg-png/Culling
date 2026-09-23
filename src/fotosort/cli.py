@@ -64,25 +64,32 @@ def exiftool_finden(konf=None) -> tuple[str | None, str]:
             return gefunden, f"{aus_konf} (exiftool_pfad)"
     mitgeliefert = exiftool_mitgeliefert()
     if mitgeliefert is not None:
-        return str(mitgeliefert), f"{mitgeliefert} (im Programmordner mitgeliefert)"
+        return str(mitgeliefert), meldungen.exiftool_mitgeliefert_wo(mitgeliefert)
     return shutil.which("exiftool"), "exiftool ueber PATH"
 
 
-def programmordner() -> Path | None:
-    """Der Ordner des gepackten Programms (PyInstaller-Ordnervariante), sonst None."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+def paket_wurzel() -> Path | None:
+    """Wurzel des Windows-Pakets - dort liegen python\\ (das eingebettete,
+    signierte Python), lib\\ (fotosort und seine Bibliotheken) und exiftool\\.
+    Aus dem Quellcode heraus: None."""
+    wurzel = Path(__file__).resolve().parent.parent.parent   # lib/fotosort/cli.py -> Paket
+    if (wurzel / "lib" / "fotosort").is_dir() and (wurzel / "python").is_dir():
+        return wurzel
     return None
 
 
 def exiftool_mitgeliefert() -> Path | None:
-    """Das im Windows-Paket mitgelieferte ExifTool: <Programmordner>/exiftool/exiftool.exe
-    (daneben liegt der Ordner exiftool_files mit den Perl-Bibliotheken)."""
-    ordner = programmordner()
-    if ordner is None:
+    """Das im Windows-Paket mitgelieferte ExifTool: exiftool/exiftool_files/exiftool.pl,
+    gestartet ueber perl.exe daneben (metadaten.exiftool_befehl). Ein Starter
+    exiftool.exe wird nur genommen, wenn exiftool_files fehlt."""
+    wurzel = paket_wurzel()
+    if wurzel is None:
         return None
+    skript = wurzel / "exiftool" / "exiftool_files" / "exiftool.pl"
+    if skript.is_file() and skript.with_name("perl.exe").is_file():
+        return skript
     for name in ("exiftool.exe", "exiftool"):
-        kandidat = ordner / "exiftool" / name
+        kandidat = wurzel / "exiftool" / name
         if kandidat.is_file():
             return kandidat
     return None
@@ -100,8 +107,8 @@ class _Version(argparse.Action):
         exif = "nicht gefunden"
         if gefunden:
             try:
-                aus = subprocess.run([gefunden, "-ver"], capture_output=True, text=True, timeout=30,
-                                     **prozesse.unsichtbar())
+                aus = subprocess.run(metadaten.exiftool_befehl(gefunden) + ["-ver"], capture_output=True,
+                                     text=True, timeout=30, **prozesse.unsichtbar())
                 exif = f"{aus.stdout.strip() or '?'} ({wo})" if aus.returncode == 0 else f"nicht startbar ({wo})"
             except (OSError, subprocess.SubprocessError):
                 exif = f"nicht startbar ({wo})"
@@ -134,7 +141,8 @@ def exiftool_pruefen(befehl: str, konf, konsole) -> None:
 def exiftool_startbar(pfad: str) -> bool:
     try:
         fertig = subprocess.run(
-            [pfad, "-ver"], capture_output=True, timeout=20, check=False, **prozesse.unsichtbar()
+            metadaten.exiftool_befehl(pfad) + ["-ver"], capture_output=True, timeout=20, check=False,
+            **prozesse.unsichtbar(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1299,10 +1307,6 @@ def main(argv: list[str] | None = None) -> int:
     global _argumente
     _ohne_konsole_umleiten()
     argumente = list(sys.argv[1:] if argv is None else argv)
-    # Das Fensterprogramm (fotosort-fenster.exe) und fotosort.exe per
-    # Doppelklick, beide ohne Angaben: das Fenster oeffnen.
-    if not argumente and getattr(sys, "frozen", False):
-        argumente = ["fenster"]
     eltern = parser_bauen()
     _exiftool_startbar_gemerkt.clear()
     _argumente = argumente

@@ -1,6 +1,7 @@
 """Laufende Anzeige fuer Kopieren und Pruefen (SPEC Abschnitt 7 und 8).
 
-Dateien und Datenmenge (erledigt/gesamt), MB/s und geschaetzte Restzeit;
+Dateien und Datenmenge (erledigt/gesamt), MB/s und geschaetzte Restzeit
+(restzeit.py: erst nach 60 s und 3 %, gleitender Durchschnitt, abgerundet);
 im Terminal als Balken mit hoechstens zwei Aktualisierungen je Sekunde,
 sonst hoechstens alle fuenf Sekunden eine Zeile.
 """
@@ -10,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import Callable
 
-from . import meldungen, steuerung
+from . import meldungen, restzeit, steuerung
 
 STILLE_SEKUNDEN = 5.0
 BALKEN_SEKUNDEN = 0.5
@@ -27,6 +28,7 @@ class Fortschritt:
         self.dateien = 0
         self.bytes = 0
         self.begonnen = time.monotonic()
+        self._restzeit = restzeit.Restzeit()
         self._zuletzt = self.begonnen
         self.balken = None
         self.aufgabe = None
@@ -46,11 +48,11 @@ class Fortschritt:
         return self.text_fn(self.dateien, self.gesamt, self.bytes, self.gesamt_bytes, self.bytes / verstrichen)
 
     def _rest(self) -> str:
-        verstrichen = time.monotonic() - self.begonnen
-        if self.bytes <= 0 or verstrichen <= 0:
-            return ""
-        rest = (self.gesamt_bytes - self.bytes) * verstrichen / self.bytes
-        return meldungen.restzeit(rest)
+        if self.gesamt_bytes:
+            sekunden, zustand = self._restzeit.melden(self.bytes, self.gesamt_bytes)
+        else:
+            sekunden, zustand = self._restzeit.melden(self.dateien, self.gesamt)
+        return meldungen.restzeit(sekunden, zustand)
 
     def weiter(self, dateien: int, bytes_: int) -> None:
         self.dateien += dateien

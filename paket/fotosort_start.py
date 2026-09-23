@@ -1,8 +1,15 @@
-"""Einstieg fuer das mit PyInstaller gepackte Programm (paket/bauen.py).
+"""Einstieg des Windows-Pakets (liegt dort als lib\\fotosort_start.py).
 
-Der normale Einstieg der Kommandozeile - und ein Fangnetz: Geht vor oder
-beim Start etwas schief, erscheint ein verstaendliches Meldungsfenster mit
-Grund, Rat und dem Ort des Protokolls. Nie "Unhandled exception in script".
+start.bat startet ihn mit dem mitgelieferten, signierten python\\pythonw.exe
+(das Fenster, ohne Konsole), fotosort.bat mit python\\python.exe (Befehle mit
+Ausgabe). Er ist der normale Einstieg der Kommandozeile - und ein Fangnetz:
+Geht vor oder beim Start etwas schief, erscheint ein verstaendliches
+Meldungsfenster mit Grund, Rat und dem Ort des Protokolls, nie eine
+unverstaendliche Fehlermeldung (und unter pythonw.exe nie gar nichts).
+
+Er wird als Datei gestartet, nicht als Modul: So erscheint das Meldungsfenster
+selbst dann, wenn der Ordner lib\\ beschaedigt ist und fotosort sich nicht
+laden laesst.
 """
 
 import sys

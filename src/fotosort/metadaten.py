@@ -92,6 +92,35 @@ def schluessel(pfad) -> str:
     return str(pfad).replace("\\", "/")
 
 
+def exiftool_befehl(programm: str) -> list[str]:
+    """Womit ExifTool wirklich gestartet wird.
+
+    Die Windows-Fassung von exiftool.org besteht aus einem kleinen Starter
+    (exiftool(-k).exe bzw. exiftool.exe) und dem Ordner exiftool_files mit
+    perl.exe, perl532.dll und dem Skript exiftool.pl. Der Starter laedt nur
+    perl532.dll und ruft darin Perl mit exiftool.pl auf - genau das tut auch
+    perl.exe, ohne eigene Umgebungsvariablen. Deshalb wird perl.exe direkt
+    gestartet, wo es geht: ein Programm weniger, das ein Virenscanner bei
+    jedem Start pruefen muss. Lange Pfade behandelt ExifTool selbst
+    (WindowsLongPath, ueber das mitgelieferte Win32::API).
+
+    programm: exiftool.pl (daneben perl.exe), ein Starter mit exiftool_files
+    daneben, oder jedes andere ExifTool (dann unveraendert).
+    """
+    p = Path(programm)
+    if p.suffix.lower() == ".pl":
+        perl = p.with_name("perl.exe")
+        if perl.is_file():
+            return [str(perl), str(p)]
+        return ["perl", str(p)]
+    if p.suffix.lower() == ".exe":
+        dateien = p.parent / "exiftool_files"
+        perl, skript = dateien / "perl.exe", dateien / "exiftool.pl"
+        if perl.is_file() and skript.is_file():
+            return [str(perl), str(skript)]
+    return [str(programm)]
+
+
 def unzulaessig_fuer_exiftool(pfad) -> bool:
     """Ein Zeilenumbruch im Namen wuerde in der Argumentdatei (-@) zu
     weiteren Argumenten - im schlimmsten Fall zu Schreibbefehlen. Solche
@@ -139,7 +168,7 @@ class _Prozess:
         self.zaehler = 0
         self.abgewuergt = False
         self.prozess = subprocess.Popen(
-            [programm, "-stay_open", "True", "-@", "-"],
+            exiftool_befehl(programm) + ["-stay_open", "True", "-@", "-"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
