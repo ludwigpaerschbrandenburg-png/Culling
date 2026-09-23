@@ -90,9 +90,15 @@ es einen Test.
   kleines Startprogramm, das im Hintergrund `perl.exe` laufen lässt; wer nur das Startprogramm
   beendet, lässt Perl weiterlaufen, und das Programm hätte im Ernstfall ewig auf die Antwort
   gewartet. Jetzt wird bei einem Zeitlimit der ganze Prozessbaum beendet. Ohne die
-  Windows-Prüfung wäre das erst bei Ihnen aufgefallen. Ein weiterer Testlauf wurde von der
-  Cloud abgebrochen, weil kurz danach schon der nächste Stand hochgeladen wurde – das ist
-  normal.
+  Windows-Prüfung wäre das erst bei Ihnen aufgefallen.
+- **Zweiter roter Windows-Lauf, ebenfalls wertvoll:** Beim Aufräumen einer halb fertigen
+  `.part`-Datei nach einem simulierten Absturz meldete Windows „Zugriff verweigert" – der
+  Virenscanner hatte die frisch geschriebene Datei gerade einen Augenblick offen. Das Programm
+  brach deshalb ab. Jetzt versucht es das Entfernen einige Male mit kurzen Pausen (bis zu
+  etwa drei Sekunden), bevor daraus ein Fehler wird. Genau das kann auf Ihrem PC mit
+  Virenscanner jederzeit passieren.
+- Ein weiterer Testlauf wurde von der Cloud abgebrochen, weil kurz danach schon der nächste
+  Stand hochgeladen wurde – das ist normal.
 
 ## Was offen ist
 

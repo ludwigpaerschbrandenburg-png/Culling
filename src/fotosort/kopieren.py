@@ -163,12 +163,25 @@ def _stat(p: Path):
         return None
 
 
+# Unter Windows haelt der Virenscanner oder der Suchindex eine frisch
+# geschriebene Datei oft fuer einen Augenblick offen; das Entfernen scheitert
+# dann mit "Zugriff verweigert". Ein paar Versuche mit kurzen Pausen, bevor
+# daraus ein Fehler wird.
+_ENTFERNEN_VERSUCHE = (0.1, 0.2, 0.3, 0.5, 0.8, 1.0)
+
+
 def _entfernen_eigene(p: Path) -> None:
     """Nur fuer Dateien, die dieser Lauf selbst angelegt hat."""
-    try:
-        os.unlink(_L(p))
-    except FileNotFoundError:
-        pass
+    for pause in (*_ENTFERNEN_VERSUCHE, None):
+        try:
+            os.unlink(_L(p))
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if pause is None:
+                raise
+            time.sleep(pause)
 
 
 @dataclass

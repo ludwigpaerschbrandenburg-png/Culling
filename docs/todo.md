@@ -462,6 +462,9 @@ Version 0.2.0, Release v0.2.
       Punkt mit Test.
 - [x] **Datenmenge je Quelle** im Scan-Ergebnis (Fenster, `status`, Befehl `scan`) zählt nur
       erfasste Dateien (Foto, RAW, Video, Sidecar), nicht die „sonstigen“.
+- [x] **Windows: „Zugriff verweigert“ auf eine frische `.part`-Datei** (Virenscanner oder Suchindex
+      hält sie kurz offen; in der Windows-CI beim Absturztest aufgetreten): `_entfernen_eigene`
+      versucht es einige Male mit kurzen Pausen (bis etwa 3 s), erst dann wird es ein Fehler.
 - [x] **Unterbrechungen in jeder Kombination geprüft** (`tests/test_unterbrechungen.py`, dazu ein
       Test im Fenster): Abbrechen mitten im Kopieren → Fenster zu → neu auf → Weitermachen; harter
       Abschuss des Arbeitsprozesses (SIGKILL/TerminateProcess) dreimal an verschiedenen Stellen;

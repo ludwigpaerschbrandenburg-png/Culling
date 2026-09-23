@@ -599,3 +599,32 @@ def test_absturz_mitten_im_kopieren_und_neustart(tmp_path, archiv_basis):
     finally:
         d.schliessen()
     assert status == {"kopiert": 24}
+
+
+def test_entfernen_eigene_wartet_auf_den_virenscanner(tmp_path, monkeypatch):
+    """Windows-CI: 'Zugriff verweigert' auf eine frische .part-Datei, weil der
+    Virenscanner sie kurz haelt. Ein paar Versuche, dann erst ein Fehler."""
+    datei = tmp_path / "x.JPG.part"
+    datei.write_bytes(b"x")
+    monkeypatch.setattr(kopieren, "_ENTFERNEN_VERSUCHE", (0.0, 0.0))
+    echt = os.unlink
+    verweigert = [2]
+
+    def zickig(pfad):
+        if verweigert[0] > 0:
+            verweigert[0] -= 1
+            raise PermissionError(13, "Zugriff verweigert", str(pfad))
+        echt(pfad)
+
+    monkeypatch.setattr(kopieren.os, "unlink", zickig)
+    kopieren._entfernen_eigene(datei)
+    assert not datei.exists() and verweigert[0] == 0
+    # Dauerhaft verweigert: nach den Versuchen kommt der Fehler durch.
+    datei.write_bytes(b"x")
+    verweigert[0] = 99
+    with pytest.raises(PermissionError):
+        kopieren._entfernen_eigene(datei)
+    assert datei.exists()
+    # Eine fehlende Datei ist kein Fehler.
+    monkeypatch.setattr(kopieren.os, "unlink", echt)
+    kopieren._entfernen_eigene(tmp_path / "gibt_es_nicht.part")
