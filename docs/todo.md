@@ -502,6 +502,9 @@ Version 0.2.0, Release v0.2.
       künstlicher Uhr (`tests/test_restzeit.py`), auch für den Fall „schneller Anfang, dann langsam“.
 - [x] **Norton hielt jede PyInstaller-exe bis zu 60 s fest** – Windows-Paket ohne PyInstaller, siehe
       Abschnitt „Windows-Paket“.
+- [x] Nebenbei in der Paketprüfung aufgefallen: Die Analyse schrieb den Durchsatz mit Punkt
+      („29.9 Dateien/s“), alle anderen Phasen mit Komma. Jetzt einheitlich „29,9 Dateien/s“ (Test in
+      `tests/test_meldungen.py`).
 
 ### Entscheidungen für den Nutzer
 

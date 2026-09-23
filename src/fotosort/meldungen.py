@@ -712,7 +712,8 @@ def analyse_ergebnis(e) -> str:
         zeilen.append(f"  ExifTool wegen Zeitlimit neu gestartet: {anzahl(e.zeitlimits)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
-        zeilen.append(f"  Durchsatz:       {e.bearbeitet / e.sekunden:,.1f} Dateien/s".replace(",", "."))
+        pro_sekunde = f"{e.bearbeitet / e.sekunden:.1f}".replace(".", ",")
+        zeilen.append(f"  Durchsatz:       {pro_sekunde} Dateien/s")
     zeilen.append(f"  ExifTool-Prozesse: {anzahl(e.prozesse)}")
     return "\n".join(zeilen)
 

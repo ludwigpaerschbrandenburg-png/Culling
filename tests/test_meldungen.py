@@ -131,6 +131,20 @@ def test_durchsatz_und_dauer():
     assert meldungen.dauer(3661) == "1 h 1 min 1 s"
 
 
+@pytest.mark.parametrize("bearbeitet, sekunden, erwartet", [
+    (21, 0.7, "30,0 Dateien/s"),
+    (299, 10.0, "29,9 Dateien/s"),
+    (123456, 100.0, "1234,6 Dateien/s"),  # wie bei den anderen Phasen, ohne Tausenderpunkt
+])
+def test_durchsatz_der_analyse_mit_deutschem_komma(bearbeitet, sekunden, erwartet):
+    # Im Paketlauf von v0.6 stand "29.9 Dateien/s" - mit Punkt statt Komma.
+    from fotosort.analyse import Ergebnis
+
+    text = meldungen.analyse_ergebnis(Ergebnis(bearbeitet=bearbeitet, sekunden=sekunden))
+    zeile = next(z for z in text.splitlines() if "Durchsatz" in z)
+    assert zeile.endswith(" " + erwartet), zeile
+
+
 # ----------------------------------------- Neue Texte aus der Abnahme ----
 
 
