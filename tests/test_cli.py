@@ -775,3 +775,11 @@ def test_status_geht_auch_waehrend_ein_scan_laeuft(capsys, quelle, ziel, archiv_
         assert rueckgabe == cli.OK
     finally:
         laufender_scan.schliessen()
+
+
+def test_status_nennt_sicherung_und_ziel_index(capsys, quelle, ziel):
+    _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
+    rueckgabe, ausgabe = _laufen(capsys, "status", "--ziel", str(ziel))
+    assert rueckgabe == cli.OK
+    assert "Sicherungskopie im Ziel:  20" in ausgabe          # Zeitstempel der Sicherung nach dem Scan
+    assert "Ziel-Index:               0 Dateien im Ziel bekannt" in ausgabe

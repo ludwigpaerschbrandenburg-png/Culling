@@ -446,9 +446,21 @@ def befehl_status(args, konsole) -> int:
                     zeile["nummer"], zeile["befehl"], zeile["start"], zeile["ende"]
                 )
             )
+        konsole.print("")
+        konsole.print(meldungen.status_sicherung_und_index(
+            _sicherung_zeit(archiv.ziel), datenbank.ziel_index_zusammenfassung()))
         return OK
     finally:
         datenbank.schliessen()
+
+
+def _sicherung_zeit(ziel: Path) -> str:
+    """Wann die Sicherungskopie im Ziel zuletzt geschrieben wurde; '' ohne Sicherung."""
+    try:
+        st = db.sicherung_pfad(ziel).stat()
+    except OSError:
+        return ""
+    return datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds").replace("T", " ")
 
 
 def befehl_config(args, konsole) -> int:

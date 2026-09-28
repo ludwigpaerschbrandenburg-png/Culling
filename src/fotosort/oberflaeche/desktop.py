@@ -1026,17 +1026,22 @@ class Hauptfenster(QMainWindow):
             self.laden("start")
             self.meldung(a.get("text", ""), gut=True)
         elif art == "neuaufbau":
-            a = self._versuchen(self.ab.neuaufbau_starten, False)
-            if a is None or a.get("frage") != "neuaufbau":
-                return
-            ja, _ = frage(self, "Archiv neu einlesen?", a["text"], ja="Neu einlesen", nein="Nicht jetzt")
-            if not ja:
-                return
-            a = self._versuchen(self.ab.neuaufbau_starten, True)
-            if a is None or not a.get("gestartet"):
-                return
-            self.haupt_zeigen()
-            self.lauf_starten(a["gestartet"])
+            self.neuaufbau()
+
+    def neuaufbau(self) -> None:
+        """Das Ziel vollstaendig neu einlesen (Rettung ohne Sicherung, oder nach
+        Umsortieren von Hand im Archiv) - nach Rueckfrage, als eigener Schritt."""
+        a = self._versuchen(self.ab.neuaufbau_starten, False)
+        if a is None or a.get("frage") != "neuaufbau":
+            return
+        ja, _ = frage(self, "Archiv neu einlesen?", a["text"], ja="Neu einlesen", nein="Nicht jetzt")
+        if not ja:
+            return
+        a = self._versuchen(self.ab.neuaufbau_starten, True)
+        if a is None or not a.get("gestartet"):
+            return
+        self.haupt_zeigen()
+        self.lauf_starten(a["gestartet"])
 
     def archiv_verwerfen(self) -> None:
         a = self._versuchen(self.ab.archiv_verwerfen, "")
@@ -1215,6 +1220,7 @@ class Hauptfenster(QMainWindow):
         if zf.get("duplikate"):
             eintraege.append((f'Duplikate {zf["duplikate"]}', "ghost", lambda: self.liste_zeigen("duplikate", 1), True))
         eintraege.append(("Ohne Datum", "ghost", lambda: self.liste_zeigen("ohne_datum", 1), True))
+        eintraege.append(("Archiv neu einlesen…", "ghost", self.neuaufbau, True))
         eintraege.append(("Einstellungen", "secondary", self.einstellungen_oeffnen, True))
         eintraege.append(("Startseite", "secondary", lambda: self.laden("start"), True))
         self.aktionen_setzen(eintraege)

@@ -307,7 +307,10 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
   mit ihrer Prüfsumme. Nötig, wenn weder Datenbank noch Sicherung da sind oder im Archiv von
   Hand umsortiert wurde. Es kopiert, verschiebt und löscht nichts; bei einem großen Archiv
   dauert es lange, lässt sich aber abbrechen und macht beim nächsten Aufruf dort weiter.
-  Ohne `--neu-aufbauen` zeigt der Befehl nur, wie viele Dateien im Ziel bekannt sind.
+  Ohne `--neu-aufbauen` zeigt der Befehl nur, wie viele Dateien im Ziel bekannt sind. Im
+  Fenster heißt dasselbe „Archiv neu einlesen…" (unten auf der Hauptansicht).
+- `status` nennt am Ende auch, wann die Sicherungskopie im Ziel zuletzt geschrieben wurde und
+  wie viele Dateien im Ziel das Programm kennt.
 
 ---
 

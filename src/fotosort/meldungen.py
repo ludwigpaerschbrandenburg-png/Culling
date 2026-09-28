@@ -578,6 +578,16 @@ def status_letzter_lauf(nummer, befehl, start, ende) -> str:
     )
 
 
+def status_sicherung_und_index(sicherung_zeit: str, index: dict) -> str:
+    zeilen = ["Sicherung und Ziel-Index"]
+    if sicherung_zeit:
+        zeilen.append(f"  Sicherungskopie im Ziel:  {sicherung_zeit}")
+    else:
+        zeilen.append("  Sicherungskopie im Ziel:  noch keine (entsteht nach dem ersten abgeschlossenen Schritt)")
+    zeilen.append(f"  Ziel-Index:               {anzahl(index['zeilen'])} Dateien im Ziel bekannt, {groesse(index['bytes'])}")
+    return "\n".join(zeilen)
+
+
 # --------------------------------------------------------------- config ----
 
 
