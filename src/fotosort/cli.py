@@ -203,6 +203,7 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False, datenban
     exiftool_pruefen(getattr(args, "befehl", ""), ort.konf, konsole)
 
     datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=sperren)
+    _anhebung_melden(datenbank, konsole)
     return Archiv(
         ziel=ort.ziel,
         archiv_id=ort.archiv_id,
@@ -212,6 +213,14 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False, datenban
         datenbank=datenbank,
         neu_angelegt=not ort.id_war_da,
     )
+
+
+def _anhebung_melden(datenbank: db.Datenbank, konsole) -> None:
+    """Wurde die Datenbank beim Oeffnen auf das Schema dieses Programms gehoben, sagen."""
+    if datenbank.angehoben_von is not None:
+        konsole.print(meldungen.datenbank_angehoben(
+            datenbank.pfad, datenbank.angehoben_von, db.SCHEMA_VERSION,
+            db.vor_schema_pfad(datenbank.pfad, datenbank.angehoben_von)))
 
 
 def archiv_ort(args, konsole, anlegen: bool) -> ArchivOrt:
@@ -1245,6 +1254,7 @@ def befehl_wiederherstellen(args, konsole) -> int:
     db.sicherung_einsetzen(ort.ordner)
     begonnen = time.monotonic()
     datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=True)
+    _anhebung_melden(datenbank, konsole)
     try:
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         datenbank.ereignis(lauf, db.ART_DATENBANK_WIEDERHERGESTELLT, db.pfad_text(sicherung), 1,

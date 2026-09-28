@@ -712,6 +712,21 @@ def abbruch_durch_signal() -> str:
 # ---------------------------------------------------------- Quellen -----
 
 
+def datenbank_schema_neuer(pfad, gefunden: int, erwartet: int) -> str:
+    return (
+        f"Die Datenbank {pfad} stammt aus einem neueren Stand des Programms\n"
+        f"(Schema-Version {gefunden}, dieses Programm kennt {erwartet}). Sie wird\n"
+        "nicht angefasst. Bitte die neuere Programmversion benutzen."
+    )
+
+
+def datenbank_angehoben(pfad, von: int, bis: int, kopie) -> str:
+    return (
+        f"Die Datenbank wurde auf den Stand dieses Programms gebracht (Schema-Version {von} -> {bis}).\n"
+        f"Der vorherige Stand liegt aufgehoben unter: {kopie}"
+    )
+
+
 def datenbank_schema_veraltet(pfad, gefunden: int, erwartet: int) -> str:
     return (
         f"Die Datenbank {pfad} stammt aus einem frueheren Stand des Programms\n"

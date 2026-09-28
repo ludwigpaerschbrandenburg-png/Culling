@@ -528,3 +528,80 @@ def test_rundungsrest_gilt_als_unveraendert(datenbank):
         datenbank.datei_gesehen("/q/a.jpg", "/q", 100, 1000.0005, "foto", lauf)
         == "unveraendert"
     )
+
+
+# ------------------------------------------------ Schema anheben (Migration) --
+
+
+def _mit_version(ordner, version: int) -> None:
+    """Eine vollstaendige Datenbank auf eine andere Schema-Version stellen."""
+    d = db.Datenbank.oeffnen(ordner)
+    d.stapel_schreiben()
+    d.verbindung.execute(f"PRAGMA user_version={version}")
+    d.schliessen()
+
+
+def test_neuere_schema_version_wird_nie_angefasst(tmp_path):
+    ordner = tmp_path / "neuer"
+    _mit_version(ordner, db.SCHEMA_VERSION + 1)
+    vorher = db.datenbank_pfad(ordner).read_bytes()
+    with pytest.raises(FotosortFehler) as fehler:
+        db.Datenbank.oeffnen(ordner)
+    assert "neueren Stand" in str(fehler.value) and f"Schema-Version {db.SCHEMA_VERSION + 1}" in str(fehler.value)
+    assert db.datenbank_pfad(ordner).read_bytes() == vorher
+    assert not list(ordner.glob(db.VOR_SCHEMA + "*"))
+
+
+def test_aeltere_version_wird_angehoben_und_vorher_aufgehoben(tmp_path, monkeypatch):
+    ordner = tmp_path / "aelter"
+    _mit_version(ordner, db.SCHEMA_VERSION - 1)
+    schritte = {db.SCHEMA_VERSION - 1: ("ALTER TABLE dateien ADD COLUMN probe TEXT NOT NULL DEFAULT 'x'",)}
+    monkeypatch.setattr(db, "MIGRATIONEN", schritte)
+    assert db.migrierbar(db.SCHEMA_VERSION - 1) and not db.migrierbar(db.SCHEMA_VERSION + 1)
+    d = db.Datenbank.oeffnen(ordner)
+    try:
+        assert d.angehoben_von == db.SCHEMA_VERSION - 1
+        assert d.verbindung.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+        spalten = {z["name"] for z in d.verbindung.execute("PRAGMA table_info(dateien)")}
+        assert "probe" in spalten
+    finally:
+        d.schliessen()
+    kopie = db.vor_schema_pfad(db.datenbank_pfad(ordner), db.SCHEMA_VERSION - 1)
+    assert kopie.is_file()
+    alt = sqlite3.connect(str(kopie))
+    try:
+        assert alt.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION - 1
+        assert "probe" not in {z[1] for z in alt.execute("PRAGMA table_info(dateien)")}
+    finally:
+        alt.close()
+    # Ein zweites Oeffnen hebt nichts mehr an.
+    d = db.Datenbank.oeffnen(ordner)
+    try:
+        assert d.angehoben_von is None
+    finally:
+        d.schliessen()
+
+
+def test_anhebung_ohne_schritt_lehnt_ab_und_laesst_alles_stehen(tmp_path, monkeypatch):
+    ordner = tmp_path / "luecke"
+    _mit_version(ordner, db.SCHEMA_VERSION - 2)
+    monkeypatch.setattr(db, "MIGRATIONEN", {db.SCHEMA_VERSION - 1: ("SELECT 1",)})   # der erste Schritt fehlt
+    vorher = db.datenbank_pfad(ordner).read_bytes()
+    with pytest.raises(FotosortFehler) as fehler:
+        db.Datenbank.oeffnen(ordner)
+    assert f"Schema-Version {db.SCHEMA_VERSION - 2}" in str(fehler.value)
+    assert db.datenbank_pfad(ordner).read_bytes() == vorher
+
+
+def test_fehlgeschlagener_schritt_laesst_die_version_stehen(tmp_path, monkeypatch):
+    ordner = tmp_path / "kaputt"
+    _mit_version(ordner, db.SCHEMA_VERSION - 1)
+    monkeypatch.setattr(db, "MIGRATIONEN", {db.SCHEMA_VERSION - 1: ("ALTER TABLE gibt_es_nicht ADD COLUMN x TEXT",)})
+    with pytest.raises(sqlite3.OperationalError):
+        db.Datenbank.oeffnen(ordner)
+    alt = sqlite3.connect(str(db.datenbank_pfad(ordner)))
+    try:
+        assert alt.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION - 1
+    finally:
+        alt.close()
+    assert db.vor_schema_pfad(db.datenbank_pfad(ordner), db.SCHEMA_VERSION - 1).is_file()

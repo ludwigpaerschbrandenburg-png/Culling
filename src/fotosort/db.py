@@ -82,6 +82,15 @@ STATUS_REIHE: tuple[str, ...] = (
 
 SCHEMA_VERSION = 6
 
+#: Anhebungen des Schemas: von Version -> SQL-Anweisungen, die eine Datenbank
+#: dieser Version auf Version + 1 heben. Eine aeltere Datenbank wird beim
+#: Oeffnen Schritt fuer Schritt angehoben, nie abgelehnt - vorher wird sie als
+#: fotosort.db.vor_schema_<Version> aufgehoben. Bisher gibt es keine
+#: Anhebung: Alle Archive tragen Version 6 (seit Phase 5, vor v0.3). Wer das
+#: Schema aendert, hebt SCHEMA_VERSION an und traegt hier die Schritte ein.
+MIGRATIONEN: dict[int, tuple[str, ...]] = {}
+VOR_SCHEMA = "fotosort.db.vor_schema_"   # Sicherung vor einer Anhebung, nie geloescht
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quellen (
     wurzel                   TEXT PRIMARY KEY,
@@ -308,7 +317,9 @@ def sicherung_lesen(pfad: Path) -> Sicherungsstand:
         tabellen = {z[0] for z in verbindung.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if not {"dateien", "laeufe", "quellen"} <= tabellen:
             raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, meldungen.SICHERUNG_OHNE_TABELLEN))
-        if version != SCHEMA_VERSION:
+        if version > SCHEMA_VERSION:
+            raise FotosortFehler(meldungen.datenbank_schema_neuer(pfad, version, SCHEMA_VERSION))
+        if not migrierbar(version):
             raise FotosortFehler(meldungen.datenbank_schema_veraltet(pfad, version, SCHEMA_VERSION))
         dateien = int(verbindung.execute("SELECT COUNT(*) FROM dateien").fetchone()[0])
         quellen = int(verbindung.execute("SELECT COUNT(*) FROM quellen").fetchone()[0])
@@ -469,21 +480,69 @@ def _jetzt() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def _schema_pruefen(verbindung: sqlite3.Connection, pfad: Path) -> None:
-    """Eine Datenbank mit aelterem Schema ablehnen statt still weiterzumachen.
+def migrierbar(version: int) -> bool:
+    """Laesst sich eine Datenbank dieser Schema-Version auf die des Programms heben?"""
+    if version == SCHEMA_VERSION:
+        return True
+    if version > SCHEMA_VERSION:
+        return False
+    return all(v in MIGRATIONEN for v in range(version, SCHEMA_VERSION))
+
+
+def _schema_pruefen(verbindung: sqlite3.Connection, pfad: Path) -> int | None:
+    """Schema-Version pruefen; eine aeltere Datenbank anheben (SPEC Abschnitt 6).
 
     Eine frische Datei hat user_version 0 und keine Tabellen. Eine Datei mit
-    Tabellen, aber falscher Version, stammt aus einem frueheren Stand des
-    Programms (SPEC Abschnitt 6).
+    Tabellen und aelterer Version wird ueber MIGRATIONEN Schritt fuer Schritt
+    angehoben, vorher als Kopie aufgehoben; fehlt ein Schritt, wird sie
+    abgelehnt statt still weiterbenutzt. Eine Datei aus einem neueren
+    Programmstand wird immer abgelehnt. Liefert die Version, von der
+    angehoben wurde, sonst None.
     """
     version = int(verbindung.execute("PRAGMA user_version").fetchone()[0])
     if version == SCHEMA_VERSION:
-        return
+        return None
     hat_tabellen = verbindung.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'dateien'"
     ).fetchone()[0]
-    if hat_tabellen:
+    if not hat_tabellen:
+        return None
+    if version > SCHEMA_VERSION:
+        raise FotosortFehler(meldungen.datenbank_schema_neuer(pfad, version, SCHEMA_VERSION))
+    if not migrierbar(version):
         raise FotosortFehler(meldungen.datenbank_schema_veraltet(pfad, version, SCHEMA_VERSION))
+    _vor_anhebung_sichern(verbindung, pfad, version)
+    von = version
+    while von < SCHEMA_VERSION:
+        verbindung.execute("BEGIN")
+        try:
+            for anweisung in MIGRATIONEN[von]:
+                verbindung.execute(anweisung)
+            verbindung.execute(f"PRAGMA user_version={von + 1}")
+            verbindung.execute("COMMIT")
+        except BaseException:
+            verbindung.execute("ROLLBACK")
+            raise
+        von += 1
+    return version
+
+
+def vor_schema_pfad(pfad: Path, version: int) -> Path:
+    return Path(pfad).with_name(f"{VOR_SCHEMA}{version}")
+
+
+def _vor_anhebung_sichern(verbindung: sqlite3.Connection, pfad: Path, version: int) -> None:
+    """Die Datenbank vor der Anhebung ueber die SQLite-Backup-Funktion aufheben
+    (nimmt auch mit, was noch im WAL steht). Eine vorhandene Kopie derselben
+    Version bleibt; es wird nie etwas ueberschrieben."""
+    kopie = vor_schema_pfad(pfad, version)
+    if kopie.exists():
+        return
+    sicherung = sqlite3.connect(str(pfade.lang(kopie)))
+    try:
+        verbindung.backup(sicherung)
+    finally:
+        sicherung.close()
 
 
 class Datenbank:
@@ -495,6 +554,7 @@ class Datenbank:
         self.verbindung = verbindung
         self.pfad = pfad
         self.sperre = sperre
+        self.angehoben_von: int | None = None   # Schema-Version vor einer Anhebung beim Oeffnen
         self._offen = 0
         self._letztes_schreiben = time.monotonic()
         self._in_transaktion = False
@@ -533,14 +593,16 @@ class Datenbank:
             verbindung.execute("PRAGMA journal_mode=WAL")
             verbindung.execute("PRAGMA synchronous=NORMAL")
             verbindung.execute("PRAGMA foreign_keys=ON")
-            _schema_pruefen(verbindung, pfad)
+            angehoben_von = _schema_pruefen(verbindung, pfad)
             verbindung.executescript(SCHEMA)
             verbindung.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         except BaseException:
             if sperre is not None:
                 sperre.freigeben()
             raise
-        return cls(verbindung, pfad, sperre)
+        datenbank = cls(verbindung, pfad, sperre)
+        datenbank.angehoben_von = angehoben_von
+        return datenbank
 
     def schliessen(self) -> None:
         """Schliessen, ohne an einem Folgefehler haengen zu bleiben.

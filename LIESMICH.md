@@ -450,6 +450,8 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   bewusst auf dem Rechner, nie auf dem Netzlaufwerk. Daneben liegt die `config.toml`. Ersetzt
   `wiederherstellen --ersetzen` eine vorhandene Datenbank, bleibt die alte daneben als
   `fotosort.db.ersetzt_<Zeit>` liegen; sie können Sie löschen, wenn alles wieder stimmt.
+  Bringt eine neue Programmversion die Datenbank auf einen neuen Stand, bleibt der alte daneben
+  als `fotosort.db.vor_schema_<Nummer>` liegen – ebenfalls nur zur Sicherheit.
 - **Archiv-Kennung**: `<Ziel>\.fotosortierer\archiv-id.txt`. Darüber findet das Programm
   die richtige Datenbank, auch wenn das Ziel unter einem anderen Laufwerksbuchstaben
   eingebunden ist.

@@ -103,22 +103,45 @@ def test_kaputte_sicherung_veraendert_nichts(baum, quelle, ziel, archiv_basis, c
     assert not (ordner / db.DATENBANK_NEU).exists()
 
 
+def _sicherung_mit_version(ziel, version: int) -> None:
+    con = sqlite3.connect(db.sicherung_pfad(ziel))
+    try:
+        con.execute(f"PRAGMA user_version = {version}")
+        con.commit()
+    finally:
+        con.close()
+
+
 def test_sicherung_aus_anderem_programmstand_wird_abgelehnt(baum, quelle, ziel, archiv_basis, capsys):
     _bis_kopiert(ziel, quelle)
     ordner = _archiv_ordner(ziel, archiv_basis)
     _lokal_loeschen(ziel, archiv_basis)
-    con = sqlite3.connect(db.sicherung_pfad(ziel))
-    try:
-        con.execute("PRAGMA user_version = 1")
-        con.commit()
-    finally:
-        con.close()
+    _sicherung_mit_version(ziel, 1)   # aelter, kein Anhebungsweg
     capsys.readouterr()
     assert _cli("wiederherstellen", "--ziel", ziel) == cli.FEHLER
     aus = capsys.readouterr().out
     assert "Schema-Version 1" in aus
     assert not (ordner / db.DATEINAME).exists()
     assert not (ordner / db.DATENBANK_NEU).exists()
+    _sicherung_mit_version(ziel, db.SCHEMA_VERSION + 1)   # neuer
+    assert _cli("wiederherstellen", "--ziel", ziel) == cli.FEHLER
+    assert "neueren Stand" in capsys.readouterr().out
+    assert not (ordner / db.DATEINAME).exists()
+
+
+def test_aeltere_sicherung_wird_zurueckgeholt_und_angehoben(baum, quelle, ziel, archiv_basis, nachschauen, capsys, monkeypatch):
+    _bis_kopiert(ziel, quelle)
+    vorher = _zeilen(nachschauen, ziel)
+    ordner = _archiv_ordner(ziel, archiv_basis)
+    _lokal_loeschen(ziel, archiv_basis)
+    _sicherung_mit_version(ziel, db.SCHEMA_VERSION - 1)
+    monkeypatch.setattr(db, "MIGRATIONEN", {db.SCHEMA_VERSION - 1: ("SELECT 1",)})
+    capsys.readouterr()
+    assert _cli("wiederherstellen", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "zurueckgeholt" in aus and f"Schema-Version {db.SCHEMA_VERSION - 1} -> {db.SCHEMA_VERSION}" in aus
+    assert db.vor_schema_pfad(ordner / db.DATEINAME, db.SCHEMA_VERSION - 1).is_file()
+    assert _zeilen(nachschauen, ziel) == vorher
 
 
 def test_ohne_sicherung_verweist_auf_den_neuaufbau(baum, quelle, ziel, archiv_basis, capsys):

@@ -254,7 +254,7 @@ Jede Phase ist einzeln startbar und **fortsetzbar**. Zwischen den Phasen wartet 
 
 ### Tabellen und Spalten
 
-Fünf Tabellen: `quellen`, `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`. Die Datenbank trägt eine Schema-Version (`PRAGMA user_version`); eine Datei mit älterer Version wird mit verständlicher Meldung abgelehnt, nicht stillschweigend weiterbenutzt.
+Fünf Tabellen: `quellen`, `dateien`, `ziel_index`, `laeufe`, `lauf_ereignisse`. Die Datenbank trägt eine Schema-Version (`PRAGMA user_version`). **Seit v0.7:** Eine Datei mit älterer Version wird beim Öffnen Schritt für Schritt auf den Stand des Programms gehoben (`db.MIGRATIONEN`, je Schritt eine Transaktion), nachdem sie über die SQLite-Backup-Funktion als `fotosort.db.vor_schema_<Version>` im Archiv-Ordner aufgehoben wurde (nie gelöscht); der Befehl sagt das. Fehlt ein Schritt, wird sie mit verständlicher Meldung abgelehnt, nie stillschweigend weiterbenutzt. Eine Datei aus einem **neueren** Programmstand wird immer abgelehnt und nicht angefasst. Dieselben Regeln gelten für eine Sicherungskopie beim Wiederherstellen (§8).
 
 **`quellen`** — eine Zeile je Quellwurzel eines Archivs (§4 Phase 1, §8):
 
