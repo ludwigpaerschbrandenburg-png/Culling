@@ -39,14 +39,20 @@ def _selbsttest_http(adresse: str, konsole) -> int:
     return OK if ok else FEHLER
 
 
-def server_starten(port: int, selbsttest: bool, ziel: str | None, konsole) -> int:
+def ablauf_bauen(ziel: str | None, config: str | None = None) -> "ablauf_modul.Ablauf":
+    """Der Ablauf hinter Fenster und Browser-Fassung - mit dem Ziel und der
+    Konfigurationsdatei aus dem Befehl (--config, SPEC Abschnitt 8)."""
+    return ablauf_modul.Ablauf(ziel=ziel, config_pfad=config)
+
+
+def server_starten(port: int, selbsttest: bool, ziel: str | None, konsole, config: str | None = None) -> int:
     """Nur der Server (Browser-Fassung): Adresse nennen, bis Strg+C laufen."""
     try:
         from . import server as server_modul
     except ImportError as fehler:
         konsole.print(meldungen.ob_server_fehlt(f"{type(fehler).__name__}: {fehler}"))
         return FEHLER
-    ab = ablauf_modul.Ablauf(ziel=ziel)
+    ab = ablauf_bauen(ziel, config)
     app = server_modul.app_bauen(ab)
     srv = server_modul.Server(app, port)
     try:
@@ -65,9 +71,10 @@ def server_starten(port: int, selbsttest: bool, ziel: str | None, konsole) -> in
 
 
 def starten(ohne_fenster: bool, port: int, selbsttest: bool, ziel: str | None, konsole,
-            durchlauf: tuple[str, str] | None = None, fotos: str | None = None) -> int:
+            durchlauf: tuple[str, str] | None = None, fotos: str | None = None,
+            config: str | None = None) -> int:
     if ohne_fenster:
-        return server_starten(port, selbsttest, ziel, konsole)
+        return server_starten(port, selbsttest, ziel, konsole, config)
     try:
         from . import desktop
     except Exception as fehler:  # noqa: BLE001 - PySide6 fehlt oder laedt nicht (z. B. libEGL)
@@ -75,4 +82,5 @@ def starten(ohne_fenster: bool, port: int, selbsttest: bool, ziel: str | None, k
         konsole.print(text)
         meldungsfenster.zeigen("fotosort: Fenster nicht verfügbar", text)
         return FEHLER
-    return desktop.starten(ziel, selbsttest=selbsttest, durchlauf=durchlauf, fotos=fotos, konsole=konsole)
+    return desktop.starten(ziel, selbsttest=selbsttest, durchlauf=durchlauf, fotos=fotos, konsole=konsole,
+                           config=config)

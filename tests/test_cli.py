@@ -783,3 +783,32 @@ def test_status_nennt_sicherung_und_ziel_index(capsys, quelle, ziel):
     assert rueckgabe == cli.OK
     assert "Sicherungskopie im Ziel:  20" in ausgabe          # Zeitstempel der Sicherung nach dem Scan
     assert "Ziel-Index:               0 Dateien im Ziel bekannt" in ausgabe
+
+
+def test_config_auf_fehlende_datei_bricht_ab(capsys, quelle, ziel, tmp_path):
+    fehlt = tmp_path / "gibt_es_nicht.toml"
+    rueckgabe, ausgabe = _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel), "--config", str(fehlt))
+    assert rueckgabe == cli.FEHLER
+    assert str(fehlt) in ausgabe and "--config" in ausgabe
+    assert not (ziel / ".fotosortierer").exists()
+
+
+def test_strg_c_im_scan_schliesst_den_lauf(capsys, quelle, ziel, monkeypatch, nachschauen):
+    from fotosort import scan
+
+    echt = scan._verbuchen
+    zaehler = {"n": 0}
+
+    def verbuchen_mit_abbruch(*a, **kw):
+        zaehler["n"] += 1
+        if zaehler["n"] == 5:
+            raise KeyboardInterrupt
+        return echt(*a, **kw)
+
+    monkeypatch.setattr(scan, "_verbuchen", verbuchen_mit_abbruch)
+    rueckgabe, ausgabe = _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
+    assert rueckgabe == cli.ABGEBROCHEN and "Abgebrochen" in ausgabe
+    with nachschauen(ziel) as d:
+        lauf = d.letzter_lauf()
+        assert lauf["ende"] and lauf["befehl"].startswith("fotosort scan")
+        assert d.ereignisse_zaehlen(lauf["nummer"], scan.ART_ABGEBROCHEN) == 1

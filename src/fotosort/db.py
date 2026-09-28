@@ -211,23 +211,49 @@ def archiv_id_vorhanden(ziel: Path) -> bool:
     return archiv_id_datei(ziel).is_file()
 
 
-def archiv_id_lesen_oder_anlegen(ziel: Path) -> str:
-    """Archiv-Kennung lesen; beim ersten Scan eines Ziels anlegen.
+def archiv_id_lesen(ziel: Path) -> str | None:
+    """Archiv-Kennung lesen; None, wenn es noch keine gibt.
 
     Ist die Datei vorhanden, ihr Inhalt aber keine gueltige 32-stellige
     Hex-Kennung, wird abgebrochen. Es wird dann niemals eine neue erzeugt
     (SPEC Abschnitt 6).
     """
     datei = archiv_id_datei(ziel)
-    if datei.is_file():
+    if not datei.is_file():
+        return None
+    try:
         roh = datei.read_text(encoding="utf-8")
-        kennung = roh.strip().lstrip("﻿")
-        if not _ID_MUSTER.match(kennung):
-            raise FotosortFehler(meldungen.archiv_id_kaputt(datei, roh))
-        return kennung
-    kennung = uuid.uuid4().hex
+    except UnicodeDecodeError:
+        roh = datei.read_bytes().decode("utf-8", errors="replace")
+        raise FotosortFehler(meldungen.archiv_id_kaputt(datei, roh))
+    kennung = roh.strip().lstrip("\ufeff")
+    if not _ID_MUSTER.match(kennung):
+        raise FotosortFehler(meldungen.archiv_id_kaputt(datei, roh))
+    return kennung
+
+
+def archiv_id_neu() -> str:
+    return uuid.uuid4().hex
+
+
+def archiv_id_schreiben(ziel: Path, kennung: str) -> Path:
+    """Die Kennung ins Ziel schreiben - erst, wenn Archiv-Ordner, Konfiguration
+    und Datenbank stehen: Eine Kennung ohne Datenbank machte das Ziel
+    unbenutzbar ("Datenbank fehlt")."""
+    datei = archiv_id_datei(ziel)
     datei.parent.mkdir(parents=True, exist_ok=True)
     datei.write_text(kennung + "\n", encoding="utf-8")
+    return datei
+
+
+def archiv_id_lesen_oder_anlegen(ziel: Path) -> str:
+    """Archiv-Kennung lesen; fehlt sie, sofort anlegen. Der Befehlsweg
+    (cli.archiv_oeffnen) schreibt sie dagegen erst am Ende."""
+    kennung = archiv_id_lesen(ziel)
+    if kennung is not None:
+        return kennung
+    kennung = archiv_id_neu()
+    archiv_id_schreiben(ziel, kennung)
     return kennung
 
 

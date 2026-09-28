@@ -505,3 +505,21 @@ def test_prozess_abgeschossen_mitten_im_aufraeumen(tmp_path, archiv_basis):
     assert status == {"quelle_geloescht": 30}
     zaehler = {a: n for a, n in alle}
     assert zaehler.get(loeschen.ART_QUELLE_GELOESCHT, 0) + zaehler.get(loeschen.ART_LOESCHUNG_NACHGETRAGEN, 0) == 30
+
+
+def test_zieldatei_nach_der_frischlesung_veraendert_wird_nicht_geloescht(baum, quelle, ziel, nachschauen):
+    """Zwischen Frischlesung und Entfernen wird die Zieldatei ersetzt: Die Quelle
+    ist dann das letzte unversehrte Exemplar und bleibt stehen."""
+    _bis_geprueft(ziel, quelle)
+    with nachschauen(ziel) as d:
+        lauf = d.lauf_beginnen("test")
+        z = d.zeile(baum["analog"])
+        zp = Path(z["zielpfad"])
+        gut = loeschen.frisch_lesen(baum["analog"], zp, False, lauf=lauf)
+        assert gut.art == "ok" and gut.ziel_kennung
+        inhalt = zp.read_bytes()
+        zp.write_bytes(inhalt[:-1] + b"?")       # gleiche Groesse, anderer Inhalt
+        with pytest.raises(loeschen.Verweigert, match="nach der Frischlesung veraendert"):
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], gut, loeschen.WEISE_ENDGUELTIG, False)
+        assert baum["analog"].exists() and zp.read_bytes() != inhalt
+        assert d.zeile(baum["analog"])["status"] != "quelle_geloescht"

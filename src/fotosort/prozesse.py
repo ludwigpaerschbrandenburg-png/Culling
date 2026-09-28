@@ -40,6 +40,46 @@ def losgeloest() -> dict:
     }
 
 
+def startzeit(pid: int) -> float | None:
+    """Wann der Prozess gestartet wurde (Sekunden seit 1970); None, wenn das
+    hier nicht feststellbar ist. Damit laesst sich eine wiederverwendete
+    Prozessnummer von "unserem" Arbeitsprozess unterscheiden: Ein fremder
+    Prozess mit derselben Nummer hat eine andere Startzeit."""
+    try:
+        if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.windll.kernel32
+            griff = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+            if not griff:
+                return None
+            try:
+                erstellt, beendet, kern, nutzer = (wintypes.FILETIME() for _ in range(4))
+                if not k32.GetProcessTimes(griff, ctypes.byref(erstellt), ctypes.byref(beendet),
+                                           ctypes.byref(kern), ctypes.byref(nutzer)):
+                    return None
+            finally:
+                k32.CloseHandle(griff)
+            hundert_ns = (erstellt.dwHighDateTime << 32) | erstellt.dwLowDateTime
+            return (hundert_ns - 116444736000000000) / 1e7   # FILETIME beginnt 1601
+        if sys.platform.startswith("linux"):
+            import os
+
+            stat = open(f"/proc/{int(pid)}/stat", "rb").read().decode("ascii", "replace")
+            felder = stat[stat.rindex(")") + 2:].split()      # nach "(name)" beginnt Feld 3
+            ticks = int(felder[19])                           # Feld 22: Startzeit in Takten seit dem Hochfahren
+            takte = os.sysconf("SC_CLK_TCK")
+            with open("/proc/stat", "rb") as f:
+                for zeile in f:
+                    if zeile.startswith(b"btime "):
+                        return int(zeile.split()[1]) + ticks / takte
+            return None
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 def baum_beenden(prozess: subprocess.Popen) -> None:
     """Einen Hilfsprozess samt seinen Kindern hart beenden.
 

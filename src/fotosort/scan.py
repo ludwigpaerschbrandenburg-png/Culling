@@ -162,17 +162,17 @@ def ist_ausgeschlossen(relativ: str, muster: list[str], ordner: bool = False) ->
 
 
 def _ist_verknuepfung(eintrag: os.DirEntry) -> bool:
+    """Symlink oder Windows-Junction. Nicht jeder Reparse-Point ist eine
+    Verknuepfung: OneDrive-Ordner ("Dateien bei Bedarf"), Dedup und aehnliche
+    Dienste markieren gewoehnliche Ordner und Dateien ebenfalls so - die
+    muessen normal durchlaufen werden."""
     try:
         if eintrag.is_symlink():
             return True
+        pruefen = getattr(eintrag, "is_junction", None)   # Python 3.12
+        return bool(pruefen and pruefen())
     except OSError:
         return False
-    if os.name == "nt":  # pragma: no cover - Junctions gibt es nur unter Windows
-        try:
-            return bool(eintrag.stat(follow_symlinks=False).st_reparse_tag)
-        except (OSError, AttributeError):
-            return False
-    return False
 
 
 # ------------------------------------------------------------- Funde -----

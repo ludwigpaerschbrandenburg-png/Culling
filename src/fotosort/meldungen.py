@@ -202,6 +202,14 @@ def config_erzeugt(pfad) -> str:
     return f"Neue Konfiguration mit Standardwerten angelegt: {pfad}"
 
 
+def config_datei_fehlt(pfad) -> str:
+    return (
+        "Abbruch: Die mit --config angegebene Konfigurationsdatei gibt es nicht:\n"
+        f"  {pfad}\n"
+        "Ohne diesen Schalter gilt die config.toml des Archivs (fotosort config --nur-pfad zeigt sie)."
+    )
+
+
 def config_aus_ziel_uebernommen(pfad) -> str:
     return (
         "Die Konfiguration aus dem Ziel wurde uebernommen, statt eine neue\n"
@@ -1220,6 +1228,7 @@ GRUND_KEIN_ECHTER_TYP = "Loeschung verweigert: kein echter Dateityp"
 GRUND_KEIN_HASH = "Loeschung verweigert: kein gespeicherter Quell-Hash"
 GRUND_QUELLE_ABWEICHUNG = "Quelle seit dem Kopieren geaendert (Hash der Quelle weicht ab) - nicht geloescht, wird neu kopiert"
 GRUND_ZIEL_ABWEICHUNG = "Loeschung verweigert: Zieldatei weicht vom gespeicherten Hash ab"
+GRUND_ZIEL_NACH_LESUNG_GEAENDERT = "Loeschung verweigert: Zieldatei hat sich nach der Frischlesung veraendert"
 GRUND_BYTEVERGLEICH = "Loeschung verweigert: Byte-Vergleich von Quelle und Ziel ungleich"
 GRUND_KEINE_FRISCHLESUNG = "Loeschung verweigert: keine Frischlesung im laufenden Lauf"
 GRUND_QUELLE_NICHT_LESBAR = "Loeschung verweigert: Quelldatei nicht lesbar"
@@ -1822,6 +1831,13 @@ def ob_liste_unbekannt(art: str) -> str:
 
 def ob_datenbank_belegt() -> str:
     return "Solange ein Schritt läuft, kann die Zusammenfassung nicht gelesen werden. Bitte warten, bis er fertig ist."
+
+
+def ob_durchlauf_nur_testbaum(quelle) -> str:
+    return (
+        f"Der Durchlauf laeuft nur am kuenstlichen Testbaum (Marke .fotosort_testbaum neben dem Ordner), nicht an {quelle}: "
+        "Er faehrt ohne Rueckfrage bis zum Aufraeumen der Quelle."
+    )
 
 
 def ob_kein_archiv(ziel) -> str:

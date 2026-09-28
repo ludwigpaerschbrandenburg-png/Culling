@@ -587,3 +587,33 @@ def test_muster_das_die_ganze_quelle_trifft_wird_gemeldet(quelle, ziel, datenban
 def test_ohne_muster_wird_nichts_gemeldet(quelle, ziel, datenbank, konf):
     ergebnis, _ = _scannen(quelle, ziel, datenbank, konf)
     assert ergebnis.alles_ausgeschlossen is False
+
+
+# ------------------------------------ Verknuepfung oder nur Reparse-Point --
+
+
+class _Eintrag:
+    """Ein os.DirEntry-Ersatz: OneDrive markiert Ordner als Reparse-Point,
+    ohne dass sie Verknuepfungen waeren."""
+
+    def __init__(self, symlink=False, junction=False, reparse_tag=0):
+        self._symlink, self._junction, self._tag = symlink, junction, reparse_tag
+
+    def is_symlink(self):
+        return self._symlink
+
+    def is_junction(self):
+        return self._junction
+
+    def stat(self, follow_symlinks=True):
+        class St:
+            st_reparse_tag = self._tag
+        return St()
+
+
+def test_nur_symlink_und_junction_sind_verknuepfungen():
+    assert scan._ist_verknuepfung(_Eintrag(symlink=True)) is True
+    assert scan._ist_verknuepfung(_Eintrag(junction=True)) is True
+    # OneDrive "Dateien bei Bedarf" (IO_REPARSE_TAG_CLOUD): ein normaler Ordner
+    assert scan._ist_verknuepfung(_Eintrag(reparse_tag=0x9000001A)) is False
+    assert scan._ist_verknuepfung(_Eintrag()) is False

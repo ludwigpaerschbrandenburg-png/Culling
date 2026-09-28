@@ -272,3 +272,20 @@ def test_startseite_bietet_das_zurueckholen_der_datenbank_an(app, tmp_path, quel
     assert f.start.weitermachen.isVisible() and f.start.weitermachen.text().startswith("Weitermachen")
     assert not antworten
     f.close()
+
+
+def test_durchlauf_laeuft_nur_am_testbaum(app, tmp_path, quelle, ziel, capsys):
+    """Der Durchlauf raeumt am Ende die Quelle auf - deshalb nur mit der Marke des Testbaums."""
+    fremd = tmp_path / "Echte Fotos"
+    fremd.mkdir()
+    (fremd / "IMG_0001.JPG").write_bytes(b"\xff\xd8\xff")
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    d = desktop.Durchlauf(f, str(ziel), str(fremd), None, None)
+    d.starten()
+    _ereignisse(app, 0.5)
+    assert "Testbaum" in d.fehler and not d.timer.isActive()
+    assert (fremd / "IMG_0001.JPG").exists() and ab.lauf is None
+    # Der Testbaum selbst traegt die Marke.
+    assert (Path(quelle).parent / desktop.TESTBAUM_MARKE).is_file()
+    f.close()

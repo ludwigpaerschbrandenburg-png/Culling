@@ -220,6 +220,26 @@ def _signatur(pfad: Path) -> tuple[str, str]:
     return status, wer
 
 
+PRUEFUNGS_MARKE = ".fotosort_pruefung"
+
+
+def _arbeitsordner_leeren(arbeit: Path) -> None:
+    """Den Arbeitsordner leeren - aber nur, wenn er leer ist oder von einer
+    frueheren Pruefung stammt (Marke). Ein fremder, gefuellter Ordner wird
+    nie geloescht: Wer versehentlich seinen Bilderordner angibt, verliert nichts."""
+    arbeit = Path(arbeit)
+    if arbeit.exists():
+        if not arbeit.is_dir():
+            raise SystemExit(f"{arbeit} ist kein Ordner.")
+        inhalt = list(arbeit.iterdir())
+        if inhalt and not (arbeit / PRUEFUNGS_MARKE).is_file():
+            raise SystemExit(f"{arbeit} ist nicht leer und stammt nicht von dieser Pruefung - "
+                             "bitte einen leeren oder neuen Ordner angeben. Es wurde nichts geloescht.")
+        shutil.rmtree(arbeit)
+    arbeit.mkdir(parents=True)
+    (arbeit / PRUEFUNGS_MARKE).write_text("Arbeitsordner von paket/pruefen.py\n", encoding="utf-8")
+
+
 def inhalt_pruefen(paket: Path) -> list[str]:
     fehler: list[str] = []
     for name in PFLICHT:
@@ -299,8 +319,7 @@ def main() -> int:
         print(f"Signatur {name} (nur zur Information): {status} - {wer or 'ohne Unterzeichner'}", flush=True)
 
     # -- 2. Frischer PC -----------------------------------------------------------------
-    shutil.rmtree(arbeit, ignore_errors=True)
-    arbeit.mkdir(parents=True)
+    _arbeitsordner_leeren(arbeit)
     start_ordner = arbeit / "fotosort-windows (1)" / "fotosort"
     shutil.copytree(paket, start_ordner)
     lokal = arbeit / "Nutzer (neu)" / "AppData" / "Local"   # existiert noch nicht

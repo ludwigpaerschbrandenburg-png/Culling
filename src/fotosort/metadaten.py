@@ -153,7 +153,10 @@ def _argumente(dateityp: str) -> list[str]:
         felder, schnell = FELDER_SIDECAR_XML, False
     else:
         felder, schnell = FELDER_FOTO, True
-    args = ["-j", "-charset", "filename=utf8", "-charset", "utf8", "-m"]
+    # LargeFileSupport: Ohne diese Option bricht ExifTool bei Videos ueber 2 GB
+    # ab, deren Kopfdaten (moov) hinter den Bilddaten liegen - dann gaebe es
+    # kein Datum, und die Aufnahme landete still unter _Ohne_Datum.
+    args = ["-j", "-charset", "filename=utf8", "-charset", "utf8", "-m", "-api", "LargeFileSupport=1"]
     if schnell:
         args.append("-fast2")
     args.extend(f"-{feld}" for feld in felder)

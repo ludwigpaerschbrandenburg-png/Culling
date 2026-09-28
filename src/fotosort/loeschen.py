@@ -75,6 +75,7 @@ class Lesung:
     grund: str = ""
     lauf: int = 0            # der Lauf, in dem gelesen wurde
     quell_kennung: tuple = ()   # Kennung der Quelle VOR dem Lesen (siehe kennung)
+    ziel_kennung: tuple = ()    # Kennung des Ziels VOR dem Lesen
 
 
 def kennung(st: os.stat_result) -> tuple:
@@ -132,7 +133,8 @@ def frisch_lesen(quelle: Path, zielpfad: Path, byte_vergleich: bool,
     except OSError as fehler:
         return Lesung("fehler", grund=f"{meldungen.GRUND_QUELLE_NICHT_LESBAR}: {fehler.strerror or fehler}", lauf=lauf)
     return Lesung("ok", quell_hash=hq, ziel_hash=hz, quell_groesse=st_q.st_size,
-                  ziel_groesse=st_z.st_size, byte_gleich=gleich, lauf=lauf, quell_kennung=kennung(st_q))
+                  ziel_groesse=st_z.st_size, byte_gleich=gleich, lauf=lauf,
+                  quell_kennung=kennung(st_q), ziel_kennung=kennung(st_z))
 
 
 def bedingungen_pruefen(zeile, lesung: Lesung, lauf: int, byte_vergleich: bool) -> None:
@@ -188,6 +190,11 @@ def _unmittelbar_vorher_pruefen(quelle: Path, zielpfad: Path, lesung: Lesung, ge
         raise Verweigert(f"{meldungen.GRUND_ZIEL_NICHT_LESBAR}: {fehler.strerror or fehler}") from None
     if dieselbe_datei(quelle, zielpfad, st, st_z):
         raise Verweigert(meldungen.GRUND_DIESELBE_DATEI)
+    # Auch das Ziel muss noch genau die Datei sein, die frisch gelesen wurde:
+    # Wurde sie zwischen Lesung und Loeschung ersetzt oder beschnitten, waere
+    # die Quelle das letzte unversehrte Exemplar.
+    if lesung.ziel_kennung and kennung(st_z) != lesung.ziel_kennung:
+        raise Verweigert(meldungen.GRUND_ZIEL_NACH_LESUNG_GEAENDERT)
     if weise == WEISE_ENDGUELTIG:
         try:
             h = hashes.blake3_datei(pfade.lang(quelle))

@@ -287,3 +287,19 @@ def test_exiftool_holen_nimmt_nur_die_festgenagelte_pruefsumme(tmp_path, monkeyp
     assert holen.version_waehlen("neueste") == ("9.99", None)
     assert holen.holen(tmp_path / "c", "9.99") == "9.99"
     assert "ExifTool 9.99" in (tmp_path / "c" / "VERSION.txt").read_text(encoding="utf-8")
+
+
+def test_pruefung_leert_nur_eigene_arbeitsordner(tmp_path):
+    pruefung = _modul("pruefen")
+    fremd = tmp_path / "Bilder"
+    fremd.mkdir()
+    (fremd / "urlaub.jpg").write_bytes(b"\xff\xd8")
+    with pytest.raises(SystemExit, match="nicht leer"):
+        pruefung._arbeitsordner_leeren(fremd)
+    assert (fremd / "urlaub.jpg").exists()
+    eigen = tmp_path / "pruefung"
+    pruefung._arbeitsordner_leeren(eigen)                       # neu angelegt, mit Marke
+    assert (eigen / pruefung.PRUEFUNGS_MARKE).is_file()
+    (eigen / "rest.txt").write_text("x", encoding="utf-8")
+    pruefung._arbeitsordner_leeren(eigen)                       # eigener Ordner: geleert
+    assert not (eigen / "rest.txt").exists() and (eigen / pruefung.PRUEFUNGS_MARKE).is_file()

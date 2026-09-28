@@ -225,3 +225,41 @@ def test_ohne_zeitlimit_kein_waechter(baum):
     with metadaten.ExifToolPool(testbaum.exiftool_pfad(), 1) as pool:
         felder = pool.lesen([(str(baum["jpg"]), FOTO)])[metadaten.schluessel(baum["jpg"])]
         assert felder["Model"] == "ILCE-7CM2" and pool.zeitlimits == 0
+
+
+def _duenne_grosse_mp4(pfad: Path, groesse: int) -> bool:
+    """MP4 wie bei vielen Kameras: Bilddaten (mdat) vorn, Kopfdaten (moov) hinten,
+    ohne Platz auf der Platte (duenne Datei). False, wenn das Dateisystem das nicht kann."""
+    import struct
+
+    kopf = bytearray(testbaum._mp4())
+    kopf[40:44] = struct.pack(">I", testbaum._sekunden_1904(2026, 1, 5, 10, 0, 0))   # mvhd: Erstellungszeit
+    ftyp, moov = bytes(kopf[:20]), bytes(kopf[20:])
+    mdat_len = groesse - len(ftyp) - len(moov)
+    with open(pfad, "wb") as f:
+        f.write(ftyp + struct.pack(">I4sQ", 1, b"mdat", mdat_len))
+        f.truncate(len(ftyp) + mdat_len)
+        f.seek(len(ftyp) + mdat_len)
+        f.write(moov)
+    st = pfad.stat()
+    return st.st_size == groesse and getattr(st, "st_blocks", 0) * 512 < groesse // 4
+
+
+def test_video_ueber_2_gb_mit_kopfdaten_am_ende_bekommt_ein_datum(pool, tmp_path):
+    """Ohne LargeFileSupport bricht ExifTool bei 2 GB ab ("End of processing at
+    large atom") - die Aufnahme haette kein Datum und landete unter _Ohne_Datum."""
+    gross = tmp_path / "C0042.MP4"
+    if not _duenne_grosse_mp4(gross, 2_200_000_000):
+        gross.unlink(missing_ok=True)
+        pytest.skip("Dateisystem kann keine duennen Dateien")
+    try:
+        felder = pool.lesen([(str(gross), VIDEO)])[metadaten.schluessel(gross)]
+        assert felder.get("CreateDate") == "2026:01:05 10:00:00"
+    finally:
+        gross.unlink(missing_ok=True)
+
+
+def test_argumente_enthalten_large_file_support():
+    for typ in (FOTO, RAW, VIDEO, SIDECAR):
+        args = metadaten._argumente(typ)
+        assert "-api" in args and "LargeFileSupport=1" in args

@@ -704,3 +704,18 @@ def test_ohne_sicherung_wird_das_ziel_neu_eingelesen(ob, quelle, ziel, archiv_ba
     assert _post(client, "/api/los")["gestartet"] == "scan"
     assert _warten(client)["zustand"] == "fertig"
     assert client.get("/api/naechster").json()["schritt"] == "analyse"
+
+
+def test_fenster_reicht_config_bis_in_den_ablauf(monkeypatch, tmp_path, capsys):
+    from fotosort.oberflaeche import fenster as fenster_modul
+
+    konf = tmp_path / "eigene.toml"
+    konf.write_text("", encoding="utf-8")
+    ab = fenster_modul.ablauf_bauen(str(tmp_path / "Ziel"), str(konf))
+    assert ab.config_pfad == str(konf) and ab.ziel == str(tmp_path / "Ziel")
+    assert fenster_modul.ablauf_bauen(None, None).config_pfad is None
+
+    aufrufe: list[dict] = []
+    monkeypatch.setattr(fenster_modul, "starten", lambda **kw: aufrufe.append(kw) or 0)
+    assert cli.main(["fenster", "--ziel", str(tmp_path / "Ziel"), "--config", str(konf), "--selbsttest"]) == 0
+    assert aufrufe and aufrufe[0]["config"] == str(konf) and aufrufe[0]["selbsttest"] is True

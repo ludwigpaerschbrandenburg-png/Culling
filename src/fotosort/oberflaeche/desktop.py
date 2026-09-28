@@ -36,6 +36,9 @@ from . import ablauf as ablauf_modul
 from . import meldungsfenster, stil
 
 SCHRITTE = ["scan", "analyse", "kopieren", "pruefen", "aufraeumen"]
+#: Marke des kuenstlichen Testbaums (tests/testbaum.py legt sie neben "Quelle" ab):
+#: nur dort darf --durchlauf laufen, denn er raeumt am Ende die Quelle auf.
+TESTBAUM_MARKE = ".fotosort_testbaum"
 ENDE = {"fertig", "abgebrochen", "fehler", "abgestuerzt"}
 POLL_MS = 500          # hoechstens zweimal je Sekunde (SPEC Abschnitt 8)
 MARKER = "fenster.json"
@@ -1386,6 +1389,12 @@ class Durchlauf(QObject):
         self.fehler = ""
 
     def starten(self) -> None:
+        # Der Durchlauf faehrt bis zum Aufraeumen, ohne eine einzige Rueckfrage.
+        # Deshalb laeuft er nur am kuenstlichen Testbaum (SPEC §11), den
+        # tests/testbaum.py mit einer Marke versieht - nie an echten Fotos.
+        if not (Path(self.quelle).parent / TESTBAUM_MARKE).is_file():
+            QTimer.singleShot(0, lambda: self._abbruch(meldungen.ob_durchlauf_nur_testbaum(self.quelle)))
+            return
         QTimer.singleShot(300, self.timer.start)
 
     def _sagen(self, text: str) -> None:
@@ -1549,7 +1558,7 @@ def eigene_taskleiste() -> None:
 
 
 def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, str] | None = None,
-            fotos: str | None = None, konsole=None) -> int:
+            fotos: str | None = None, konsole=None, config: str | None = None) -> int:
     """Das Desktop-Fenster oeffnen. Rueckgabe wie ein Befehl (0 gut)."""
     from .. import cli
     protokoll = None
@@ -1569,7 +1578,8 @@ def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, st
     app.setWindowIcon(stil.programm_symbol())
     meldungsfenster.excepthook_einrichten(protokoll)
 
-    ab = ablauf_modul.Ablauf(ziel=ziel)
+    from . import fenster as fenster_modul
+    ab = fenster_modul.ablauf_bauen(ziel, config)
     ab.fenster = True
     fenster = Hauptfenster(ab, konsole)
     fenster.show()

@@ -21,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import restzeit
+from . import prozesse, restzeit
 
 ZUSTAND_LAEUFT = "laeuft"
 ZUSTAND_PAUSE = "pause"
@@ -47,6 +47,9 @@ def json_lesen(pfad: Path) -> dict | None:
         return json.loads(Path(pfad).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+_MEINE_STARTZEIT = prozesse.startzeit(os.getpid())
 
 
 class Steuerung:
@@ -85,6 +88,7 @@ class Steuerung:
             "schritt": self.schritt,
             "zustand": self.zustand,
             "pid": os.getpid(),
+            "prozess_start": _MEINE_STARTZEIT,   # gegen eine spaeter wiederverwendete Prozessnummer
             "programm": sys.executable,     # im Windows-Paket: python\\pythonw.exe
             "beginn": self.begonnen,
             "aktualisiert": jetzt,

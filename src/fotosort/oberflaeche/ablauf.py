@@ -115,9 +115,16 @@ def ordner_eintraege(ordner: Path, hoechstens: int = 100000) -> int:
     return n
 
 
-def pid_lebt(pid: int) -> bool:
+def pid_lebt(pid: int, start: float | None = None) -> bool:
+    """Lebt der Prozess - und ist es noch derselbe? Mit "start" (Startzeit aus
+    der Statusdatei) wird eine spaeter an einen fremden Prozess vergebene
+    Nummer erkannt; "Sofort beenden" darf nie einen Fremden treffen."""
     if not pid:
         return False
+    if start is not None:
+        jetzt = prozesse.startzeit(pid)
+        if jetzt is not None and abs(jetzt - float(start)) > 2.0:
+            return False
     if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
         import ctypes
         k32 = ctypes.windll.kernel32
@@ -177,6 +184,7 @@ class Lauf:
     pid: int
     beginn: float
     auftrag: dict
+    start: float | None = None   # Startzeit des Prozesses (aus der Statusdatei), gegen PID-Wiederverwendung
 
 
 class Ablauf:
@@ -215,10 +223,10 @@ class Ablauf:
         if st.get("zustand") in (steuerung.ZUSTAND_LAEUFT, steuerung.ZUSTAND_PAUSE, ZUSTAND_STARTET):
             pid = int(st.get("pid") or 0)
             frisch = time.time() - float(st.get("aktualisiert") or 0) < ABGESTUERZT_NACH
-            if pid_lebt(pid) or (frisch and st.get("zustand") == ZUSTAND_STARTET):
+            if pid_lebt(pid, st.get("prozess_start")) or (frisch and st.get("zustand") == ZUSTAND_STARTET):
                 auftrag = steuerung.json_lesen(self.auftrag_datei) or {}
                 self.lauf = Lauf(str(st.get("schritt") or auftrag.get("schritt") or ""), None, pid,
-                                 float(st.get("beginn") or time.time()), auftrag)
+                                 float(st.get("beginn") or time.time()), auftrag, st.get("prozess_start"))
                 if auftrag.get("ziel") and not self.ziel:
                     self.ziel = str(auftrag["ziel"])
 
@@ -242,7 +250,7 @@ class Ablauf:
             if st.get("zustand") in ENDZUSTAENDE:
                 return False
             frisch = time.time() - float(st.get("aktualisiert") or 0) < ABGESTUERZT_NACH
-            return pid_lebt(self.lauf.pid) or frisch
+            return pid_lebt(self.lauf.pid, self.lauf.start or st.get("prozess_start")) or frisch
 
     def _log_anfang(self, schritt: str) -> None:
         self.ordner.mkdir(parents=True, exist_ok=True)
@@ -307,11 +315,11 @@ class Ablauf:
                 return {"aktiv": False, "zustand": "", "schritt": ""}
             zustand = str(st.get("zustand") or ZUSTAND_STARTET)
             schritt = str(st.get("schritt") or (self.lauf.schritt if self.lauf else ""))
-            if self.lauf is None and zustand not in ENDZUSTAENDE and pid_lebt(int(st.get("pid") or 0)):
+            if self.lauf is None and zustand not in ENDZUSTAENDE and pid_lebt(int(st.get("pid") or 0), st.get("prozess_start")):
                 # Ein Arbeitsprozess, den dieses Fenster nicht gestartet hat (etwa
                 # ein zweites Fenster): uebernehmen statt fuer tot erklaeren.
                 self.lauf = Lauf(schritt, None, int(st.get("pid") or 0), float(st.get("beginn") or time.time()),
-                                 steuerung.json_lesen(self.auftrag_datei) or {})
+                                 steuerung.json_lesen(self.auftrag_datei) or {}, st.get("prozess_start"))
             lebt = self.lauf_lebt()
             if not lebt and zustand not in ENDZUSTAENDE:
                 # Verschwunden, ohne sich abzumelden (Absturz, Stromausfall,
@@ -388,8 +396,8 @@ class Ablauf:
                 steuerung.wunsch_schreiben(self.steuer_datei, abbrechen=True)
                 if self.lauf.prozess is not None:
                     self.lauf.prozess.terminate()
-                else:
-                    prozess_beenden(self.lauf.pid)
+                elif pid_lebt(self.lauf.pid, self.lauf.start):
+                    prozess_beenden(self.lauf.pid)   # nie einen fremden Prozess mit derselben Nummer
                 return {"ok": True, "text": meldungen.ob_abgebrochen_hart(self.lauf.schritt)}
             else:
                 raise FotosortFehler(meldungen.ob_kein_lauf())

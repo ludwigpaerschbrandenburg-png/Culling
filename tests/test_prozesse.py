@@ -81,3 +81,30 @@ def test_arbeitsprozess_bekommt_die_argumente(monkeypatch, tmp_path):
     assert a["gestartet"] == "scan"
     assert aufrufe and aufrufe[0]["creationflags"] == 0 and aufrufe[0]["start_new_session"] is True
     ablauf.prozess_beenden(a["pid"])
+
+
+def test_startzeit_erkennt_wiederverwendete_prozessnummer():
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from fotosort import prozesse
+    from fotosort.oberflaeche import ablauf as ablauf_modul
+
+    eigene = prozesse.startzeit(os.getpid())
+    if eigene is None:
+        import pytest
+        pytest.skip("Startzeit auf diesem System nicht feststellbar")
+    assert time.time() - 86400 < eigene <= time.time() + 2
+    kind = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        start = prozesse.startzeit(kind.pid)
+        assert start is not None and abs(start - time.time()) < 10
+        assert ablauf_modul.pid_lebt(kind.pid, start) is True
+        # Dieselbe Nummer, aber ein anderer (frueherer) Prozess: nicht unserer.
+        assert ablauf_modul.pid_lebt(kind.pid, start - 600) is False
+        assert ablauf_modul.pid_lebt(kind.pid) is True      # ohne Startzeit wie bisher
+    finally:
+        kind.kill()
+        kind.wait()

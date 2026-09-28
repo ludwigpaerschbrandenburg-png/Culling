@@ -216,6 +216,9 @@ def erzeugen(wurzel: Path) -> dict[str, Path]:
     ausserhalb = wurzel / "Ausserhalb"
     quelle.mkdir(parents=True, exist_ok=True)
     ausserhalb.mkdir(parents=True, exist_ok=True)
+    # Marke fuer "--durchlauf": Der fuehrt ohne Rueckfrage bis zum Aufraeumen
+    # und darf deshalb nur an diesem Baum laufen (oberflaeche/desktop.py).
+    (wurzel / ".fotosort_testbaum").write_text("kuenstlicher Testbaum aus SPEC Abschnitt 11\n", encoding="utf-8")
 
     wo: dict[str, Path] = {"wurzel": wurzel, "quelle": quelle, "ausserhalb": ausserhalb}
     befehle: list[list[str]] = []

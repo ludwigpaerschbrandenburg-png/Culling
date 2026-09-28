@@ -204,6 +204,13 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False, datenban
 
     datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=sperren)
     _anhebung_melden(datenbank, konsole)
+    if not ort.id_war_da:
+        try:
+            datei = db.archiv_id_schreiben(ort.ziel, ort.archiv_id)
+        except BaseException:
+            datenbank.schliessen()
+            raise
+        konsole.print(meldungen.archiv_id_angelegt(ort.archiv_id, datei))
     return Archiv(
         ziel=ort.ziel,
         archiv_id=ort.archiv_id,
@@ -238,17 +245,21 @@ def archiv_ort(args, konsole, anlegen: bool) -> ArchivOrt:
         ziel.mkdir(parents=True, exist_ok=True)
         konsole.print(meldungen.ziel_angelegt(ziel))
 
-    id_war_da = db.archiv_id_vorhanden(ziel)
-    if not id_war_da and not anlegen:
-        raise FotosortFehler(meldungen.archiv_id_fehlt(ziel))
-    archiv_id = db.archiv_id_lesen_oder_anlegen(ziel)
-    if not id_war_da:
-        konsole.print(meldungen.archiv_id_angelegt(archiv_id, db.archiv_id_datei(ziel)))
-
     # Der Konfigurationswert datenbank_ort wirkt nur aus einer mit --config
     # angegebenen Datei (SPEC Abschnitt 6).
     von_aussen = bool(getattr(args, "config", None))
+    if von_aussen and not Path(args.config).is_file():
+        raise FotosortFehler(meldungen.config_datei_fehlt(args.config))
     aeussere = config.laden(Path(args.config)) if von_aussen else None
+
+    vorhanden = db.archiv_id_lesen(ziel)
+    id_war_da = vorhanden is not None
+    if not id_war_da and not anlegen:
+        raise FotosortFehler(meldungen.archiv_id_fehlt(ziel))
+    # Eine neue Kennung wird erst geschrieben, wenn Ordner, Konfiguration und
+    # Datenbank stehen (archiv_oeffnen) - sonst bliebe bei einem Fehler eine
+    # Kennung ohne Datenbank im Ziel liegen, und das Ziel waere unbenutzbar.
+    archiv_id = vorhanden if id_war_da else db.archiv_id_neu()
     ordner = db.archiv_ordner(archiv_id, aeussere)
 
     konf_pfad, _ = _konf_pfad_bestimmen(args, ordner)
@@ -379,6 +390,7 @@ def befehl_scan(args, konsole) -> int:
         if gesamt.abgebrochen:
             konsole.print("")
             konsole.print(meldungen.scan_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
             return ABGEBROCHEN
         _abschliessen(archiv, konsole, lauf, {
             "dateien": ergebnis.dateien, "bytes": ergebnis.bytes_gesamt, "sekunden": ergebnis.sekunden,
@@ -1164,6 +1176,7 @@ def befehl_fenster(args, konsole) -> int:
         return fenster.starten(
             ohne_fenster=bool(args.ohne_fenster), port=args.port, selbsttest=bool(args.selbsttest),
             ziel=args.ziel, konsole=konsole, durchlauf=durchlauf, fotos=getattr(args, "fotos", None),
+            config=getattr(args, "config", None),
         )
     except FotosortFehler:
         raise
