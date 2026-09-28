@@ -289,13 +289,16 @@ def sicherung_lesen(pfad: Path) -> Sicherungsstand:
     except OSError as fehler:
         raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, fehler.strerror or str(fehler)))
     geaendert = datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
+    # Kein URI-Pfad (unter Windows vertraegt sich das lange Praefix nicht mit
+    # file:-Adressen); die Datei ist der eigene Zwischenstand im Archiv-Ordner.
     try:
-        verbindung = sqlite3.connect(f"{pfade.lang(pfad).as_uri()}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000.0)
-    except (sqlite3.Error, ValueError) as fehler:
+        verbindung = sqlite3.connect(str(pfade.lang(pfad)), timeout=BUSY_TIMEOUT_MS / 1000.0)
+    except sqlite3.Error as fehler:
         raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, str(fehler)))
     try:
         verbindung.row_factory = sqlite3.Row
         try:
+            verbindung.execute("PRAGMA query_only = 1")
             befund = verbindung.execute("PRAGMA integrity_check").fetchone()[0]
         except sqlite3.DatabaseError as fehler:
             raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, str(fehler)))
@@ -341,11 +344,12 @@ def lokaler_stand(ordner: Path) -> str:
     """Letzter Lauf der vorhandenen lokalen Datenbank, nur lesend; '' wenn unlesbar."""
     pfad = datenbank_pfad(ordner)
     try:
-        verbindung = sqlite3.connect(f"{pfade.lang(pfad).as_uri()}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000.0)
-    except (sqlite3.Error, ValueError):
+        verbindung = sqlite3.connect(str(pfade.lang(pfad)), timeout=BUSY_TIMEOUT_MS / 1000.0)
+    except sqlite3.Error:
         return ""
     try:
         verbindung.row_factory = sqlite3.Row
+        verbindung.execute("PRAGMA query_only = 1")
         return _lauf_text(verbindung.execute("SELECT nummer, befehl, start FROM laeufe ORDER BY nummer DESC LIMIT 1").fetchone())
     except sqlite3.Error:
         return ""
