@@ -599,6 +599,9 @@ Lückenliste (weil aus der SPEC unmittelbar fällig):
 - [x] **ExifTool-Version und Prüfsumme im Paketbau festgenagelt** (siehe Windows-Paket).
 - [x] **`status` nennt Sicherung und Ziel-Index.**
 - [x] Analyse-Durchsatz mit Komma (war „29.9 Dateien/s").
+- [x] **Skalierungstest des Neuaufbaus** (Container, Dateisystem-Cache, 20.096 Dateien, 1,6 GB):
+      Neuaufbau 9,3 s (2.167 Dateien/s, 174 MB/s, 4 Hash-Worker); danach Scan, Analyse und
+      Kopieren erneut: 0 kopiert, 20.096 als Duplikat erkannt, Zahl der Dateien im Ziel unverändert.
 
 ### Entscheidungen für den Nutzer
 
