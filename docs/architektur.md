@@ -44,6 +44,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ hashes.py              BLAKE3-Prüfsummen, Byte-Vergleich
 │  ├─ kopieren.py            Phase 3: übertragen
 │  ├─ pruefen.py             Phase 4: nachrechnen
+│  ├─ zielindex.py            fotosort ziel-index --neu-aufbauen: das Ziel vollstaendig lesen, Index neu (SPEC §6, §8), fortsetzbar
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
@@ -193,7 +194,7 @@ SQLite-Backup-Funktion sein muss und kein einfaches Kopieren der Datei: Nur sie 
 einer Datenbank, die gerade benutzt wird, eine in sich stimmige Kopie; ein Dateikopiervorgang
 könnte einen halb geschriebenen Zustand einfangen. Das Ergebnis liegt danach als ganz normale
 Datei im Ziel. Gearbeitet wird nie in dieser Kopie. Geht die lokale Datenbank verloren, holt
-`fotosort wiederherstellen` sie daraus zurück (SPEC §8).
+`fotosort wiederherstellen` sie daraus zurück (SPEC §8): Byte-Kopie in den Archiv-Ordner, dort geprüft (`db.sicherung_holen`), nicht überschreibend eingesetzt (`db.sicherung_einsetzen`); eine vorhandene Datenbank wird nur mit `--ersetzen` ersetzt und dabei aufgehoben (`db.datenbank_beiseite`).
 
 ### Tabelle `dateien` — eine Zeile pro Quelldatei
 

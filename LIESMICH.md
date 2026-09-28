@@ -275,6 +275,8 @@ fotosort.bat bericht    --ziel D:\Archiv                    (Bericht als Text un
 fotosort.bat config     --ziel D:\Archiv                    (Einstellungsdatei oeffnen)
 fotosort.bat messen     --quelle D:\Chaos --ziel D:\Archiv  (Lese- und Schreibtempo messen)
 fotosort.bat start      --ziel D:\Archiv                    (der gefuehrte Ablauf)
+fotosort.bat wiederherstellen --ziel D:\Archiv              (Datenbank aus der Sicherungskopie im Ziel zurueckholen)
+fotosort.bat ziel-index --neu-aufbauen --ziel D:\Archiv     (das Archiv neu einlesen: jede Datei im Ziel lesen und merken)
 ```
 
 Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` oder
@@ -296,6 +298,16 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
   besten ist, sagt `fotosort.bat messen`.
 - `messen` legt im Ziel nur einen vorübergehenden Messordner an, der am Ende wieder
   verschwindet, und schlägt am Ende Werte für die Einstellungen vor.
+- `wiederherstellen` holt die Datenbank (das Gedächtnis des Archivs) aus der Sicherungskopie
+  im Zielordner zurück – etwa auf einem neuen Rechner oder nachdem sie gelöscht wurde. Es
+  prüft die Sicherung vor dem Einsetzen und ersetzt eine vorhandene Datenbank nur mit
+  `--ersetzen` (die bisherige wird aufgehoben, nie gelöscht); `--vorheriger-stand` nimmt die
+  vorletzte Sicherung. Das Fenster bietet dasselbe als Knopf an (Abschnitt 8).
+- `ziel-index --neu-aufbauen` liest jede Datei im Zielordner vollständig und merkt sie sich
+  mit ihrer Prüfsumme. Nötig, wenn weder Datenbank noch Sicherung da sind oder im Archiv von
+  Hand umsortiert wurde. Es kopiert, verschiebt und löscht nichts; bei einem großen Archiv
+  dauert es lange, lässt sich aber abbrechen und macht beim nächsten Aufruf dort weiter.
+  Ohne `--neu-aufbauen` zeigt der Befehl nur, wie viele Dateien im Ziel bekannt sind.
 
 ---
 
@@ -435,7 +447,9 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 
 - **Datenbank** (das Gedächtnis: jede Datei mit Status und Fingerabdruck):
   `C:\Users\<Name>\AppData\Local\fotosortierer\<Archiv-Kennung>\fotosort.db`. Sie liegt
-  bewusst auf dem Rechner, nie auf dem Netzlaufwerk. Daneben liegt die `config.toml`.
+  bewusst auf dem Rechner, nie auf dem Netzlaufwerk. Daneben liegt die `config.toml`. Ersetzt
+  `wiederherstellen --ersetzen` eine vorhandene Datenbank, bleibt die alte daneben als
+  `fotosort.db.ersetzt_<Zeit>` liegen; sie können Sie löschen, wenn alles wieder stimmt.
 - **Archiv-Kennung**: `<Ziel>\.fotosortierer\archiv-id.txt`. Darüber findet das Programm
   die richtige Datenbank, auch wenn das Ziel unter einem anderen Laufwerksbuchstaben
   eingebunden ist.
@@ -470,14 +484,22 @@ die ZIP-Datei noch einmal vollständig entpacken und gegebenenfalls die Ausnahme
 Abschnitt 1 einrichten. Aus dem Quellcode
 heraus: Anhang lesen und `einrichten.bat` erneut starten.
 
-**„Es gibt eine Archiv-Kennung, aber die lokale Datenbank fehlt":** Das passiert,
-wenn das Archiv auf einem anderen Rechner angelegt wurde oder die Datenbank gelöscht
-wurde. Der Befehl `fotosort wiederherstellen` ist noch nicht gebaut; bis dahin von Hand:
-die Datei `<Ziel>\.fotosortierer\fotosort.db.sicherung` nach
-`C:\Users\<Name>\AppData\Local\fotosortierer\<Archiv-Kennung>\fotosort.db` kopieren
-(die Kennung steht in `<Ziel>\.fotosortierer\archiv-id.txt`). Legen Sie **keine** neue
-Kennung an und löschen Sie die Datei `archiv-id.txt` nicht – sonst gälte das Archiv als
-leer, und alles würde noch einmal kopiert.
+**„Archiv ohne Merkliste" auf der Startseite / „Es gibt eine Archiv-Kennung, aber die
+lokale Datenbank fehlt":** Das passiert, wenn das Archiv auf einem anderen Rechner angelegt
+wurde oder die Datenbank gelöscht wurde. Das Fenster zeigt dann auf der Zielordner-Karte den
+passenden Knopf:
+
+- **„Datenbank zurückholen…"** – im Zielordner liegt eine Sicherungskopie (nach jedem Schritt
+  geschrieben). Nach einer Rückfrage wird sie geprüft und eingesetzt; danach steht das Archiv
+  wieder da, wo die Sicherung stand. Im schwarzen Fenster: `fotosort.bat wiederherstellen`.
+- **„Archiv neu einlesen…"** – es gibt keine Sicherung. Das Programm liest jede Datei im
+  Zielordner und merkt sie sich; das dauert bei einem großen Archiv lange, verändert aber
+  nichts. Danach auf der Startseite die Quellordner angeben und „Los geht's" drücken: Was
+  schon im Archiv liegt, wird am Inhalt erkannt und nicht noch einmal kopiert. Im schwarzen
+  Fenster: `fotosort.bat ziel-index --neu-aufbauen`.
+
+Legen Sie **keine** neue Kennung an und löschen Sie die Datei `archiv-id.txt` nicht – sonst
+gälte das Archiv als leer, und alles würde noch einmal kopiert.
 
 **Eine Datei steht auf `fehler`:** Der Grund steht im Bericht. Meist ist die Datei
 nicht lesbar, oder die Kopie stimmte nicht. Die Quelldatei bleibt unangetastet. Nach
@@ -498,9 +520,9 @@ neben der alten den Anhang `_1`.
 - **Nie zwei Läufe gleichzeitig** auf dasselbe Archiv. Das Programm sperrt das Archiv,
   und das Fenster startet keinen zweiten Schritt, solange einer läuft – aber starten Sie
   nicht zusätzlich Befehle im schwarzen Fenster, während das Fenster arbeitet.
-- **Die Datenbank bleibt auf dem Rechner.** Beim Wechsel auf einen anderen Rechner
-  übernimmt das Programm nur die Einstellungen aus dem Archiv; die Datenbank selbst holen
-  Sie wie in Abschnitt 8 beschrieben von Hand zurück, solange `wiederherstellen` fehlt.
+- **Die Datenbank bleibt auf dem Rechner.** Beim Wechsel auf einen anderen Rechner holt
+  „Datenbank zurückholen…" (oder `fotosort.bat wiederherstellen`) den letzten Stand samt
+  Einstellungen aus der Sicherungskopie im Zielordner (Abschnitt 8).
 - **Sidecars** (`.xmp` usw.) wandern immer zusammen mit ihrer Hauptdatei.
 - **Videos ohne Zeitzone** werden aus Weltzeit umgerechnet; steht `heimat_zeitzone`
   falsch, rutscht eine Abendaufnahme in den nächsten Tag.
@@ -519,9 +541,6 @@ neben der alten den Anhang `_1`.
 
 ## 10. Was noch nicht gebaut ist
 
-- `fotosort wiederherstellen` (Datenbank aus der Sicherungskopie holen) und
-  `fotosort ziel-index --neu-aufbauen` (das Archiv neu einlesen) melden sich mit
-  „Er kommt in Phase 3" und tun noch nichts. Der Weg von Hand steht in Abschnitt 8.
 - Der Betrieb auf dem TrueNAS-Server (im Browser, mit eigenem Ordner-Browser statt des
   Windows-Dialogs) ist eine spätere Phase. Die Browser-Fassung der Oberfläche läuft dort schon
   jetzt mit `fotosort fenster --ohne-fenster`; der Ordnerpfad wird dann eingetippt. Auf dem

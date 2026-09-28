@@ -389,9 +389,10 @@ Größe: etwa 42 MB als ZIP (v0.5 mit PyInstaller: 74 MB), 107 MB entpackt.
 - [x] **Signatur:** Eine eigene Signatur ist nicht mehr nötig: Es gibt keine eigenen Programme mehr,
       und die gestarteten sind signiert (Python) bzw. weit verbreitet (Perl von ExifTool). Ob Norton
       damit zufrieden ist, zeigt erst der Test auf dem echten PC.
-- [ ] **ExifTool-Version:** Der Bau nimmt die jeweils aktuelle Version von exiftool.org; die
-      benutzte steht in `exiftool\VERSION.txt` im Paket. Zum Festnageln `--version` in
-      `paket/exiftool_holen.py` bzw. im Workflow angeben.
+- [x] **ExifTool-Version festgenagelt (v0.7):** `paket/exiftool_holen.py` nimmt ohne Angabe die
+      Version `FESTE_VERSION` (13.59) und prüft die ZIP-Datei gegen `FESTE_SHA256`; andere Bytes
+      werden nie benutzt. `--version neueste` fragt exiftool.org. Zum Anheben beide Werte zusammen
+      ändern; die benutzte Version und Prüfsumme stehen in `exiftool\VERSION.txt` im Paket.
 
 ---
 
