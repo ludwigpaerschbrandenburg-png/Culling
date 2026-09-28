@@ -3,6 +3,7 @@ Ziel zurueckholen (SPEC §6 "Sicherungskopie der Datenbank", §8)."""
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -127,3 +128,21 @@ def test_ohne_sicherung_verweist_auf_den_neuaufbau(baum, quelle, ziel, archiv_ba
     assert _cli("wiederherstellen", "--ziel", ziel) == cli.FEHLER
     aus = capsys.readouterr().out
     assert "keine Sicherungskopie" in aus and "ziel-index --neu-aufbauen" in aus
+
+
+def test_neuer_rechner_ohne_archiv_ordner(baum, quelle, ziel, archiv_basis, nachschauen, capsys):
+    """Der Fall aus der LIESMICH: Das Archiv wurde anderswo angelegt, auf diesem
+    Rechner gibt es noch nicht einmal den Archiv-Ordner."""
+    _bis_kopiert(ziel, quelle)
+    vorher = _zeilen(nachschauen, ziel)
+    ordner = _archiv_ordner(ziel, archiv_basis)
+    konf_im_ziel = (ziel / db.ARCHIV_UNTERORDNER / config.DATEINAME).read_bytes()
+    shutil.rmtree(ordner)
+    capsys.readouterr()
+    assert _cli("wiederherstellen", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "zurueckgeholt" in aus and "Konfiguration aus dem Ziel" in aus
+    assert (ordner / db.DATEINAME).is_file()
+    assert (ordner / config.DATEINAME).read_bytes() == konf_im_ziel
+    assert _zeilen(nachschauen, ziel) == vorher
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
