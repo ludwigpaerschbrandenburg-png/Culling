@@ -1660,6 +1660,7 @@ SCHRITT_NAME: dict[str, str] = {
     "verschieben": "Verschieben ins Archiv",
     "pruefen": "Prüfen: jede Zieldatei vollständig neu lesen",
     "aufraeumen": "Quelle aufräumen",
+    "ziel-index": "Archiv neu einlesen: jede Datei im Ziel lesen und merken",
 }
 
 SCHRITT_ERKLAERUNG: dict[str, str] = {
@@ -1669,6 +1670,7 @@ SCHRITT_ERKLAERUNG: dict[str, str] = {
     "verschieben": "Die Dateien werden ins Archiv gebracht und erst nach erfolgreicher Prüfung in der Quelle gelöscht.",
     "pruefen": "Jede kopierte Datei wird im Archiv vollständig neu gelesen und mit der Quelle verglichen.",
     "aufraeumen": "Nur Dateien, deren Kopie im Archiv nachweislich stimmt, werden aus der Quelle entfernt. Vorher werden Quelle und Ziel noch einmal komplett gelesen.",
+    "ziel-index": "Jede Datei im Zielordner wird vollständig gelesen und mit ihrer Prüfsumme gemerkt. Kopiert, verschoben oder gelöscht wird nichts. Danach auf der Startseite die Quellordner angeben und „Los geht's“ drücken.",
 }
 
 OB_PROFILE: list[tuple[str, str]] = [
@@ -1787,6 +1789,49 @@ def ob_datenbank_belegt() -> str:
 
 def ob_kein_archiv(ziel) -> str:
     return f"In {ziel} liegt noch kein Archiv. Bitte zuerst „Los geht's“ mit mindestens einem Quellordner."
+
+
+def ob_rettung_wiederherstellen(zeit: str) -> str:
+    return (
+        "Die Merkliste des Programms zu diesem Archiv (die Datenbank) fehlt auf diesem PC. Im Zielordner liegt "
+        f"eine Sicherungskopie vom {zeit or 'unbekannten Zeitpunkt'}. Sie lässt sich mit einem Klick zurückholen; "
+        "kopierte Fotos bleiben unangetastet."
+    )
+
+
+def ob_rettung_neuaufbau() -> str:
+    return (
+        "Die Merkliste des Programms zu diesem Archiv (die Datenbank) fehlt auf diesem PC, und im Zielordner liegt "
+        "keine Sicherungskopie. Das Archiv lässt sich neu einlesen: Jede Datei im Ziel wird gelesen und gemerkt; "
+        "kopiert, verschoben oder gelöscht wird dabei nichts."
+    )
+
+
+def ob_frage_wiederherstellen(zeit: str, lokal) -> str:
+    return (
+        f"Die Sicherungskopie vom {zeit or 'unbekannten Zeitpunkt'} wird nach {lokal} zurückgeholt. Was nach diesem "
+        "Stand geschah, kennt das Programm danach nicht mehr; ein erneuter Scan und ein erneutes Kopieren finden das "
+        "Fehlende, ohne etwas doppelt zu kopieren. Gelöscht wird nichts."
+    )
+
+
+def ob_wiederhergestellt(dateien: int, zeit: str) -> str:
+    return f"Datenbank zurückgeholt: {anzahl(dateien)} Dateien erfasst, Stand vom {zeit or 'unbekannten Zeitpunkt'}."
+
+
+def ob_datenbank_schon_da() -> str:
+    return "Die Datenbank ist vorhanden; es gibt nichts zurückzuholen."
+
+
+def ob_frage_neuaufbau(ziel) -> str:
+    return (
+        f"Jede Datei in {ziel} wird vollständig gelesen – bei einem großen Archiv dauert das lange. Es wird nichts "
+        "kopiert, verschoben oder gelöscht. Danach auf der Startseite die Quellordner angeben und „Los geht's“ drücken."
+    )
+
+
+def ob_scan_noetig_text() -> str:
+    return "Es sind noch keine Dateien aus einer Quelle erfasst. Auf der Startseite die Quellordner angeben und „Los geht's“ drücken."
 
 
 def ob_bericht(pfad, geoeffnet: bool) -> str:

@@ -159,6 +159,8 @@
     leer(tags);
     wm.disabled = true;
     wm.textContent = "Weitermachen";
+    wm.classList.remove("versteckt");
+    $("rettung").classList.add("versteckt");
     $("verwerfen").classList.toggle("versteckt", !($("ziel").value.trim() && archiv && archiv.da && !archiv.laeuft));
     if (!$("ziel").value.trim()) {
       kicker.textContent = "Zielordner"; text.textContent = "Noch kein Zielordner gewählt."; return;
@@ -170,6 +172,14 @@
     }
     kicker.textContent = "Angefangenes Archiv";
     if (archiv.laeuft) { text.textContent = "Gerade läuft ein Schritt."; return; }
+    if (archiv.rettung) {
+      kicker.textContent = "Archiv ohne Merkliste";
+      text.textContent = archiv.rettung_text || archiv.fehler || "";
+      $("rettung").textContent = archiv.rettung === "wiederherstellen" ? "Datenbank zurückholen…" : "Archiv neu einlesen…";
+      $("rettung").classList.remove("versteckt");
+      wm.classList.add("versteckt");
+      return;
+    }
     if (archiv.fehler) { text.textContent = archiv.fehler; return; }
     text.textContent = archiv.phase || "";
     (archiv.quellen || []).forEach(function (q) {
@@ -184,7 +194,7 @@
   }
 
   function kurzName(schritt) {
-    return { scan: "Scan", analyse: "Analyse", kopieren: Z.zustand && Z.zustand.verschieben ? "Verschieben" : "Kopieren", pruefen: "Prüfen", aufraeumen: "Aufräumen" }[schritt] || schritt;
+    return { scan: "Scan", analyse: "Analyse", kopieren: Z.zustand && Z.zustand.verschieben ? "Verschieben" : "Kopieren", pruefen: "Prüfen", aufraeumen: "Aufräumen", "ziel-index": "Neu einlesen" }[schritt] || schritt;
   }
 
   function zielUebernehmen() {
@@ -234,6 +244,27 @@
     }).catch(fehlerZeigen);
   }
 
+  function rettung() {
+    var art = Z.zustand && Z.zustand.archiv && Z.zustand.archiv.rettung;
+    if (art === "wiederherstellen") {
+      api("/api/wiederherstellen", {}).then(function (a) {
+        if (!a || a.frage !== "wiederherstellen") return;
+        return dialog("Datenbank zurückholen?", a.text, { ja: "Zurückholen", nein: "Nicht jetzt" }).then(function (r) {
+          if (!r.ja) return;
+          return api("/api/wiederherstellen", { ja: true }).then(function (b) { laden("start"); meldung(b.text || "", true); });
+        });
+      }).catch(fehlerZeigen);
+    } else if (art === "neuaufbau") {
+      api("/api/neuaufbau", {}).then(function (a) {
+        if (!a || a.frage !== "neuaufbau") return;
+        return dialog("Archiv neu einlesen?", a.text, { ja: "Neu einlesen", nein: "Nicht jetzt" }).then(function (r) {
+          if (!r.ja) return;
+          return api("/api/neuaufbau", { ja: true }).then(function (b) { if (b && b.gestartet) { hauptZeigen(); laufStarten(b.gestartet); } });
+        });
+      }).catch(fehlerZeigen);
+    }
+  }
+
   function archivVerwerfen() {
     api("/api/verwerfen", {}).then(function (a) {
       if (!a || a.frage !== "verwerfen") return;
@@ -275,10 +306,10 @@
   function phasenSetzen(aktiv, anteil) {
     var idx = SCHRITTE.indexOf(aktiv);
     alle("#phasen-liste li").forEach(function (li, i) {
-      li.className = idx < 0 ? "ist-fertig" : (i < idx ? "ist-fertig" : (i === idx ? "ist-aktiv" : ""));
+      li.className = idx < 0 ? "" : (i < idx ? "ist-fertig" : (i === idx ? "ist-aktiv" : ""));
       if (i === idx) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
     });
-    var fuellung = idx < 0 ? 1 : (idx + (anteil || 0)) / SCHRITTE.length;
+    var fuellung = idx < 0 ? 0 : (idx + (anteil || 0)) / SCHRITTE.length;
     $("phasen-fill").style.width = Math.round(fuellung * 100) + "%";
   }
 
@@ -421,7 +452,8 @@
   function ruheAktionen(n, zf) {
     var a = $("aktionen"); leer(a);
     var v = Z.zustand.verschieben;
-    if (n.schritt === "analyse") a.appendChild(knopf("Analyse starten", "btn-primary", function () { schrittStarten("analyse"); }));
+    if (n.schritt === "scan") a.appendChild(knopf("Startseite: Quellordner angeben", "btn-primary", function () { laden("start"); }));
+    else if (n.schritt === "analyse") a.appendChild(knopf("Analyse starten", "btn-primary", function () { schrittStarten("analyse"); }));
     else if (n.schritt === "pruefen") a.appendChild(knopf("Prüfen starten", "btn-primary", function () { schrittStarten("pruefen"); }));
     else if (n.schritt === "kopieren") a.appendChild(knopf((v ? "Verschieben" : "Kopieren") + " starten · " + n.n + " Dateien", "btn-primary", function () { kopierenStarten(n); }));
     else if (n.schritt === "aufraeumen") a.appendChild(knopf("Aufräumen · Wort rechts eintippen", "btn-primary", function () { $("auf-wort").focus(); }));
@@ -604,6 +636,7 @@
     alle("input[name=modus]").forEach(function (r) { r.addEventListener("change", function () { modusText(); einstellungenSenden(); }); });
     alle("input[name=profil]").forEach(function (r) { r.addEventListener("change", function () { Z.profilGewaehlt = true; profilText(); einstellungenSenden(); }); });
     $("verwerfen").onclick = archivVerwerfen;
+    $("rettung").onclick = rettung;
     $("weitermachen").onclick = function () { zielUebernehmen().then(function () { Z.letzterSchritt = ""; hauptZeigen(); ruheZeigen(); }); };
     alle("input[name=weise]").forEach(function (r) { r.addEventListener("change", aufWortPruefen); });
     $("auf-wort").addEventListener("input", aufWortPruefen);

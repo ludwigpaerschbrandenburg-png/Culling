@@ -250,7 +250,7 @@ class Phasenleiste(QWidget):
                 klasse_setzen(l, "phase-aktiv")
             else:
                 klasse_setzen(l, "phase")
-        self.linie.setzen(1.0 if alles_fertig or idx < 0 else (idx + anteil) / len(SCHRITTE))
+        self.linie.setzen(1.0 if alles_fertig else (0.0 if idx < 0 else (idx + anteil) / len(SCHRITTE)))
 
 
 class Zaehler(QWidget):
@@ -386,6 +386,9 @@ class StartSeite(QWidget):
         self.weitermachen = knopf("Weitermachen", "primary", self.f.weitermachen)
         self.weitermachen.setEnabled(False)
         self.karte.lay.addWidget(self.weitermachen)
+        self.rettung = knopf("", "primary", self.f.rettung)
+        self.rettung.hide()
+        self.karte.lay.addWidget(self.rettung)
         self.verwerfen = knopf("Archiv verwerfen…", "ghost", self.f.archiv_verwerfen)
         self.verwerfen.setToolTip("Merkliste und Berichte zu diesem Ziel entfernen – kopierte Fotos bleiben.")
         self.verwerfen.hide()
@@ -445,6 +448,7 @@ class StartSeite(QWidget):
         _leeren(self.archiv_tags)
         self.weitermachen.setEnabled(False)
         self.weitermachen.setText("Weitermachen")
+        self.rettung.hide()
         self.verwerfen.setVisible(bool(self.ziel.text()) and bool(archiv.get("da")) and not archiv.get("laeuft"))
         if not self.ziel.text():
             self.karte.kicker.setText("ZIELORDNER")
@@ -459,6 +463,14 @@ class StartSeite(QWidget):
         if archiv.get("laeuft"):
             self.archiv_text.setText("Gerade läuft ein Schritt.")
             return
+        if archiv.get("rettung"):
+            self.karte.kicker.setText("ARCHIV OHNE MERKLISTE")
+            self.archiv_text.setText(archiv.get("rettung_text") or archiv.get("fehler") or "")
+            self.rettung.setText("Datenbank zurückholen…" if archiv["rettung"] == "wiederherstellen" else "Archiv neu einlesen…")
+            self.rettung.show()
+            self.weitermachen.hide()
+            return
+        self.weitermachen.show()
         if archiv.get("fehler"):
             self.archiv_text.setText(archiv["fehler"])
             return
@@ -885,7 +897,7 @@ class Hauptfenster(QMainWindow):
 
     def kurzname(self, schritt: str) -> str:
         return {"scan": "Scan", "analyse": "Analyse", "kopieren": "Verschieben" if self.zustand.get("verschieben") else "Kopieren",
-                "pruefen": "Prüfen", "aufraeumen": "Aufräumen"}.get(schritt, schritt)
+                "pruefen": "Prüfen", "aufraeumen": "Aufräumen", "ziel-index": "Neu einlesen"}.get(schritt, schritt)
 
     def rahmen(self) -> None:
         z = self.zustand
@@ -995,6 +1007,34 @@ class Hauptfenster(QMainWindow):
                 self.los(ziel_anlegen, True)
             return
         if a.get("gestartet"):
+            self.haupt_zeigen()
+            self.lauf_starten(a["gestartet"])
+
+    def rettung(self) -> None:
+        """Startseite: Datenbank aus der Sicherung holen oder das Ziel neu einlesen."""
+        art = (self.zustand.get("archiv") or {}).get("rettung")
+        if art == "wiederherstellen":
+            a = self._versuchen(self.ab.archiv_wiederherstellen, False)
+            if a is None or a.get("frage") != "wiederherstellen":
+                return
+            ja, _ = frage(self, "Datenbank zurückholen?", a["text"], ja="Zurückholen", nein="Nicht jetzt")
+            if not ja:
+                return
+            a = self._versuchen(self.ab.archiv_wiederherstellen, True)
+            if a is None:
+                return
+            self.laden("start")
+            self.meldung(a.get("text", ""), gut=True)
+        elif art == "neuaufbau":
+            a = self._versuchen(self.ab.neuaufbau_starten, False)
+            if a is None or a.get("frage") != "neuaufbau":
+                return
+            ja, _ = frage(self, "Archiv neu einlesen?", a["text"], ja="Neu einlesen", nein="Nicht jetzt")
+            if not ja:
+                return
+            a = self._versuchen(self.ab.neuaufbau_starten, True)
+            if a is None or not a.get("gestartet"):
+                return
             self.haupt_zeigen()
             self.lauf_starten(a["gestartet"])
 
@@ -1158,7 +1198,9 @@ class Hauptfenster(QMainWindow):
         v = bool(self.zustand.get("verschieben"))
         s = n["schritt"]
         eintraege = []
-        if s == "analyse":
+        if s == "scan":
+            eintraege.append(("Startseite: Quellordner angeben", "primary", lambda: self.laden("start"), True))
+        elif s == "analyse":
             eintraege.append(("Analyse starten", "primary", lambda: self.schritt_starten("analyse"), True))
         elif s == "pruefen":
             eintraege.append(("Prüfen starten", "primary", lambda: self.schritt_starten("pruefen"), True))

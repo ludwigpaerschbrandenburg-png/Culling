@@ -1063,6 +1063,11 @@ def befehl_arbeit(args, konsole) -> int:
             ns.profil = auftrag.get("profil")
             ns.hash_worker = None
             rc = befehl_pruefen(ns, konsole)
+        elif schritt == "ziel-index":
+            ns.neu_aufbauen = True
+            ns.profil = auftrag.get("profil")
+            ns.hash_worker = None
+            rc = befehl_ziel_index(ns, konsole)
         elif schritt == "aufraeumen":
             ns.quelle = list(auftrag.get("quellen") or []) or None
             ns.leere_ordner = bool(auftrag.get("leere_ordner"))

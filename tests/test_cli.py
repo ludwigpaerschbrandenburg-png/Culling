@@ -140,7 +140,7 @@ def test_scan_auf_frischem_ziel_legt_alles_an(capsys, quelle, tmp_path, archiv_b
     assert db.sicherung_pfad(ziel).is_file()
     assert (ziel / ".fotosortierer" / config.DATEINAME).is_file()
 
-    assert "noch kein Archiv" in ausgabe
+    assert "Archiv-Kennung" in ausgabe
     assert str(testbaum.ERWARTET_GESAMT) in ausgabe
 
 

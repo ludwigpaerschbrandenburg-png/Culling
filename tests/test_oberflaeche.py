@@ -623,3 +623,84 @@ def test_fenster_kommando_und_umgebung(monkeypatch, tmp_path):
     assert ablauf_modul._kommando() == [str(python), "-X", "utf8", "-m", "fotosort"]   # ohne pythonw.exe
     (python.parent / "pythonw.exe").write_bytes(b"")
     assert ablauf_modul._kommando() == [str(python.parent / "pythonw.exe"), "-X", "utf8", "-m", "fotosort"]
+
+
+# ------------------------------------------------ Rettung ohne Datenbank --
+
+
+def _lokal_weg(ziel: Path, archiv_basis: Path, auch_sicherung: bool = False) -> Path:
+    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
+    lokal = archiv_basis / kennung
+    for name in (db.DATEINAME, db.DATEINAME + "-wal", db.DATEINAME + "-shm"):
+        if (lokal / name).exists():
+            (lokal / name).unlink()
+    if auch_sicherung:
+        for p in (db.sicherung_pfad(ziel), db.sicherung_vorher_pfad(ziel)):
+            if p.exists():
+                p.unlink()
+    return lokal
+
+
+def test_fehlende_datenbank_wird_von_der_startseite_zurueckgeholt(ob, quelle, ziel, archiv_basis):
+    """Datenbank weg, Sicherung im Ziel da: Die Startseite bietet das Zurueckholen an (SPEC §6)."""
+    ab, client = ob
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["kopieren", "--ziel", str(ziel)]) == cli.OK
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["naechster"] == "pruefen" and "rettung" not in z["archiv"]
+    assert "nichts zurückzuholen" in _fehler(client, "/api/wiederherstellen", {"ja": True})
+
+    lokal = _lokal_weg(ziel, archiv_basis)
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["da"] and z["archiv"]["rettung"] == "wiederherstellen"
+    assert "Sicherungskopie" in z["archiv"]["rettung_text"]
+    a = _post(client, "/api/wiederherstellen")
+    assert a["frage"] == "wiederherstellen" and str(lokal) in a["text"]
+    assert not (lokal / db.DATEINAME).exists()          # die Rueckfrage allein tut nichts
+    a = _post(client, "/api/wiederherstellen", {"ja": True})
+    assert "zurückgeholt" in a["text"] and a["archiv"]["naechster"] == "pruefen"
+    assert (lokal / db.DATEINAME).is_file()
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["naechster"] == "pruefen" and "rettung" not in z["archiv"]
+    assert "nichts zurückzuholen" in _fehler(client, "/api/wiederherstellen", {"ja": True})
+
+
+def test_ohne_sicherung_wird_das_ziel_neu_eingelesen(ob, quelle, ziel, archiv_basis, nachschauen):
+    """Weder Datenbank noch Sicherung: Die Startseite bietet das Neueinlesen an; es
+    laeuft als eigener Schritt mit Fortschritt und fuehrt danach zu den Quellen."""
+    ab, client = ob
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["kopieren", "--ziel", str(ziel)]) == cli.OK
+    im_ziel = [p for p in ziel.rglob("*") if p.is_file() and db.ARCHIV_UNTERORDNER not in p.parts]
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    _lokal_weg(ziel, archiv_basis, auch_sicherung=True)
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["rettung"] == "neuaufbau" and "keine Sicherungskopie" in z["archiv"]["rettung_text"]
+    assert "Sicherungskopie" in _fehler(client, "/api/wiederherstellen", {"ja": True})
+    a = _post(client, "/api/neuaufbau")
+    assert a["frage"] == "neuaufbau" and str(ziel) in a["text"]
+    assert ab.lauf is None
+    a = _post(client, "/api/neuaufbau", {"ja": True})
+    assert a["gestartet"] == "ziel-index"
+    assert "läuft" in _fehler(client, "/api/los")
+    l = _warten(client)
+    assert l["zustand"] == "fertig" and l["schritt"] == "ziel-index" and l["dateien"] == len(im_ziel)
+    assert "Neu einlesen" not in l["schritt_name"] and l["schritt_name"].startswith("Archiv neu einlesen")
+    zf = client.get("/api/zusammenfassung?schritt=ziel-index").json()
+    zeilen = dict((z[0], z[1]) for z in zf["zeilen"])
+    assert zeilen["Dateien im Ziel gemerkt"] == str(len(im_ziel)) and zeilen["kopiert, verschoben oder gelöscht"] == "nichts"
+    assert "als Nächstes" in zeilen
+    n = client.get("/api/naechster").json()
+    assert n["schritt"] == "scan" and "Quellordner" in n["text"]
+    with nachschauen(ziel) as d:
+        assert d.ziel_index_zusammenfassung()["zeilen"] == len(im_ziel)
+    z = client.get("/api/zustand").json()
+    assert "rettung" not in z["archiv"] and z["archiv"]["da"]
+    # Danach wie gewohnt: Quelle angeben, los - der Scan findet die Dateien wieder.
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    assert _post(client, "/api/los")["gestartet"] == "scan"
+    assert _warten(client)["zustand"] == "fertig"
+    assert client.get("/api/naechster").json()["schritt"] == "analyse"

@@ -29,6 +29,8 @@ from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db
 from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
+# Schritte ausserhalb der Phasenleiste, die trotzdem als Arbeitsprozess laufen.
+WEITERE_SCHRITTE = ("ziel-index",)
 ZUSTAND_STARTET = "startet"
 ZUSTAND_ABGESTUERZT = "abgestuerzt"
 ENDZUSTAENDE = (steuerung.ZUSTAND_FERTIG, steuerung.ZUSTAND_ABGEBROCHEN, steuerung.ZUSTAND_FEHLER, ZUSTAND_ABGESTUERZT)
@@ -264,7 +266,7 @@ class Ablauf:
 
     def schritt_starten(self, schritt: str, **werte) -> dict:
         """Einen Schritt als eigenen Prozess starten. Nie zwei zugleich."""
-        if schritt not in SCHRITTE:
+        if schritt not in SCHRITTE and schritt not in WEITERE_SCHRITTE:
             raise FotosortFehler(meldungen.arbeit_schritt_unbekannt(schritt))
         with self.sperre:
             if self.lauf_lebt():
@@ -460,7 +462,7 @@ class Ablauf:
         try:
             stand = self.archiv_lesen()
         except FotosortFehler as fehler:
-            return {"da": True, "fehler": str(fehler)}
+            return {"da": True, "fehler": str(fehler), **self._rettung()}
         naechster = self._naechster_aus(stand)
         letzter = stand["letzter_lauf"] or {}
         return {
@@ -471,6 +473,52 @@ class Ablauf:
             "sicherung": self._sicherung_zeit(),
             "bericht": self._letzter_bericht(),
         }
+
+    def _rettung(self) -> dict:
+        """Fehlt die lokale Datenbank zu einem Archiv, gibt es zwei Wege zurueck
+        (SPEC Abschnitt 6): die Sicherungskopie aus dem Ziel holen oder das
+        Ziel neu einlesen. Die Startseite bietet den passenden an."""
+        try:
+            ziel, lokal, _im_ziel = self._archiv_orte()
+        except FotosortFehler:
+            return {}
+        if db.datenbank_pfad(lokal).is_file():
+            return {}
+        if db.sicherung_pfad(ziel).is_file():
+            return {"rettung": "wiederherstellen", "rettung_text": meldungen.ob_rettung_wiederherstellen(self._sicherung_zeit())}
+        return {"rettung": "neuaufbau", "rettung_text": meldungen.ob_rettung_neuaufbau()}
+
+    def archiv_wiederherstellen(self, ja: bool = False) -> dict:
+        """Die lokale Datenbank aus der Sicherungskopie im Ziel zurueckholen -
+        derselbe Weg wie "fotosort wiederherstellen". Ohne "ja" nur die
+        Rueckfrage. Nur, wenn lokal keine Datenbank liegt; nichts wird geloescht."""
+        with self.sperre:
+            if self.lauf_lebt():
+                raise FotosortFehler(meldungen.ob_laeuft_schon(self._schritt_name(self.lauf.schritt if self.lauf else "")))
+            ziel, lokal, _im_ziel = self._archiv_orte()
+            if db.datenbank_pfad(lokal).is_file():
+                raise FotosortFehler(meldungen.ob_datenbank_schon_da())
+            sicherung = db.sicherung_pfad(ziel)
+            if not sicherung.is_file():
+                raise FotosortFehler(meldungen.wiederherstellen_keine_sicherung(sicherung, ziel))
+            zeit = self._sicherung_zeit()
+            if not ja:
+                return {"frage": "wiederherstellen", "text": meldungen.ob_frage_wiederherstellen(zeit, lokal)}
+            stille = _StilleKonsole()
+            rc = cli.befehl_wiederherstellen(self._namensraum("wiederherstellen", ersetzen=False, vorheriger_stand=False), stille)
+            if rc != cli.OK:
+                raise FotosortFehler("\n".join(stille.zeilen))
+        stand = self.archiv_lesen()
+        return {"text": meldungen.ob_wiederhergestellt(sum(stand["zaehler"].values()), zeit), "archiv": self.archiv_info()}
+
+    def neuaufbau_starten(self, ja: bool = False) -> dict:
+        """Das Ziel vollstaendig neu einlesen ("fotosort ziel-index --neu-aufbauen")
+        als eigener Arbeitsprozess mit Fortschritt. Ohne "ja" nur die Rueckfrage."""
+        if not self.ziel or not self._archiv_da():
+            raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+        if not ja:
+            return {"frage": "neuaufbau", "text": meldungen.ob_frage_neuaufbau(self.ziel)}
+        return self.schritt_starten("ziel-index", profil=self.profil)
 
     def _sicherung_zeit(self) -> str:
         """Wann die Sicherungskopie im Ziel zuletzt geschrieben wurde (Statusleiste)."""
@@ -619,7 +667,7 @@ class Ablauf:
 
     # -- Archiv verwerfen --------------------------------------------------------
 
-    def _verwerfen_orte(self) -> tuple[Path, Path, Path]:
+    def _archiv_orte(self) -> tuple[Path, Path, Path]:
         """(Zielordner, lokaler Archiv-Ordner, .fotosortierer im Ziel)."""
         if not self.ziel or not self._archiv_da():
             raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
@@ -642,7 +690,7 @@ class Ablauf:
         with self.sperre:
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self._schritt_name(self.lauf.schritt if self.lauf else "")))
-            ziel, lokal, im_ziel = self._verwerfen_orte()
+            ziel, lokal, im_ziel = self._archiv_orte()
             erwartet = meldungen.BESTAETIGUNGSWORT["verwerfen"]
             wort = str(wort or "").strip().lower()
             if not wort:
@@ -730,10 +778,17 @@ class Ablauf:
         with self.sperre:
             stand = self.archiv_lesen()
             schritt = self._naechster_aus(stand)
+            if schritt == "fertig" and sum(stand["zaehler"].values()) == 0:
+                # Nichts erfasst (etwa nach dem Neueinlesen des Ziels): zuerst die Quellen.
+                schritt = "scan"
             d: dict = {"schritt": schritt, "phase": stand["phase"], "zaehler": stand["zaehler"]}
             if schritt == "fertig":
                 d["text"] = meldungen.ob_fertig_text()
                 d["name"] = ""
+                return d
+            if schritt == "scan":
+                d.update(name=self._schritt_name("scan"), erklaerung=meldungen.SCHRITT_ERKLAERUNG["scan"],
+                         text=meldungen.ob_scan_noetig_text())
                 return d
             d["name"] = self._schritt_name(schritt)
             d["erklaerung"] = meldungen.SCHRITT_ERKLAERUNG["verschieben" if schritt == "kopieren" and self.verschieben else schritt]
@@ -924,6 +979,17 @@ class Ablauf:
                         zeilen.append(["Quelle seit Kopieren geändert", meldungen.anzahl(n)])
                     if zaehler.get("geprueft", 0):
                         zeilen.append(["noch in der Quelle (geprueft)", meldungen.anzahl(zaehler.get("geprueft", 0))])
+                elif schritt == "ziel-index":
+                    stand_index = d.ziel_index_zusammenfassung()
+                    zeilen.append(["gelesen in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
+                    zeilen.append(["Dateien im Ziel gemerkt", meldungen.anzahl(stand_index["zeilen"])])
+                    zeilen.append(["Datenmenge im Ziel", meldungen.groesse(stand_index["bytes"])])
+                    n = ereignis("ziel_index_nicht_lesbar")
+                    if n:
+                        zeilen.append(["nicht lesbar", meldungen.anzahl(n)])
+                    zeilen.append(["kopiert, verschoben oder gelöscht", "nichts"])
+                    if sum(zaehler.values()) == 0:
+                        zeilen.append(["als Nächstes", "Startseite: Quellordner angeben, „Los geht's“"])
                 else:
                     raise FotosortFehler(meldungen.arbeit_schritt_unbekannt(schritt))
                 sek = float(zahlen.get("sekunden", 0) or 0)

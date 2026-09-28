@@ -234,3 +234,41 @@ def test_fensterprotokoll_legt_ordner_an(monkeypatch, tmp_path):
     assert pfad.parent.is_dir() and pfad.name == "fenster.log"
     with open(pfad, "a", encoding="utf-8") as f:
         f.write("ok\n")
+
+
+def test_startseite_bietet_das_zurueckholen_der_datenbank_an(app, tmp_path, quelle, ziel, monkeypatch, archiv_basis):
+    """Datenbank weg, Sicherung da: Knopf „Datenbank zurückholen…“, Rueckfrage, dann ist alles wieder da."""
+    fragen: list[tuple[str, str]] = []
+    antworten: list[tuple[bool, str]] = []
+
+    def frage_ersatz(_eltern, titel, text, eingabe=False, ja="Ja", nein="Abbrechen"):
+        fragen.append((titel, ja))
+        return antworten.pop(0)
+
+    monkeypatch.setattr(desktop, "frage", frage_ersatz)
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    kennung = (ziel / ".fotosortierer" / "archiv-id.txt").read_text(encoding="utf-8").strip()
+    lokal = archiv_basis / kennung
+    for name in ("fotosort.db", "fotosort.db-wal", "fotosort.db-shm"):
+        if (lokal / name).exists():
+            (lokal / name).unlink()
+
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    assert f.start.karte.kicker.text() == "ARCHIV OHNE MERKLISTE"
+    assert f.start.rettung.isVisible() and f.start.rettung.text() == "Datenbank zurückholen…"
+    assert not f.start.weitermachen.isVisible()
+    antworten.append((False, ""))
+    f.rettung()                                            # Rueckfrage -> Nicht jetzt
+    assert fragen[-1] == ("Datenbank zurückholen?", "Zurückholen") and not (lokal / "fotosort.db").exists()
+    antworten.append((True, ""))
+    f.rettung()                                            # -> Zurueckholen
+    assert (lokal / "fotosort.db").is_file()
+    assert "zurückgeholt" in f.meldung_label.text()
+    assert not f.start.rettung.isVisible() and f.start.karte.kicker.text() == "ANGEFANGENES ARCHIV"
+    assert f.start.weitermachen.isVisible() and f.start.weitermachen.text().startswith("Weitermachen")
+    assert not antworten
+    f.close()

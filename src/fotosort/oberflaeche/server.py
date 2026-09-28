@@ -96,6 +96,14 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     def verwerfen(daten: dict = Body(default={})):
         return ab.archiv_verwerfen(str(daten.get("wort", "")))
 
+    @app.post("/api/wiederherstellen")
+    def wiederherstellen(daten: dict = Body(default={})):
+        return ab.archiv_wiederherstellen(bool(daten.get("ja", False)))
+
+    @app.post("/api/neuaufbau")
+    def neuaufbau(daten: dict = Body(default={})):
+        return ab.neuaufbau_starten(bool(daten.get("ja", False)))
+
     @app.get("/api/lauf")
     def lauf():
         return ab.lauf_status()
