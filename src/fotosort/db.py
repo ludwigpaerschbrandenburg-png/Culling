@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, unquote_to_bytes
@@ -25,6 +27,11 @@ ARCHIV_ID_DATEI = "archiv-id.txt"
 SICHERUNG = "fotosort.db.sicherung"
 SICHERUNG_NEU = "fotosort.db.sicherung.neu"
 SICHERUNG_VORHER = "fotosort.db.sicherung.vorher"
+DATENBANK_NEU = "fotosort.db.neu"            # Zwischenstand beim Wiederherstellen
+DATENBANK_ERSETZT = "fotosort.db.ersetzt_"      # aufgehobene lokale Datenbank (nie geloescht)
+
+#: Ereignisart, wenn die Datenbank aus der Sicherungskopie zurueckgeholt wurde (fotosort wiederherstellen).
+ART_DATENBANK_WIEDERHERGESTELLT = "datenbank_wiederhergestellt"
 SPERRDATEI = "fotosort.sperre"
 
 # So lange wartet SQLite auf eine belegte Datenbank, bevor es aufgibt.
@@ -246,6 +253,124 @@ def datenbank_pfad(ordner: Path) -> Path:
 
 def sicherung_pfad(ziel: Path) -> Path:
     return Path(ziel) / ARCHIV_UNTERORDNER / SICHERUNG
+
+
+def sicherung_vorher_pfad(ziel: Path) -> Path:
+    return Path(ziel) / ARCHIV_UNTERORDNER / SICHERUNG_VORHER
+
+
+# ------------------------------------------------- Wiederherstellen ----
+
+
+@dataclass
+class Sicherungsstand:
+    """Was eine Sicherungskopie enthaelt - nur lesend ermittelt."""
+    pfad: Path
+    geaendert: str        # Zeitpunkt der Sicherungsdatei
+    dateien: int
+    quellen: int
+    laeufe: int
+    letzter_lauf: str     # "Lauf 7: fotosort kopieren ... (2026-09-21T10:00:00)" oder ""
+
+
+def _lauf_text(zeile) -> str:
+    if zeile is None:
+        return ""
+    return f"Lauf {zeile['nummer']}: {zeile['befehl']} ({zeile['start']})"
+
+
+def sicherung_lesen(pfad: Path) -> Sicherungsstand:
+    """Eine Datenbankdatei pruefen (Integritaet, Schema-Version) und ihre
+    Zahlen liefern. Wirft FotosortFehler mit verstaendlicher Meldung, wenn
+    die Datei kaputt ist oder aus einem anderen Programmstand stammt."""
+    pfad = Path(pfad)
+    try:
+        st = pfad.stat()
+    except OSError as fehler:
+        raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, fehler.strerror or str(fehler)))
+    geaendert = datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds")
+    try:
+        verbindung = sqlite3.connect(f"{pfade.lang(pfad).as_uri()}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000.0)
+    except (sqlite3.Error, ValueError) as fehler:
+        raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, str(fehler)))
+    try:
+        verbindung.row_factory = sqlite3.Row
+        try:
+            befund = verbindung.execute("PRAGMA integrity_check").fetchone()[0]
+        except sqlite3.DatabaseError as fehler:
+            raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, str(fehler)))
+        if befund != "ok":
+            raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, str(befund)))
+        version = int(verbindung.execute("PRAGMA user_version").fetchone()[0])
+        tabellen = {z[0] for z in verbindung.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if not {"dateien", "laeufe", "quellen"} <= tabellen:
+            raise FotosortFehler(meldungen.wiederherstellen_sicherung_kaputt(pfad, meldungen.SICHERUNG_OHNE_TABELLEN))
+        if version != SCHEMA_VERSION:
+            raise FotosortFehler(meldungen.datenbank_schema_veraltet(pfad, version, SCHEMA_VERSION))
+        dateien = int(verbindung.execute("SELECT COUNT(*) FROM dateien").fetchone()[0])
+        quellen = int(verbindung.execute("SELECT COUNT(*) FROM quellen").fetchone()[0])
+        laeufe = int(verbindung.execute("SELECT COUNT(*) FROM laeufe").fetchone()[0])
+        letzter = verbindung.execute("SELECT nummer, befehl, start FROM laeufe ORDER BY nummer DESC LIMIT 1").fetchone()
+    finally:
+        verbindung.close()
+    return Sicherungsstand(pfad, geaendert, dateien, quellen, laeufe, _lauf_text(letzter))
+
+
+def sicherung_holen(sicherung: Path, ordner: Path) -> Sicherungsstand:
+    """Die Sicherungskopie als Zwischenstand DATENBANK_NEU in den Archiv-Ordner
+    kopieren (Byte fuer Byte, ohne SQLite ueber das Netz zu oeffnen) und dort
+    pruefen. Bei einem Befund wird der Zwischenstand wieder entfernt."""
+    ordner = Path(ordner)
+    ordner.mkdir(parents=True, exist_ok=True)
+    neu = ordner / DATENBANK_NEU
+    if neu.exists():
+        neu.unlink()   # eigener Zwischenstand eines frueheren Versuchs
+    try:
+        shutil.copyfile(pfade.lang(sicherung), pfade.lang(neu))
+        stand = sicherung_lesen(neu)
+    except BaseException:
+        try:
+            neu.unlink()
+        except OSError:
+            pass
+        raise
+    return Sicherungsstand(Path(sicherung), stand.geaendert, stand.dateien, stand.quellen, stand.laeufe, stand.letzter_lauf)
+
+
+def lokaler_stand(ordner: Path) -> str:
+    """Letzter Lauf der vorhandenen lokalen Datenbank, nur lesend; '' wenn unlesbar."""
+    pfad = datenbank_pfad(ordner)
+    try:
+        verbindung = sqlite3.connect(f"{pfade.lang(pfad).as_uri()}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000.0)
+    except (sqlite3.Error, ValueError):
+        return ""
+    try:
+        verbindung.row_factory = sqlite3.Row
+        return _lauf_text(verbindung.execute("SELECT nummer, befehl, start FROM laeufe ORDER BY nummer DESC LIMIT 1").fetchone())
+    except sqlite3.Error:
+        return ""
+    finally:
+        verbindung.close()
+
+
+def datenbank_beiseite(ordner: Path) -> Path:
+    """Die vorhandene lokale Datenbank samt -wal und -shm unter einem neuen
+    Namen aufheben - nie loeschen, nie ueberschreiben."""
+    ordner = Path(ordner)
+    zeit = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    basis = ordner / f"{DATENBANK_ERSETZT}{zeit}"
+    for endung in ("", "-wal", "-shm"):
+        von = ordner / (DATEINAME + endung)
+        if von.exists():
+            pfade.umbenennen_ohne_ueberschreiben(von, Path(str(basis) + endung))
+    return basis
+
+
+def sicherung_einsetzen(ordner: Path) -> Path:
+    """Den geprueften Zwischenstand nicht ueberschreibend auf fotosort.db umbenennen."""
+    pfad = datenbank_pfad(ordner)
+    pfade.umbenennen_ohne_ueberschreiben(Path(ordner) / DATENBANK_NEU, pfad)
+    return pfad
 
 
 # ---------------------------------------------------------- Archivsperre ----
@@ -494,6 +619,20 @@ class Datenbank:
     def lauf_zeile(self, nummer: int) -> sqlite3.Row | None:
         self.stapel_schreiben()
         return self.verbindung.execute("SELECT * FROM laeufe WHERE nummer = ?", (nummer,)).fetchone()
+
+    def unvollendeter_lauf(self, befehlsteile: tuple[str, ...], vor: int) -> int | None:
+        """Nummer des juengsten Laufs vor "vor", dessen Befehl alle Teile
+        enthaelt und der ohne Zusammenfassung endete (Absturz oder Abbruch).
+        Ein beendeter Lauf traegt immer eine Zusammenfassung."""
+        self.stapel_schreiben()
+        bedingung = " AND ".join("befehl LIKE ?" for _ in befehlsteile)
+        werte = [f"%{teil}%" for teil in befehlsteile] + [vor]
+        z = self.verbindung.execute(
+            f"SELECT nummer FROM laeufe WHERE {bedingung} AND zusammenfassung = '' AND nummer < ?"
+            " ORDER BY nummer DESC LIMIT 1",
+            werte,
+        ).fetchone()
+        return int(z["nummer"]) if z else None
 
     def letzter_lauf(self) -> sqlite3.Row | None:
         return self.verbindung.execute(
@@ -1001,6 +1140,25 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute("DELETE FROM ziel_index WHERE zielpfad = ?", (pfad_text(zielpfad),))
         self._vielleicht_schreiben()
+
+    def ziel_index_zusammenfassung(self) -> dict:
+        """Zeilen, Bytes und der juengste Lese-Lauf des Ziel-Index."""
+        self.stapel_schreiben()
+        z = self.verbindung.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b, MAX(zuletzt_gelesen_in_lauf) AS l FROM ziel_index"
+        ).fetchone()
+        return {"zeilen": int(z["n"]), "bytes": int(z["b"]), "letzter_lauf": z["l"]}
+
+    def ziel_index_veraltete_entfernen(self, lauf: int) -> int:
+        """Nach einem vollstaendigen Neuaufbau: Zeilen entfernen, die der Lauf
+        nicht gesehen hat - zu ihnen liegt keine Datei mehr im Ziel. Es werden
+        nur Eintraege der Datenbank entfernt, nie Dateien (SPEC Abschnitt 8)."""
+        self.stapel_schreiben()
+        zeiger = self.verbindung.execute(
+            "DELETE FROM ziel_index WHERE zuletzt_gelesen_in_lauf IS NULL OR zuletzt_gelesen_in_lauf != ?",
+            (lauf,),
+        )
+        return int(zeiger.rowcount)
 
     def kopier_zusammenfassung(self) -> dict:
         self.stapel_schreiben()

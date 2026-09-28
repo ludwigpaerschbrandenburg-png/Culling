@@ -23,7 +23,8 @@ PFLICHT = [
     "ziel_fehlt",
     "quelle_fehlt",
     "quelle_existiert_nicht",
-    "noch_nicht_gebaut",
+    "ziel_index_ergebnis",
+    "wiederherstellen_fertig",
     "editor_nicht_gefunden",
     "groesse",
     "anzahl",
@@ -76,7 +77,8 @@ def test_alle_texte_sind_deutsch_und_nicht_leer():
         meldungen.ziel_fehlt(),
         meldungen.quelle_fehlt(),
         meldungen.quelle_existiert_nicht("/gibt/es/nicht"),
-        meldungen.noch_nicht_gebaut("analyse", 2),
+        meldungen.wiederherstellen_keine_sicherung("/z/.fotosortierer/fotosort.db.sicherung", "/z"),
+        meldungen.datenbank_neu_fuer_neuaufbau("/a/fotosort.db"),
         meldungen.editor_nicht_gefunden("/a/config.toml"),
     ]
     for text in texte:
@@ -102,10 +104,24 @@ def test_datenbank_fehlt_weist_auf_wiederherstellen_hin():
     assert "ziel-index" in meldungen.datenbank_fehlt_keine_sicherung("/z")
 
 
-def test_noch_nicht_gebaut_nennt_befehl_und_phase():
-    text = meldungen.noch_nicht_gebaut("kopieren", 3)
-    assert "kopieren" in text
-    assert "Phase 3" in text
+def test_wiederherstellen_meldungen_nennen_die_naechsten_schritte():
+    text = meldungen.wiederherstellen_lokale_da("/a/fotosort.db", "Lauf 3: fotosort pruefen", "/z/sicherung", "Lauf 2: fotosort kopieren")
+    assert "--ersetzen" in text and "Lauf 3" in text and "Lauf 2" in text and "nicht geloescht" in text
+    text = meldungen.wiederherstellen_sicherung_kaputt("/z/sicherung", "file is not a database")
+    assert "--vorheriger-stand" in text and "ziel-index --neu-aufbauen" in text and "nichts veraendert" in text
+    assert "ziel-index --neu-aufbauen" in meldungen.datenbank_schema_veraltet("/a/fotosort.db", 5, 6)
+
+
+def test_ziel_index_ergebnis_zaehlt_alles_auf():
+    from fotosort.zielindex import Ergebnis
+
+    e = Ergebnis(geplant=12, geplant_bytes=3000, gehasht=10, uebernommen=2, entfernt=1, fehler=0,
+                 verknuepfungen=1, part_dateien=1, bytes_gelesen=2500, sekunden=2.0, hash_worker=4, profil="hdd")
+    text = meldungen.ziel_index_ergebnis(e)
+    assert "vollstaendig gelesen:        10" in text
+    assert "uebernommen: 2" in text and "ohne Datei entfernt: 1" in text
+    assert "Verknuepfungen nicht verfolgt: 1" in text and ".part-Dateien uebergangen:   1" in text
+    assert "nichts geloescht" in text
 
 
 def test_config_unbekannte_werte_nennt_alle_namen():

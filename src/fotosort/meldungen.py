@@ -264,11 +264,161 @@ def ziel_existiert_nicht(pfad) -> str:
     return f"Abbruch: Diesen Zielordner gibt es nicht:\n  {pfad}"
 
 
-def noch_nicht_gebaut(befehl, phase: int) -> str:
-    return (
-        f"Der Befehl „{befehl}“ ist noch nicht gebaut. Er kommt in Phase {phase}.\n"
-        "Fertig sind bisher: scan, status und config."
+# ------------------------------------- Ziel-Index und Wiederherstellen ----
+
+GRUND_ZIEL_INDEX_LESEN = "Zieldatei nicht lesbar"
+GRUND_ZIEL_INDEX_FEHLT = "Zieldatei war beim Lesen nicht mehr da"
+SICHERUNG_OHNE_TABELLEN = "keine fotosort-Datenbank (Tabellen fehlen)"
+
+
+def ziel_index_stand(stand: dict, ziel) -> str:
+    zeilen = [
+        "Ziel-Index: was die Datenbank ueber die Dateien im Ziel weiss",
+        f"  Ziel:             {ziel}",
+        f"  Dateien im Index: {anzahl(stand['zeilen'])}, {groesse(stand['bytes'])}",
+    ]
+    if stand.get("letzter_lauf"):
+        zeilen.append(f"  zuletzt gelesen:  in Lauf {stand['letzter_lauf']}")
+    zeilen.append(
+        "Vollstaendig neu einlesen (jede Datei im Ziel wird gehasht):\n"
+        "  fotosort ziel-index --neu-aufbauen --ziel <Ziel>"
     )
+    return "\n".join(zeilen)
+
+
+def ziel_index_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str, fortgesetzt_von) -> str:
+    text = (
+        f"Ziel-Index wird neu aufgebaut: {anzahl(dateien)} Dateien, {groesse(bytes_)} im Ziel werden"
+        f" vollstaendig gelesen. Profil {profil}: {anzahl(hash_worker)} Hash-Worker."
+    )
+    if fortgesetzt_von:
+        text += (
+            f"\nEin frueherer Neuaufbau (Lauf {fortgesetzt_von}) wurde nicht beendet. Was er schon"
+            " gelesen hat und seitdem unveraendert ist, wird uebernommen."
+        )
+    return text
+
+
+def ziel_index_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
+    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    return (
+        f"Ziel-Index: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
+        f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
+    )
+
+
+def ziel_index_nichts_gefunden(ziel) -> str:
+    return (
+        f"Im Ziel liegen keine Dateien (ausser dem Programmordner .fotosortierer):\n  {ziel}\n"
+        "Der Ziel-Index ist danach leer."
+    )
+
+
+def ziel_index_abgebrochen() -> str:
+    return (
+        "Abgebrochen. Das Bisherige ist gespeichert; der naechste Neuaufbau uebernimmt die schon"
+        " gelesenen Dateien, sofern sie unveraendert sind, und liest den Rest."
+    )
+
+
+def ziel_index_ergebnis(e) -> str:
+    """Zaehler dieses Laufs (ein zielindex.Ergebnis)."""
+    zeilen = [
+        "Ergebnis des Neuaufbaus (dieser Lauf)",
+        f"  Dateien im Ziel:             {anzahl(e.geplant)}, {groesse(e.geplant_bytes)}",
+        f"  vollstaendig gelesen:        {anzahl(e.gehasht)}",
+    ]
+    if e.uebernommen:
+        zeilen.append(f"  aus dem nicht beendeten Neuaufbau uebernommen: {anzahl(e.uebernommen)}")
+    zeilen.append(f"  alte Eintraege ohne Datei entfernt: {anzahl(e.entfernt)}")
+    if e.verknuepfungen:
+        zeilen.append(f"  Verknuepfungen nicht verfolgt: {anzahl(e.verknuepfungen)}")
+    if e.part_dateien:
+        zeilen.append(f"  .part-Dateien uebergangen:   {anzahl(e.part_dateien)} (raeumt das naechste Kopieren auf)")
+    if e.ordner_nicht_lesbar:
+        zeilen.append(f"  Ordner nicht lesbar:         {anzahl(e.ordner_nicht_lesbar)}")
+    zeilen.append(f"  Fehler (nicht lesbar):       {anzahl(e.fehler)}")
+    zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
+    if e.sekunden > 0:
+        zeilen.append(f"  Durchsatz:       {durchsatz(e.gehasht, e.bytes_gelesen, e.sekunden)}")
+    zeilen.append(f"  Hash-Worker:     {anzahl(e.hash_worker)} (Profil {e.profil})")
+    zeilen.append("  Im Ziel wurde nichts geloescht und nichts verschoben; entfernt wurden nur Eintraege der Datenbank.")
+    return "\n".join(zeilen)
+
+
+def ereignis_ziel_index_neu_aufgebaut(e) -> str:
+    return (
+        f"{anzahl(e.gehasht)} gelesen, {anzahl(e.uebernommen)} uebernommen,"
+        f" {anzahl(e.entfernt)} alte Eintraege entfernt, {anzahl(e.fehler)} nicht lesbar"
+    )
+
+
+def datenbank_neu_fuer_neuaufbau(pfad) -> str:
+    return (
+        "Zu diesem Ziel gibt es keine lokale Datenbank. Fuer den Neuaufbau des Ziel-Index\n"
+        f"wird eine neue angelegt:\n  {pfad}\n"
+        "Sie kennt danach nur, was im Ziel liegt. Die Quellen muessen anschliessend neu\n"
+        "durchsucht werden (fotosort scan --quelle ...). Was schon im Ziel liegt, wird beim\n"
+        "Kopieren am Inhalt erkannt und nicht noch einmal kopiert."
+    )
+
+
+def wiederherstellen_keine_sicherung(pfad, ziel) -> str:
+    return (
+        "Abbruch: Im Ziel liegt keine Sicherungskopie der Datenbank:\n"
+        f"  {pfad}\n"
+        f"  (Ziel: {ziel})\n"
+        "Gibt es auch keine lokale Datenbank, hilft nur der vollstaendige Neuaufbau:\n"
+        "  fotosort ziel-index --neu-aufbauen --ziel <Ziel>"
+    )
+
+
+def wiederherstellen_lokale_da(lokal, letzter_lokal: str, sicherung, letzter_sicherung: str) -> str:
+    zeilen = [
+        "Abbruch: Es gibt bereits eine lokale Datenbank; sie wird nicht ungefragt ersetzt.",
+        f"  lokal:     {lokal}",
+    ]
+    if letzter_lokal:
+        zeilen.append(f"             {letzter_lokal}")
+    zeilen.append(f"  Sicherung: {sicherung}")
+    if letzter_sicherung:
+        zeilen.append(f"             {letzter_sicherung}")
+    zeilen.append(
+        "Soll die Sicherung trotzdem eingesetzt werden: fotosort wiederherstellen --ersetzen --ziel <Ziel>\n"
+        "Die bisherige lokale Datenbank wird dabei nicht geloescht, sondern unter dem Namen\n"
+        f"{lokal}.ersetzt_<Zeit> aufgehoben."
+    )
+    return "\n".join(zeilen)
+
+
+def wiederherstellen_sicherung_kaputt(pfad, grund: str) -> str:
+    return (
+        "Abbruch: Die Sicherungskopie laesst sich nicht als Datenbank lesen:\n"
+        f"  {pfad}\n"
+        f"  Befund: {grund}\n"
+        "Es wurde nichts veraendert. Vielleicht hilft der vorherige Stand:\n"
+        "  fotosort wiederherstellen --vorheriger-stand --ziel <Ziel>\n"
+        "Sonst bleibt der vollstaendige Neuaufbau: fotosort ziel-index --neu-aufbauen --ziel <Ziel>"
+    )
+
+
+def wiederherstellen_fertig(stand, lokal, beiseite) -> str:
+    zeilen = [
+        "Datenbank aus der Sicherungskopie zurueckgeholt.",
+        f"  aus:       {stand.pfad} (Stand vom {stand.geaendert.replace('T', ' ')})",
+        f"  nach:      {lokal}",
+        f"  Inhalt:    {anzahl(stand.dateien)} Dateien, {anzahl(stand.quellen)} Quellen, {anzahl(stand.laeufe)} Laeufe",
+    ]
+    if stand.letzter_lauf:
+        zeilen.append(f"  Letzter Lauf in der Sicherung: {stand.letzter_lauf}")
+    if beiseite is not None:
+        zeilen.append(f"  Die bisherige lokale Datenbank liegt aufgehoben unter: {beiseite}")
+    zeilen.append(
+        "Alles, was nach diesem Stand geschah, kennt die Datenbank nicht mehr. Ein erneuter Scan und ein\n"
+        "erneutes Kopieren finden das Fehlende: Was schon im Ziel liegt, wird am Inhalt erkannt und nicht\n"
+        "noch einmal kopiert. Geloescht wird weiterhin nur nach frischem Lesen von Quelle und Ziel."
+    )
+    return "\n".join(zeilen)
 
 
 # ----------------------------------------------------------------- Scan ----
@@ -566,8 +716,11 @@ def datenbank_schema_veraltet(pfad, gefunden: int, erwartet: int) -> str:
     return (
         f"Die Datenbank {pfad} stammt aus einem frueheren Stand des Programms\n"
         f"(Schema-Version {gefunden}, erwartet {erwartet}). Sie wird nicht\n"
-        "stillschweigend weiterbenutzt. Da es noch keine echten Archive gibt,\n"
-        "hilft: den Archiv-Ordner loeschen und neu scannen."
+        "stillschweigend weiterbenutzt. Bitte die Programmversion nehmen, mit der\n"
+        "das Archiv zuletzt bearbeitet wurde, oder das Archiv neu einlesen:\n"
+        "  fotosort ziel-index --neu-aufbauen --ziel <Ziel>\n"
+        "(dafuer die alte Datenbank vorher an einen anderen Ort legen; sie wird\n"
+        "nicht geloescht). Bilder im Ziel bleiben davon unberuehrt."
     )
 
 

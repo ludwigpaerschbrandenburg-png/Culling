@@ -28,6 +28,7 @@ from .loeschen import (ART_LEERER_ORDNER_ENTFERNT, ART_LOESCHUNG_NACHGETRAGEN, A
                        ART_QUELLE_GELOESCHT, ART_QUELLE_IN_PAPIERKORB, ART_QUELLE_SEIT_KOPIEREN_GEAENDERT,
                        ART_REST_ENTFERNT, ART_REST_NICHT_ENTFERNT)
 from .pruefen import ART_PRUEFUNG_FEHLGESCHLAGEN
+from .zielindex import ART_NEU_AUFGEBAUT, ART_NICHT_LESBAR
 from .scan import (ART_AUSGESCHLOSSEN, ART_INS_ZIEL, ART_NICHT_MEHR_VORHANDEN, ART_ORDNER_NICHT_LESBAR,
                    ART_QUELLE_ABGELEHNT, ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, ART_VERKNUEPFUNG)
 
@@ -210,6 +211,14 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
                     dbank.ereignisse_liste(ART_INS_ZIEL), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "Zielordner mehrdeutig (alphabetisch erster gewaehlt)",
                     dbank.ereignisse_liste(ART_ZIELORDNER_MEHRDEUTIG), lambda e: f"{e['pfad']}")
+    _ereignis_liste(z, "Datenbank aus der Sicherungskopie zurueckgeholt (fotosort wiederherstellen)",
+                    dbank.ereignisse_liste(db.ART_DATENBANK_WIEDERHERGESTELLT),
+                    lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
+    _ereignis_liste(z, "Ziel-Index neu aufgebaut (fotosort ziel-index --neu-aufbauen)",
+                    dbank.ereignisse_liste(ART_NEU_AUFGEBAUT),
+                    lambda e: f"Lauf {e['lauf_nummer']}: {meldungen.anzahl(e['anzahl'])} Dateien im Ziel  —  {e['text']}")
+    _ereignis_liste(z, "Beim Neuaufbau des Ziel-Index nicht lesbare Dateien",
+                    dbank.ereignisse_liste(ART_NICHT_LESBAR), lambda e: f"{e['pfad']}  —  {e['text']}")
 
     summen = dbank.ereignisse_summen()
     z.append("Weitere Zaehler (alle Laeufe)")

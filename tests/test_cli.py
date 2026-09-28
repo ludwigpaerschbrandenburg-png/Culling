@@ -62,20 +62,13 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
     }
 
 
-@pytest.mark.parametrize(
-    "befehl,phase",
-    [
-        ("ziel-index", 3),
-        ("wiederherstellen", 3),
-    ],
-)
-def test_spaetere_phase_meldet_freundlich_und_endet_ungleich_null(
-    befehl, phase, ziel, capsys
-):
+@pytest.mark.parametrize("befehl", ["ziel-index", "wiederherstellen"])
+def test_ziel_index_und_wiederherstellen_brauchen_ein_archiv(befehl, ziel, capsys):
+    """Ohne Archiv-Kennung im Ziel legen sie nichts an, sondern sagen es (SPEC §6)."""
     rueckgabe, ausgabe = _laufen(capsys, befehl, "--ziel", str(ziel))
-    assert rueckgabe != 0
-    assert befehl in ausgabe
-    assert f"Phase {phase}" in ausgabe
+    assert rueckgabe == cli.FEHLER
+    assert "noch kein Archiv" in ausgabe
+    assert not (ziel / ".fotosortierer").exists()
 
 
 # -------------------------------------------------------------- --ziel ----
@@ -147,7 +140,7 @@ def test_scan_auf_frischem_ziel_legt_alles_an(capsys, quelle, tmp_path, archiv_b
     assert db.sicherung_pfad(ziel).is_file()
     assert (ziel / ".fotosortierer" / config.DATEINAME).is_file()
 
-    assert "Archiv-Kennung" in ausgabe
+    assert "noch kein Archiv" in ausgabe
     assert str(testbaum.ERWARTET_GESAMT) in ausgabe
 
 

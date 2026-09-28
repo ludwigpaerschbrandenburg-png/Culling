@@ -1,8 +1,8 @@
 """Kommandozeile: argparse, keine CLI-Bibliothek (docs/architektur.md Abs. 3).
 
-In Phase 1 tun nur scan, status und config etwas. Alle uebrigen Unterbefehle
-aus SPEC Abschnitt 8 gibt es bereits; sie melden freundlich, in welcher Phase
-sie kommen, und beenden sich mit einem von Null verschiedenen Rueckgabewert.
+Alle Unterbefehle aus SPEC Abschnitt 8. Jeder Befehl ausser --help braucht
+--ziel (ersatzweise FOTOSORT_ZIEL); ueber das Ziel werden Archiv-Kennung,
+Archiv-Ordner, Konfiguration und lokale Datenbank gefunden (archiv_oeffnen).
 """
 
 from __future__ import annotations
@@ -14,35 +14,21 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, prozesse, steuerung, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, prozesse, steuerung, zielindex, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
 FEHLER = 1
 FEHLENDE_ANGABE = 2
-SPAETERE_PHASE = 3
 ABGEBROCHEN = 130
 
 # Befehle, die Metadaten brauchen: ohne ExifTool harter Abbruch (SPEC Abs. 2).
 BRAUCHT_EXIFTOOL = frozenset({"analyse", "start"})
-
-# In welcher Phase ein noch nicht gebauter Befehl kommt (docs/PROMPTS.md,
-# Prompt 2 bis 6). "ziel-index" und "wiederherstellen" nennt kein Prompt
-# ausdruecklich; sie gehoeren zum Ziel-Index und zur Sicherungskopie und
-# damit zum Kopieren (Phase 3). Das ist noch zu bestaetigen.
-PHASE_JE_BEFEHL: dict[str, int] = {
-    "analyse": 2,
-    "kopieren": 3,
-    "ziel-index": 3,
-    "wiederherstellen": 3,
-    "pruefen": 4,
-    "bericht": 4,
-    "aufraeumen": 5,
-}
 
 # ------------------------------------------------------------- ExifTool ----
 
@@ -170,7 +156,18 @@ def _konf_pfad_bestimmen(args, ordner: Path) -> tuple[Path, bool]:
     return ordner / config.DATEINAME, False
 
 
-def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False) -> Archiv:
+@dataclass
+class ArchivOrt:
+    """Alles, was vor dem Oeffnen der Datenbank feststeht."""
+    ziel: Path
+    archiv_id: str
+    ordner: Path
+    konf: config.Konfiguration
+    konf_pfad: Path
+    id_war_da: bool
+
+
+def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False, datenbank_anlegen: bool = False) -> Archiv:
     """Archiv-Kennung, Archiv-Ordner, Konfiguration und Datenbank bereitstellen.
 
     "anlegen" ist nur beim Scan wahr: Nur er darf ein Archiv neu anlegen.
@@ -180,7 +177,46 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False) -> Archi
     "sperren" belegt das Archiv fuer diesen Lauf. Das tun nur Befehle, die
     etwas veraendern; "status" und "config" duerfen auch waehrend eines
     laufenden Scans jederzeit hineinschauen.
+
+    "datenbank_anlegen" darf allein der Neuaufbau des Ziel-Index setzen: Er
+    ist der einzige Befehl, der zu einer vorhandenen Archiv-Kennung eine
+    fehlende lokale Datenbank neu anlegen darf - ausdruecklich, nie
+    stillschweigend (SPEC Abschnitt 6 und 8).
     """
+    ort = archiv_ort(args, konsole, anlegen)
+
+    # Fehlende lokale Datenbank (SPEC Abschnitt 6).
+    datenbank_da = db.datenbank_pfad(ort.ordner).is_file()
+    if not datenbank_da and ort.id_war_da:
+        if datenbank_anlegen:
+            konsole.print(meldungen.datenbank_neu_fuer_neuaufbau(db.datenbank_pfad(ort.ordner)))
+        elif db.sicherung_pfad(ort.ziel).is_file():
+            raise FotosortFehler(meldungen.datenbank_fehlt_sicherung_da(ort.ziel))
+        else:
+            raise FotosortFehler(meldungen.datenbank_fehlt_keine_sicherung(ort.ziel))
+
+    # Erst hier steht die geltende Konfiguration fest. Deshalb wird die
+    # ExifTool-Pruefung (SPEC Abschnitt 2) auch erst jetzt gemacht: Sonst
+    # haette die mittlere Stufe der Vorrangfolge - der Konfigurationswert
+    # exiftool_pfad - ueberhaupt keine Wirkung.
+    exiftool_pruefen(getattr(args, "befehl", ""), ort.konf, konsole)
+
+    datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=sperren)
+    return Archiv(
+        ziel=ort.ziel,
+        archiv_id=ort.archiv_id,
+        ordner=ort.ordner,
+        konf=ort.konf,
+        konf_pfad=ort.konf_pfad,
+        datenbank=datenbank,
+        neu_angelegt=not ort.id_war_da,
+    )
+
+
+def archiv_ort(args, konsole, anlegen: bool) -> ArchivOrt:
+    """Zielordner, Archiv-Kennung, Archiv-Ordner und Konfiguration bestimmen -
+    alles, was vor dem Oeffnen der Datenbank feststeht. Fehlt lokal die
+    Konfiguration, wird die aus dem Ziel uebernommen (SPEC Abschnitt 6)."""
     ziel = Path(args.ziel)
     if not ziel.exists():
         if not anlegen:
@@ -229,30 +265,7 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False) -> Archi
         and str(konf.wert("datenbank.datenbank_ort")).strip()
     ):
         konsole.print(meldungen.config_datenbank_ort_ignoriert(konf_pfad))
-
-    # Fehlende lokale Datenbank (SPEC Abschnitt 6).
-    datenbank_da = db.datenbank_pfad(ordner).is_file()
-    if not datenbank_da and id_war_da:
-        if db.sicherung_pfad(ziel).is_file():
-            raise FotosortFehler(meldungen.datenbank_fehlt_sicherung_da(ziel))
-        raise FotosortFehler(meldungen.datenbank_fehlt_keine_sicherung(ziel))
-
-    # Erst hier steht die geltende Konfiguration fest. Deshalb wird die
-    # ExifTool-Pruefung (SPEC Abschnitt 2) auch erst jetzt gemacht: Sonst
-    # haette die mittlere Stufe der Vorrangfolge - der Konfigurationswert
-    # exiftool_pfad - ueberhaupt keine Wirkung.
-    exiftool_pruefen(getattr(args, "befehl", ""), konf, konsole)
-
-    datenbank = db.Datenbank.oeffnen(ordner, sperren=sperren)
-    return Archiv(
-        ziel=ziel,
-        archiv_id=archiv_id,
-        ordner=ordner,
-        konf=konf,
-        konf_pfad=konf_pfad,
-        datenbank=datenbank,
-        neu_angelegt=not id_war_da,
-    )
+    return ArchivOrt(ziel=ziel, archiv_id=archiv_id, ordner=ordner, konf=konf, konf_pfad=konf_pfad, id_war_da=id_war_da)
 
 
 # --------------------------------------------------------------- Befehle ----
@@ -1131,9 +1144,82 @@ def befehl_messen(args, konsole) -> int:
     return OK
 
 
-def befehl_spaetere_phase(args, konsole) -> int:
-    konsole.print(meldungen.noch_nicht_gebaut(args.befehl, PHASE_JE_BEFEHL[args.befehl]))
-    return SPAETERE_PHASE
+def befehl_ziel_index(args, konsole) -> int:
+    """Ziel-Index zeigen oder vollstaendig neu aufbauen (SPEC Abschnitt 6 und 8).
+
+    Der Neuaufbau ist der einzige Befehl, der eine fehlende lokale Datenbank
+    neu anlegen darf. Er loescht und verschiebt nichts im Ziel.
+    """
+    if not args.neu_aufbauen:
+        archiv = archiv_oeffnen(args, konsole, anlegen=False)
+        try:
+            konsole.print(meldungen.ziel_index_stand(archiv.datenbank.ziel_index_zusammenfassung(), archiv.ziel))
+            return OK
+        finally:
+            archiv.datenbank.schliessen()
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True, datenbank_anlegen=True)
+    datenbank = archiv.datenbank
+    try:
+        kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        try:
+            ergebnis = zielindex.neu_aufbauen(
+                archiv.ziel, archiv.konf, datenbank, lauf, konsole,
+                hash_worker=args.hash_worker, profil=args.profil,
+            )
+        except FotosortFehler:
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            raise
+        konsole.print("")
+        konsole.print(meldungen.ziel_index_ergebnis(ergebnis))
+        if ergebnis.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.ziel_index_abgebrochen())
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return ABGEBROCHEN
+        _abschliessen(archiv, konsole, lauf, {
+            "dateien": ergebnis.gehasht + ergebnis.uebernommen, "bytes": ergebnis.bytes_gelesen,
+            "sekunden": ergebnis.sekunden,
+        })
+        return FEHLER if ergebnis.fehler else OK
+    finally:
+        datenbank.schliessen()
+
+
+def befehl_wiederherstellen(args, konsole) -> int:
+    """Lokale Datenbank aus der Sicherungskopie im Ziel zurueckholen (SPEC
+    Abschnitt 6 und 8). Fehlt lokal die Konfiguration, kommt auch sie aus
+    dem Ziel (archiv_ort). Eine vorhandene lokale Datenbank wird nur mit
+    --ersetzen ersetzt und dabei aufgehoben, nie geloescht."""
+    ort = archiv_ort(args, konsole, anlegen=False)
+    sicherung = db.sicherung_vorher_pfad(ort.ziel) if args.vorheriger_stand else db.sicherung_pfad(ort.ziel)
+    if not sicherung.is_file():
+        konsole.print(meldungen.wiederherstellen_keine_sicherung(sicherung, ort.ziel))
+        return FEHLER
+    lokal = db.datenbank_pfad(ort.ordner)
+    lokal_da = lokal.exists()
+    # Erst pruefen, dann ersetzen: Ein kaputter Stand veraendert nichts.
+    stand = db.sicherung_holen(sicherung, ort.ordner)
+    if lokal_da and not args.ersetzen:
+        (ort.ordner / db.DATENBANK_NEU).unlink()
+        konsole.print(meldungen.wiederherstellen_lokale_da(lokal, db.lokaler_stand(ort.ordner), sicherung, stand.letzter_lauf))
+        return FEHLER
+    exiftool_pruefen(args.befehl, ort.konf, konsole)
+    beiseite = db.datenbank_beiseite(ort.ordner) if lokal_da else None
+    db.sicherung_einsetzen(ort.ordner)
+    begonnen = time.monotonic()
+    datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=True)
+    try:
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        datenbank.ereignis(lauf, db.ART_DATENBANK_WIEDERHERGESTELLT, db.pfad_text(sicherung), 1,
+                           f"Stand vom {stand.geaendert}; {stand.letzter_lauf or 'kein Lauf'}")
+        datenbank.lauf_beenden(lauf, {"dateien": stand.dateien, "bytes": 0, "sekunden": time.monotonic() - begonnen})
+        konsole.print(meldungen.wiederherstellen_fertig(stand, lokal, beiseite))
+        konsole.print("")
+        konsole.print(meldungen.status_zaehler(datenbank.zaehler_je_status()))
+        return OK
+    finally:
+        datenbank.schliessen()
 
 
 # ------------------------------------------------------------ argparse ----
@@ -1220,11 +1306,18 @@ def parser_bauen() -> argparse.ArgumentParser:
     p = unterbefehle.add_parser("bericht", help="Bericht als Text und CSV")
     _gemeinsam(p)
 
-    p = unterbefehle.add_parser("ziel-index", help="Ziel-Index pflegen")
-    p.add_argument("--neu-aufbauen", action="store_true", help="Index vollstaendig neu")
+    p = unterbefehle.add_parser("ziel-index", help="Ziel-Index zeigen oder das Ziel vollstaendig neu einlesen")
+    p.add_argument("--neu-aufbauen", action="store_true",
+                   help="jede Datei im Ziel lesen und hashen, Index vollstaendig neu; legt eine fehlende Datenbank an")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
-    p = unterbefehle.add_parser("wiederherstellen", help="Datenbank aus der Sicherung")
+    p = unterbefehle.add_parser("wiederherstellen", help="lokale Datenbank aus der Sicherungskopie im Ziel zurueckholen")
+    p.add_argument("--ersetzen", action="store_true",
+                   help="eine vorhandene lokale Datenbank ersetzen (sie wird aufgehoben, nicht geloescht)")
+    p.add_argument("--vorheriger-stand", action="store_true",
+                   help="den vorletzten Stand (fotosort.db.sicherung.vorher) nehmen")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("config", help="Konfiguration zeigen und oeffnen")
@@ -1328,18 +1421,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Die ExifTool-Pruefung nach SPEC Abschnitt 2 geschieht in
     # archiv_oeffnen - erst dort ist die Konfiguration geladen, und nur
-    # dann kann der Wert exiftool_pfad ueberhaupt wirken. Befehle, die kein
-    # Archiv oeffnen, pruefen hier mit den Standardwerten.
-    # Befehle, die ein Archiv oeffnen, pruefen ExifTool erst dort - mit der
-    # geladenen Konfiguration, sonst wirkte exiftool_pfad nie (SPEC §2).
-    if args.befehl not in ("scan", "status", "config", "analyse", "kopieren", "pruefen", "bericht", "aufraeumen", "start", "messen", "fenster", "arbeit"):
-        gefunden, wo = exiftool_finden(config.Konfiguration())
-        if not (gefunden and exiftool_startbar(gefunden)):
-            if args.befehl in BRAUCHT_EXIFTOOL:
-                konsole.print(meldungen.exiftool_fehlt(wo))
-                return FEHLER
-            konsole.print(meldungen.exiftool_hinweis(wo))
-
+    # dann kann der Wert exiftool_pfad ueberhaupt wirken.
     _signale_einrichten()
     try:
         if args.befehl == "scan":
@@ -1366,7 +1448,11 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_fenster(args, konsole)
         if args.befehl == "arbeit":
             return befehl_arbeit(args, konsole)
-        return befehl_spaetere_phase(args, konsole)
+        if args.befehl == "ziel-index":
+            return befehl_ziel_index(args, konsole)
+        if args.befehl == "wiederherstellen":
+            return befehl_wiederherstellen(args, konsole)
+        raise AssertionError(f"unbekannter Befehl: {args.befehl}")   # argparse laesst das nicht durch
     except FotosortFehler as fehler:
         konsole.print(str(fehler))
         return FEHLER
