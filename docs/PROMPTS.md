@@ -219,6 +219,33 @@ Phase 8: Betrieb auf dem TrueNAS-Server.
 
 ---
 
+## Prompt 9 – Professioneller Feinschliff (Version 0.7)
+
+Der Auftrag lautete wörtlich: „optimiere das tool weiter bis es nichts mehr gibt was eine sehr
+professionelles paid culling tool können müsste." Gemeint ist fotosort so, wie die SPEC es
+beschreibt (Einlesen, Einsortieren nach Datum und Kamera, Duplikate, Prüfen, Quelle aufräumen,
+Windows-Fenster) – gemessen an bezahlten Werkzeugen dieser Art. Was die Art des Programms
+verändern würde (Bilder bewerten und aussortieren, Dateien umbenennen, mehrere Ziele), wird
+nicht gebaut, sondern unter „Entscheidungen für den Nutzer" in `docs/todo.md` notiert.
+
+So wird gearbeitet, in Runden:
+
+```
+1. Bestandsaufnahme: Code-Karte je Modul, Recherche zu professionellen Einlese-, Sortier- und
+   Duplikat-Werkzeugen, Fehlersuche aus mehreren Blickwinkeln (Verlustpfade, Windows/Netz,
+   Absturz/Fortsetzen, echte Kamera- und Handydateien, Bedienung, Tempo, Doku), jeder Befund
+   von zwei unabhängigen Prüfern gegengeprüft. Ergebnis: eine Lückenliste mit Kategorie
+   A (passt zur SPEC, wird gebaut), B (Nutzer entscheidet), C (nicht anwendbar).
+2. Umsetzen der A-Punkte nach Priorität (Sicherheit, dann Zuverlässigkeit und Bedienung, dann
+   Komfort und Tempo). Je Punkt zuerst ein Test, dann die Änderung; deutsche Texte in
+   meldungen.py; Tests grün; SPEC, LIESMICH, architektur und todo nachziehen.
+3. Prüfung durch unabhängige Prüfer (Verlustpfade, Windows, Regressionen), volle Testsuite,
+   CI auf Linux, Windows und für das Paket, dann Release.
+4. Nächste Runde mit dem, was übrig ist, bis die Liste leer ist oder nur noch B-Punkte enthält.
+```
+
+---
+
 ## Wenn etwas nicht passt
 
 Beschreib Claude Code genau: was du gemacht hast, was passiert ist, was du erwartet hättest. Fehlermeldungen komplett hineinkopieren. Und immer dazusagen: „Schreib zuerst einen Test, der das Problem zeigt, dann behebe es."

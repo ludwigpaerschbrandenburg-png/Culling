@@ -574,6 +574,38 @@ Version 0.2.0, Release v0.2.
 
 ---
 
+## Phase 9 — Professioneller Feinschliff (Version 0.7)
+
+Auftrag und Arbeitsweise stehen in `docs/PROMPTS.md`, Prompt 9. Gebaut in Runde 1, noch vor der
+Lückenliste (weil aus der SPEC unmittelbar fällig):
+
+- [x] **`fotosort wiederherstellen` gebaut** (SPEC §6, §8): Sicherung Byte für Byte in den
+      Archiv-Ordner, dort geprüft (Integrität, Tabellen, Schema-Version), nicht überschreibend
+      eingesetzt; `--ersetzen` hebt eine vorhandene Datenbank als `fotosort.db.ersetzt_<Zeit>` auf,
+      `--vorheriger-stand` nimmt die vorletzte Sicherung. Konfiguration kommt aus dem Ziel, wenn sie
+      lokal fehlt. Eigener Lauf mit Ereignis `datenbank_wiederhergestellt`.
+- [x] **`fotosort ziel-index --neu-aufbauen` gebaut** (SPEC §6, §8): jede Datei im Ziel gelesen
+      und gehasht (parallel, Hash-Worker des Profils), Index vollständig neu, alte Einträge ohne
+      Datei entfernt, im Ziel nichts angefasst; einziger Befehl, der eine fehlende Datenbank
+      anlegt. Abbrechbar und fortsetzbar (nicht beendeter Neuaufbau wird übernommen, soweit
+      unverändert). Ohne Schalter: Stand des Index.
+- [x] **Rettung im Fenster und in der Browser-Fassung:** Karte „Archiv ohne Merkliste" mit
+      „Datenbank zurückholen…" bzw. „Archiv neu einlesen…"; Neueinlesen als Arbeitsschritt mit
+      Fortschritt; „Archiv neu einlesen…" auch bei vorhandener Datenbank auf der Hauptansicht.
+      Der geführte Modus (`start`) fragt bei fehlender Datenbank, ob er die Sicherung zurückholt.
+- [x] **Schema-Anhebung statt Ablehnung:** ältere Datenbanken werden beim Öffnen über
+      `db.MIGRATIONEN` angehoben, vorher als `fotosort.db.vor_schema_<Nr>` aufgehoben; neuere
+      werden nie angefasst. (Bisher keine Anhebung nötig, alle Archive tragen Version 6.)
+- [x] **ExifTool-Version und Prüfsumme im Paketbau festgenagelt** (siehe Windows-Paket).
+- [x] **`status` nennt Sicherung und Ziel-Index.**
+- [x] Analyse-Durchsatz mit Komma (war „29.9 Dateien/s").
+
+### Entscheidungen für den Nutzer
+
+(werden nach der Lückenliste ergänzt)
+
+---
+
 ## Ohne feste Phase
 
 - [ ] Nichts offen.
