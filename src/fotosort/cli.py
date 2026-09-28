@@ -17,6 +17,7 @@ import sys
 import time
 import tomllib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, prozesse, steuerung, zielindex, FotosortFehler, config, db, meldungen, pfade, scan
@@ -755,9 +756,39 @@ def _start_namensraum(args, befehl: str, **extra) -> argparse.Namespace:
     return argparse.Namespace(befehl=befehl, ziel=args.ziel, config=args.config, **extra)
 
 
+def _start_datenbank_retten(args, konsole) -> bool:
+    """Fehlt die lokale Datenbank, liegt aber eine Sicherungskopie im Ziel,
+    bietet der gefuehrte Modus an, sie zurueckzuholen - derselbe Weg wie
+    "fotosort wiederherstellen" und wie die Startseite des Fensters.
+    True, wenn das geschehen ist."""
+    ort = archiv_ort(args, konsole, anlegen=False)
+    if db.datenbank_pfad(ort.ordner).is_file():
+        return False
+    sicherung = db.sicherung_pfad(ort.ziel)
+    if not sicherung.is_file() or not _eingabe_moeglich():
+        return False
+    try:
+        zeit = datetime.fromtimestamp(sicherung.stat().st_mtime).isoformat(timespec="seconds")
+    except OSError:
+        zeit = ""
+    konsole.print(meldungen.start_datenbank_fehlt(sicherung, zeit))
+    try:
+        if not _ja(konsole, meldungen.start_frage_wiederherstellen(), standard=True):
+            return False
+    except _Abbruch:
+        return False
+    ns = _start_namensraum(args, "wiederherstellen", ersetzen=False, vorheriger_stand=False)
+    return befehl_wiederherstellen(ns, konsole) == OK
+
+
 def _start_archiv_lesen(args, konsole) -> dict:
     """Bekannte Quellen, Zaehler und Profil-Standard aus dem Archiv (nur lesen)."""
-    archiv = archiv_oeffnen(args, konsole, anlegen=False)
+    try:
+        archiv = archiv_oeffnen(args, konsole, anlegen=False)
+    except FotosortFehler:
+        if not _start_datenbank_retten(args, konsole):
+            raise
+        archiv = archiv_oeffnen(args, konsole, anlegen=False)
     d = archiv.datenbank
     try:
         zaehler = d.zaehler_je_status()

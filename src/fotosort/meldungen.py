@@ -1415,6 +1415,18 @@ def start_frage_ziel_anlegen() -> str:
     return "Soll er angelegt werden? (ja/nein) [nein]: "
 
 
+def start_datenbank_fehlt(sicherung, zeit: str) -> str:
+    return (
+        "Zu diesem Archiv fehlt auf diesem Rechner die Datenbank (das Gedaechtnis des Archivs).\n"
+        f"Im Ziel liegt eine Sicherungskopie vom {zeit.replace('T', ' ') if zeit else 'unbekannten Zeitpunkt'}:\n"
+        f"  {sicherung}"
+    )
+
+
+def start_frage_wiederherstellen() -> str:
+    return "Jetzt zurueckholen? Danach geht es dort weiter, wo die Sicherung stand. (ja/nein) [ja]: "
+
+
 def start_quellen_bekannt(quellen: list) -> str:
     zeilen = ["Bekannte Quellordner dieses Archivs:"]
     zeilen += [f"  {q}" for q in quellen]

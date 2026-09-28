@@ -253,3 +253,28 @@ def test_zuruecksetzen_nach_modell_auch_mit_umlaut(baum, quelle, ziel, nachschau
         d.verbindung.commit()
         assert d.analyse_zuruecksetzen_nach_modell(["KAMERA Ü"]) == 0
         assert d.zeile(db.pfad_text(baum["jpg"]))["status"] == "kopiert"
+
+
+def test_start_bietet_das_zurueckholen_der_datenbank_an(baum, quelle, ziel, nachschauen, antwort, archiv_basis, capsys):
+    """Datenbank weg, Sicherung im Ziel: Der gefuehrte Modus fragt, statt nur abzubrechen."""
+    antwort.extend(_antworten_voll(quelle))
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    ordner = _konf_pfad(ziel, archiv_basis).parent
+    for name in (db.DATEINAME, db.DATEINAME + "-wal", db.DATEINAME + "-shm"):
+        if (ordner / name).exists():
+            (ordner / name).unlink()
+    capsys.readouterr()
+    # "nein": die bekannte Meldung mit dem Befehl, nichts angelegt.
+    antwort.append("nein")
+    assert _cli("start", "--ziel", ziel) == cli.FEHLER
+    aus = capsys.readouterr().out
+    assert "Sicherungskopie vom" in aus and "fotosort wiederherstellen" in aus
+    assert not (ordner / db.DATEINAME).exists()
+    # Enter (= ja): zurueckgeholt, dann geht der Ablauf normal weiter.
+    antwort.extend(["", "", "k", "", "", "", "", "nein", "nein"])
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "zurueckgeholt" in aus and "Bekannte Quellordner" in aus
+    assert (ordner / db.DATEINAME).is_file()
+    zeilen = _echte(_zeilen(nachschauen, ziel))
+    assert {z["status"] for z in zeilen.values()} == {"geprueft", "duplikat_bestaetigt"}
