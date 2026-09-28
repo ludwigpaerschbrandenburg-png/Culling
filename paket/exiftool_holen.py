@@ -6,15 +6,22 @@ das Paket aber nicht mitnimmt - es startet perl.exe mit exiftool.pl direkt
 diesen Ordner ebenfalls (.github/workflows/tests.yml).
 
 Aufruf:
-    python paket/exiftool_holen.py <zielordner> [--version 13.36]
+    python paket/exiftool_holen.py <zielordner> [--version 13.59 | --version neueste]
 
-Ohne --version wird die aktuelle Version von https://exiftool.org/ver.txt
-genommen. Laeuft in GitHub Actions; braucht Internet.
+Ohne --version wird die festgenagelte Version FESTE_VERSION genommen und die
+geladene ZIP-Datei gegen FESTE_SHA256 geprueft - so nimmt jeder Bau
+nachweislich dieselbe Fassung, und eine unterwegs veraenderte Datei faellt
+auf. "--version neueste" fragt https://exiftool.org/ver.txt; eine andere
+Version als die festgenagelte wird ohne Pruefsumme geladen (mit Hinweis).
+Zum Anheben: FESTE_VERSION und FESTE_SHA256 zusammen aendern (die Pruefsumme
+mit "sha256sum exiftool-<Version>_64.zip"). Laeuft in GitHub Actions;
+braucht Internet.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import shutil
 import subprocess
@@ -27,9 +34,11 @@ import zipfile
 from pathlib import Path
 
 KOPF = {"User-Agent": "fotosort-paketbau (https://github.com/ludwigpaerschbrandenburg-png/Culling)"}
-# Ist exiftool.org gerade nicht erreichbar (kommt vor), wird diese bekannte
-# Version genommen - der Bau darf nicht an einer Versionsabfrage scheitern.
-ERSATZ_VERSION = "13.59"
+# Die festgenagelte Fassung: Version und SHA-256 der ZIP-Datei
+# exiftool-<Version>_64.zip (Windows, 64 Bit, mit exiftool_files).
+FESTE_VERSION = "13.59"
+FESTE_SHA256 = "44b512b25af500724ba579d0a53c8fc5851628b692dd5e5d94ae4a15c2cba9ec"
+NEUESTE = "neueste"
 VERSUCHE = 3
 
 
@@ -62,12 +71,24 @@ def aktuelle_version() -> str:
     try:
         return _laden("https://exiftool.org/ver.txt").decode("ascii").strip()
     except Exception as fehler:  # noqa: BLE001
-        print(f"Versionsabfrage bei exiftool.org fehlgeschlagen ({fehler}); nehme {ERSATZ_VERSION}.", flush=True)
-        return ERSATZ_VERSION
+        print(f"Versionsabfrage bei exiftool.org fehlgeschlagen ({fehler}); nehme {FESTE_VERSION}.", flush=True)
+        return FESTE_VERSION
+
+
+def version_waehlen(gewuenscht: str | None) -> tuple[str, str | None]:
+    """(Version, erwartete SHA-256 oder None). Ohne Angabe die festgenagelte."""
+    if not gewuenscht:
+        return FESTE_VERSION, FESTE_SHA256
+    if gewuenscht == NEUESTE:
+        gewuenscht = aktuelle_version()
+    if gewuenscht == FESTE_VERSION:
+        return gewuenscht, FESTE_SHA256
+    print(f"Hinweis: Version {gewuenscht} ist nicht die festgenagelte ({FESTE_VERSION}); keine Pruefsumme bekannt.", flush=True)
+    return gewuenscht, None
 
 
 def holen(ziel: Path, version: str | None) -> str:
-    version = version or aktuelle_version()
+    version, erwartet = version_waehlen(version)
     kandidaten = [
         f"https://exiftool.org/exiftool-{version}_64.zip",
         f"https://exiftool.org/exiftool-{version}.zip",
@@ -77,14 +98,20 @@ def holen(ziel: Path, version: str | None) -> str:
     quelle = ""
     for url in kandidaten:
         try:
-            daten = _laden(url)
-            quelle = url
-            break
+            geladen = _laden(url)
         except Exception as fehler:  # noqa: BLE001 - naechste Adresse probieren
             print(f"  nicht geladen: {url} ({fehler})")
+            continue
+        summe = hashlib.sha256(geladen).hexdigest()
+        if erwartet is not None and summe != erwartet:
+            # Andere Bytes als erwartet: nie benutzen, naechste Adresse probieren.
+            print(f"  Pruefsumme passt nicht: {url} (SHA-256 {summe}, erwartet {erwartet})")
+            continue
+        daten, quelle = geladen, url
+        break
     if daten is None:
-        raise SystemExit(f"ExifTool {version} liess sich von keiner Adresse laden.")
-    print(f"Geladen: {quelle} ({len(daten) / 1e6:.1f} MB)")
+        raise SystemExit(f"ExifTool {version} liess sich von keiner Adresse mit passender Pruefsumme laden.")
+    print(f"Geladen: {quelle} ({len(daten) / 1e6:.1f} MB, SHA-256 {hashlib.sha256(daten).hexdigest()})")
 
     ziel.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -106,6 +133,7 @@ def holen(ziel: Path, version: str | None) -> str:
             shutil.copyfile(txt, ziel / txt.name)
     (ziel / "VERSION.txt").write_text(
         f"ExifTool {version} von Phil Harvey, geladen von {quelle}\n"
+        f"SHA-256 der ZIP-Datei: {hashlib.sha256(daten).hexdigest()}\n"
         "Lizenz: wie Perl (Artistic License / GPL), siehe https://exiftool.org\n",
         encoding="utf-8",
     )

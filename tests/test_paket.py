@@ -241,3 +241,49 @@ def test_importtabellen_und_fehlende_bibliotheken(tmp_path):
     assert [p for p in inhalt.programme(paket) if p not in inhalt.ERLAUBTE_PROGRAMME] == ["lib/bin/pygmentize.exe"]
     with pytest.raises(ValueError):
         inhalt.pe_importe(_datei(tmp_path / "kein.dll", b"Hallo"))
+
+
+# ------------------------------------------- ExifTool festgenagelt holen ----
+
+
+def _exiftool_zip(version: str) -> bytes:
+    import io
+    import zipfile
+
+    puffer = io.BytesIO()
+    with zipfile.ZipFile(puffer, "w") as zf:
+        zf.writestr(f"exiftool-{version}_64/exiftool(-k).exe", b"MZ starter")
+        zf.writestr(f"exiftool-{version}_64/exiftool_files/perl.exe", b"MZ perl")
+        zf.writestr(f"exiftool-{version}_64/exiftool_files/exiftool.pl", b"#!perl")
+        zf.writestr(f"exiftool-{version}_64/README.txt", b"readme")
+    return puffer.getvalue()
+
+
+def test_exiftool_holen_nimmt_nur_die_festgenagelte_pruefsumme(tmp_path, monkeypatch):
+    import hashlib
+
+    holen = _modul("exiftool_holen")
+    assert holen.FESTE_VERSION and len(holen.FESTE_SHA256) == 64 and int(holen.FESTE_SHA256, 16)
+    daten = _exiftool_zip(holen.FESTE_VERSION)
+    geladen: list[str] = []
+    monkeypatch.setattr(holen, "_laden", lambda url, versuche=3: geladen.append(url) or daten)
+    monkeypatch.setattr(holen, "time", type("T", (), {"sleep": staticmethod(lambda s: None)}))
+
+    # Andere Bytes als festgenagelt: keine Adresse wird angenommen, nichts abgelegt.
+    with pytest.raises(SystemExit, match="Pruefsumme"):
+        holen.holen(tmp_path / "a", None)
+    assert len(geladen) == 3 and not (tmp_path / "a").exists()
+
+    # Passende Pruefsumme: die erste Adresse genuegt, VERSION.txt nennt die Summe.
+    monkeypatch.setattr(holen, "FESTE_SHA256", hashlib.sha256(daten).hexdigest())
+    geladen.clear()
+    assert holen.holen(tmp_path / "b", None) == holen.FESTE_VERSION
+    assert len(geladen) == 1
+    assert (tmp_path / "b" / "exiftool_files" / "perl.exe").is_file() and (tmp_path / "b" / "exiftool.exe").is_file()
+    assert hashlib.sha256(daten).hexdigest() in (tmp_path / "b" / "VERSION.txt").read_text(encoding="utf-8")
+
+    # Eine ausdruecklich andere Version: ohne Pruefsumme, mit Hinweis.
+    monkeypatch.setattr(holen, "_laden", lambda url, versuche=3: b"9.99" if url.endswith("ver.txt") else _exiftool_zip("9.99"))
+    assert holen.version_waehlen("neueste") == ("9.99", None)
+    assert holen.holen(tmp_path / "c", "9.99") == "9.99"
+    assert "ExifTool 9.99" in (tmp_path / "c" / "VERSION.txt").read_text(encoding="utf-8")
