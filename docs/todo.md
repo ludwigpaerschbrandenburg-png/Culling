@@ -687,6 +687,9 @@ je Befund zuerst ein Test)
       Verknüpfung jetzt auch bei relativem Pfad richtig an.
 - [x] Tests für Windows-Zweige, die sich unter Linux nachbauen lassen (MoveFileExW mit
       nachgebautem kernel32, Schreibschutz-Attribut, Bildschirmfotos 1180×800).
+- [x] **Aus der Windows-CI:** Beim Erkennen einer beschädigten Datenbank blieb die Verbindung
+      offen, bis Python aufräumte; unter Windows scheiterte dann das Beiseitelegen beim
+      Zurückholen (Fehler 32). Jetzt wird sie sofort geschlossen.
 
 **Bewusst nicht gebaut in Runde 1**
 - **Platten-Syncs bündeln** (Tempo-Befund): Beim Aufräumen und beim Verschieben auf demselben

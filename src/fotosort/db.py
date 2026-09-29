@@ -619,6 +619,14 @@ def _vor_anhebung_sichern(verbindung: sqlite3.Connection, pfad: Path, version: i
         sicherung.close()
 
 
+def _schliessen(verbindung: sqlite3.Connection | None) -> None:
+    if verbindung is not None:
+        try:
+            verbindung.close()
+        except sqlite3.Error:
+            pass
+
+
 class Datenbank:
     """Eine geoeffnete Archiv-Datenbank mit Sammelschreiben."""
 
@@ -660,6 +668,7 @@ class Datenbank:
                 raise FotosortFehler(meldungen.archiv_belegt(ordner))
 
         pfad = datenbank_pfad(ordner)
+        verbindung = None
         try:
             verbindung = sqlite3.connect(
                 str(pfade.lang(pfad)),
@@ -678,12 +687,16 @@ class Datenbank:
             verbindung.executescript(SCHEMA)
             verbindung.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         except sqlite3.DatabaseError as fehler:
+            # Sofort schliessen, nicht erst, wenn Python aufraeumt: Unter
+            # Windows liesse sich die Datei sonst nicht beiseitelegen.
+            _schliessen(verbindung)
             if sperre is not None:
                 sperre.freigeben()
             if _ist_beschaedigt(fehler):
                 raise FotosortFehler(meldungen.datenbank_beschaedigt(pfad, fehler)) from fehler
             raise
         except BaseException:
+            _schliessen(verbindung)
             if sperre is not None:
                 sperre.freigeben()
             raise

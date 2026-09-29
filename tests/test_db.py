@@ -346,6 +346,36 @@ def test_sicherung_ist_lesbar_und_vollstaendig(tmp_path, datenbank):
         kopie.close()
 
 
+def test_beschaedigte_datenbank_bleibt_nicht_offen(tmp_path, monkeypatch):
+    """Wird eine beschaedigte Datenbank erkannt, darf keine Verbindung zu ihr
+    offen bleiben. Unter Windows laesst sich eine offene Datei nicht
+    umbenennen: Das Beiseitelegen beim Zurueckholen scheiterte sonst mit
+    Fehler 32 - je nachdem, wann Python aufraeumt."""
+    ordner = tmp_path / "archiv"
+    ordner.mkdir()
+    (ordner / db.DATEINAME).write_bytes(b"kaputt" * 1000)
+    offen: list = []
+    echt = sqlite3.connect
+
+    def verbinden(*a, **k):
+        verbindung = echt(*a, **k)
+        offen.append(verbindung)
+        return verbindung
+
+    monkeypatch.setattr(db.sqlite3, "connect", verbinden)
+    with pytest.raises(FotosortFehler):
+        db.Datenbank.oeffnen(ordner, sperren=True)
+    assert offen
+    for verbindung in offen:
+        with pytest.raises(sqlite3.ProgrammingError):   # geschlossen
+            verbindung.execute("SELECT 1")
+    # Die Sperre ist auch wieder frei.
+    db.Datenbank.oeffnen(tmp_path / "anderes", sperren=True).schliessen()
+    sperre = db.Archivsperre(db.sperr_pfad(ordner))
+    assert sperre.nehmen()
+    sperre.freigeben()
+
+
 class _Gesperrt(PermissionError):
     """Wie Windows beim Ersetzen einer Datei, die ein anderes Programm gerade
     offen haelt: "Zugriff verweigert" (5); 32 bei einer Freigabeverletzung."""
