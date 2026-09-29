@@ -782,3 +782,23 @@ def test_fenster_reicht_config_bis_in_den_ablauf(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(fenster_modul, "starten", lambda **kw: aufrufe.append(kw) or 0)
     assert cli.main(["fenster", "--ziel", str(tmp_path / "Ziel"), "--config", str(konf), "--selbsttest"]) == 0
     assert aufrufe and aufrufe[0]["config"] == str(konf) and aufrufe[0]["selbsttest"] is True
+
+
+def test_stand_wird_nach_einem_schritt_nicht_mehrfach_gerechnet(ob, quelle, ziel, monkeypatch):
+    """Startseite und "naechster Schritt" lasen frueher je einmal das ganze Archiv
+    (bei einer Million Dateien je 2-3 s, das Fenster stand solange). Solange
+    sich nichts geaendert hat, wird der Stand jetzt nur einmal gerechnet."""
+    ab, client = ob
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    geoeffnet = []
+    echt = cli.archiv_oeffnen
+    monkeypatch.setattr(cli, "archiv_oeffnen", lambda *a, **k: geoeffnet.append(1) or echt(*a, **k))
+    ab._stand_gemerkt = None          # das Setzen des Ziels hat schon einmal gelesen
+    erst = ab.archiv_lesen()
+    assert ab.archiv_lesen() == erst and ab.naechster()["schritt"] == "analyse"
+    assert len(geoeffnet) == 1
+    # Aendert sich das Archiv, wird neu gelesen.
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    n = len(geoeffnet)
+    assert ab.naechster()["schritt"] == "kopieren" and len(geoeffnet) == n + 1

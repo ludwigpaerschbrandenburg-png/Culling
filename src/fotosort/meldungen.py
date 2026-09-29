@@ -16,6 +16,11 @@ def anzahl(n: int) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
+def dezimal(wert: float, stellen: int = 1) -> str:
+    """1234.5 -> "1.234,5" (Punkt als Tausender-, Komma als Dezimaltrenner)."""
+    return f"{float(wert):,.{stellen}f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+
+
 def groesse(bytes_: int) -> str:
     """1288490189 -> "1,2 GB" (Komma als Dezimaltrenner)."""
     wert = float(bytes_)
@@ -24,7 +29,7 @@ def groesse(bytes_: int) -> str:
     for einheit in ("KB", "MB", "GB", "TB", "PB"):
         wert /= 1024.0
         if wert < 1024 or einheit == "PB":
-            return f"{wert:.1f}".replace(".", ",") + f" {einheit}"
+            return f"{dezimal(wert)} {einheit}"
     raise AssertionError("unerreichbar")
 
 
@@ -52,6 +57,25 @@ def durchsatz(dateien: int, bytes_: int, sekunden: float) -> str:
 # ------------------------------------------------------------- ExifTool ----
 
 
+#: Feste Texte von argparse (Hilfe und Eingabefehler der Kommandozeile).
+ARGPARSE: dict[str, str] = {
+    "usage: ": "Aufruf: ",
+    "positional arguments": "Befehle und Angaben",
+    "options": "Optionen",
+    "optional arguments": "Optionen",
+    "show this help message and exit": "diese Hilfe zeigen und beenden",
+    "%(prog)s: error: %(message)s\n": "%(prog)s: Fehler: %(message)s\n",
+    "argument %(argument_name)s: %(message)s": "Angabe %(argument_name)s: %(message)s",
+    "invalid choice: %(value)r (choose from %(choices)s)": "unbekannt: %(value)r (moeglich: %(choices)s)",
+    "the following arguments are required: %s": "es fehlt: %s",
+    "unrecognized arguments: %s": "unbekannte Angaben: %s",
+    "expected one argument": "hier fehlt ein Wert",
+    "invalid %(type)s value: %(value)r": "ungueltiger Wert: %(value)r",
+    "not allowed with argument %s": "nicht zusammen mit %s",
+    "ambiguous option: %(option)s could match %(matches)s": "mehrdeutig: %(option)s passt zu %(matches)s",
+}
+
+
 def exiftool_fehlt(gesucht: str = "") -> str:
     """Harter Abbruch, wenn ein Befehl Metadaten braucht (SPEC Abschnitt 2)."""
     wo = gesucht or "ueber PATH"
@@ -65,6 +89,19 @@ def exiftool_fehlt(gesucht: str = "") -> str:
         "  1. Umgebungsvariable FOTOSORT_EXIFTOOL\n"
         "  2. Konfigurationswert exiftool_pfad in der Gruppe [leistung]\n"
         "Zu beziehen ist ExifTool unter https://exiftool.org"
+    )
+
+
+def exiftool_startet_nicht(wo: str, grund: str) -> str:
+    """ExifTool ist da, der Probestart scheiterte aber (Virenscanner, Zeitlimit)."""
+    return (
+        "ExifTool wurde gefunden, liess sich aber nicht starten.\n"
+        f"Gefunden: {wo}\n"
+        f"Grund: {grund}\n"
+        "Haeufige Ursache ist ein Virenscanner, der das Programm beim ersten Start\n"
+        "lange festhaelt oder sperrt. Bitte noch einmal versuchen; hilft das nicht,\n"
+        "fuer den Programmordner eine Ausnahme im Virenscanner einrichten (LIESMICH)\n"
+        "oder das ZIP-Paket neu entpacken. Ohne ExifTool wird nicht angefangen."
     )
 
 
@@ -323,6 +360,10 @@ def ziel_index_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int,
         f"Ziel-Index: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
         f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
     )
+
+
+def ziel_index_durchsucht(ziel) -> str:
+    return f"Das Ziel wird durchsucht (bei sehr vielen Dateien dauert schon das eine Weile): {ziel}"
 
 
 def ziel_index_nichts_gefunden(ziel) -> str:
@@ -739,7 +780,7 @@ def ziel_wird_nicht_angelegt(ziel) -> str:
 
 def ziel_eltern_fehlt(ziel, eltern) -> str:
     return (
-        "Abbruch: Der Ordner, in dem das Ziel angelegt werden soll, gibt es\n"
+        "Abbruch: Den Ordner, in dem das Ziel angelegt werden soll, gibt es\n"
         "nicht:\n"
         f"  Ziel:          {ziel}\n"
         f"  fehlender Ort: {eltern}\n"
@@ -1811,6 +1852,7 @@ OB_ZUSTAND: dict[str, str] = {
     "fertig": "Fertig",
     "abgebrochen": "Abgebrochen – das Bisherige ist gespeichert, der nächste Lauf macht dort weiter.",
     "fehler": "Beendet, aber mit Fehlern",
+    "nicht_fertig": "Nicht fertig geworden – der Grund steht oben",
     "abgestuerzt": "Der Arbeitsvorgang ist unerwartet beendet worden. Das Bisherige ist gespeichert; ein neuer Start macht dort weiter.",
 }
 
@@ -1854,7 +1896,68 @@ def ob_quelle_fehlt_pfad() -> str:
 
 
 def ob_frage_ziel_anlegen(ziel) -> str:
-    return f"Den Ordner {ziel} gibt es noch nicht. Soll er angelegt werden?"
+    return (
+        f"Den Ordner {ziel} gibt es noch nicht. Soll er angelegt werden? Lag hier schon ein Archiv – etwa auf "
+        "einer externen Platte oder einem Netzlaufwerk –, dann bitte erst die Platte angeschlossen oder das "
+        "Laufwerk verbunden und „Nicht anlegen“ wählen; sonst entsteht ein zweites, leeres Archiv."
+    )
+
+
+def ob_ziel_nicht_gefunden() -> str:
+    return (
+        "Den gemerkten Zielordner gibt es gerade nicht. Ist die Platte angeschlossen und das Netzlaufwerk "
+        "verbunden? Sonst oben einen anderen Ordner wählen. „Los geht's“ würde ihn nach Rückfrage neu anlegen."
+    )
+
+
+def ob_ziel_fehlt() -> str:
+    return "Bitte zuerst oben einen Zielordner auswählen."
+
+
+def ob_ziel_eltern_fehlt(ziel, eltern) -> str:
+    return (
+        f"Den Ordner {eltern}, in dem das Ziel {ziel} angelegt werden soll, gibt es nicht. Ist die Platte "
+        "angeschlossen und das Netzlaufwerk verbunden? Sonst bitte einen anderen Zielordner wählen."
+    )
+
+
+def ob_quelle_kein_ordner(pfad) -> str:
+    return f"{pfad} ist kein Ordner. Bitte einen Ordner als Quelle wählen."
+
+
+def ob_quelle_gleich_ziel(pfad) -> str:
+    return f"{pfad} ist schon der Zielordner. Bitte einen anderen Quellordner wählen."
+
+
+def ob_quelle_in_ziel(pfad) -> str:
+    return (
+        f"{pfad} liegt im Zielordner – dort sind die schon einsortierten Bilder. Bitte einen Quellordner "
+        "außerhalb des Ziels wählen."
+    )
+
+
+def ob_quelle_schon_dabei(pfad) -> str:
+    return f"{pfad} ist schon als Quelle dabei."
+
+
+def ob_exiftool_fehlt(wo: str) -> str:
+    return (
+        f"ExifTool wurde nicht gefunden (gesucht: {wo}). Ohne ExifTool gibt es weder Aufnahmedatum noch "
+        "Kamera, deshalb wird nicht angefangen. Im Windows-Paket liegt ExifTool im Programmordner – bitte "
+        "das ZIP-Paket vollständig neu entpacken."
+    )
+
+
+def ob_exiftool_startet_nicht(wo: str, grund: str) -> str:
+    return (
+        f"ExifTool ist da ({wo}), ließ sich aber nicht starten: {grund}. Häufig hält ein Virenscanner es "
+        "beim ersten Start fest. Bitte noch einmal „Los geht's“ drücken; hilft das nicht, für den "
+        "Programmordner eine Ausnahme im Virenscanner einrichten (siehe LIESMICH)."
+    )
+
+
+def ob_bericht_erst_danach() -> str:
+    return "Der Bericht lässt sich erst schreiben, wenn der laufende Schritt fertig ist."
 
 
 def ob_frage_quelle_gross(pfad, art: str) -> str:

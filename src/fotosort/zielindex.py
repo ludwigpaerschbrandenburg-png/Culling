@@ -33,7 +33,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import db, fortschritt, hashes, meldungen, messen, pfade
+from . import db, fortschritt, hashes, meldungen, messen, pfade, steuerung
 from .kopieren import worker_zahlen
 
 ART_NICHT_LESBAR = "ziel_index_nicht_lesbar"
@@ -62,7 +62,7 @@ class Ergebnis:
     fortgesetzt_von_lauf: int | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class _Datei:
     pfad: str          # Schreibweise der Datenbank (db.pfad_text)
     groesse: int
@@ -95,6 +95,9 @@ def dateien_im_ziel(ziel: Path, e: Ergebnis) -> list[_Datei]:
     gefunden: list[_Datei] = []
     stapel: list[Path] = [ziel]
     while stapel:
+        # Schon beim Durchsuchen melden: Fortschritt fuer das Fenster, und ein
+        # Abbruchwunsch greift hier (KeyboardInterrupt), nicht erst danach.
+        steuerung.melden(len(gefunden), 0, 0, 0)
         ordner = stapel.pop()
         try:
             with os.scandir(pfade.lang(ordner)) as eintraege:
@@ -168,7 +171,14 @@ def neu_aufbauen(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     e = Ergebnis(hash_worker=hw, profil=prof)
     e.fortgesetzt_von_lauf = dbank.unvollendeter_lauf(BEFEHLSTEILE, vor=lauf)
 
-    dateien = dateien_im_ziel(ziel, e)
+    if konsole is not None:
+        konsole.print(meldungen.ziel_index_durchsucht(ziel))
+    try:
+        dateien = dateien_im_ziel(ziel, e)
+    except KeyboardInterrupt:
+        e.abgebrochen = True
+        e.sekunden = time.monotonic() - begonnen
+        return e
     e.geplant = len(dateien)
     e.geplant_bytes = sum(d.groesse for d in dateien)
     if konsole is not None:

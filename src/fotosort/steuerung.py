@@ -103,7 +103,9 @@ class Steuerung:
         verstrichen = max(1e-9, jetzt - self.begonnen)
         rate = self.bytes / verstrichen
         # Restzeit (restzeit.py): nach der Datenmenge, sonst nach der Zahl der Dateien.
-        if self.gesamt_bytes:
+        if self.zustand in (ZUSTAND_FERTIG, ZUSTAND_ABGEBROCHEN, ZUSTAND_FEHLER):
+            rest, rest_zustand = None, ""      # vorbei: keine Restzeit mehr
+        elif self.gesamt_bytes:
             rest, rest_zustand = self.restzeit.melden(self.bytes, self.gesamt_bytes)
         else:
             rest, rest_zustand = self.restzeit.melden(self.dateien, self.gesamt)

@@ -75,6 +75,10 @@ def ausfuehren(
 
     with metadaten.ExifToolPool(exiftool, ergebnis.prozesse) as pool:
         ab = ""
+        # Doppelte Pufferung: Die Stapel der naechsten Seite laufen schon bei
+        # ExifTool, waehrend die vorige ausgewertet und geschrieben wird -
+        # sonst warten alle Prozesse am Ende jeder Seite.
+        vorige: _Seite | None = None
         try:
             while True:
                 seite = dbank.zu_analysieren(ab, SEITE)
@@ -96,7 +100,15 @@ def ausfuehren(
                     # ("o/a.jpg", "o/b/x.jpg", "o/k.jpg"); jeder Ordner darf
                     # trotzdem nur einmal in der Liste stehen.
                     ordner.setdefault(db.pfad_text(Path(db.text_pfad(z["quellpfad"])).parent))
-                _seite_bearbeiten(list(ordner), trenner, struktur, konf, dbank, lauf, pool, ergebnis, anzeige)
+                # Ein Ordner, den die vorige Seite schon ganz bearbeitet (er
+                # reicht ueber die Seitengrenze), wird nicht ein zweites Mal gelesen.
+                schon = vorige.ordner if vorige is not None else set()
+                naechste = _seite_vorbereiten([o for o in ordner if o not in schon], trenner, konf, dbank, pool, ergebnis)
+                if vorige is not None:
+                    _seite_abschliessen(vorige, struktur, konf, dbank, lauf, ergebnis, anzeige)
+                vorige = naechste
+            if vorige is not None:
+                _seite_abschliessen(vorige, struktur, konf, dbank, lauf, ergebnis, anzeige)
         except KeyboardInterrupt:
             ergebnis.abgebrochen = True
         finally:
@@ -109,7 +121,22 @@ def ausfuehren(
     return ergebnis
 
 
+@dataclass
+class _Seite:
+    """Eine vorbereitete Seite: Gruppen gebildet, Stapel bei ExifTool eingereicht."""
+    ordner: set
+    aufgaben: list
+    ohne_haupt: list
+    stapel: list          # (Stapel, Future)
+
+
 def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebnis, anzeige) -> None:
+    """Eine Seite am Stueck (ohne Ueberlappung)."""
+    seite = _seite_vorbereiten(ordner, trenner, konf, dbank, pool, ergebnis)
+    _seite_abschliessen(seite, struktur, konf, dbank, lauf, ergebnis, anzeige)
+
+
+def _seite_vorbereiten(ordner, trenner, konf, dbank, pool, ergebnis) -> _Seite:
     # 1. Gruppen je Ordner bilden und die zu lesenden Dateien einsammeln.
     aufgaben: list[tuple[str, gruppen.Gruppe, dict]] = []   # (ordner_text, gruppe, zeilen nach Name)
     zu_lesen: list[tuple[str, str]] = []                      # (pfad, typ)
@@ -140,10 +167,15 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
                             zu_lesen.append((s_pfad, dateitypen.SIDECAR))
 
     # 2. Metadaten in Stapeln lesen, parallel ueber die ExifTool-Prozesse.
-    felder_von: dict[str, dict] = {}
     stapel = metadaten.stapel_bilden(zu_lesen)
     ergebnis.stapel += len(stapel)
-    for s, zukunft in [(s, pool.einreichen(s)) for s in stapel]:
+    return _Seite(set(ordner), aufgaben, ohne_haupt, [(s, pool.einreichen(s)) for s in stapel])
+
+
+def _seite_abschliessen(seite: _Seite, struktur, konf, dbank, lauf, ergebnis, anzeige) -> None:
+    aufgaben, ohne_haupt = seite.aufgaben, seite.ohne_haupt
+    felder_von: dict[str, dict] = {}
+    for s, zukunft in seite.stapel:
         try:
             felder_von.update(zukunft.result())
         except metadaten.MetadatenFehler as fehler:

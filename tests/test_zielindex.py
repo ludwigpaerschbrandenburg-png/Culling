@@ -263,3 +263,27 @@ def test_leeres_ziel_ergibt_leeren_index(quelle, ziel, nachschauen, capsys):
     aus = capsys.readouterr().out
     assert "keine Dateien" in aus
     assert _index(nachschauen, ziel) == {}
+
+
+def test_durchsuchen_meldet_schon_fortschritt_und_laesst_sich_abbrechen(tmp_path, monkeypatch):
+    """Bei einem NAS mit einer Million Dateien stand die Anzeige minutenlang auf
+    "0 Dateien", bis der ganze Baum gelesen war; ein Abbruch griff erst danach."""
+    from fotosort import steuerung
+    ziel = tmp_path / "Ziel"
+    for i in range(30):
+        (ziel / f"{i:02d}").mkdir(parents=True)
+        for j in range(100):
+            (ziel / f"{i:02d}" / f"{j}.jpg").write_bytes(b"x")
+    meldungen_: list[int] = []
+    monkeypatch.setattr(steuerung, "melden", lambda n, gesamt, b, gb: meldungen_.append(n))
+    e = zielindex.Ergebnis()
+    dateien = zielindex.dateien_im_ziel(ziel, e)
+    assert len(dateien) == 3000
+    assert meldungen_ and meldungen_[-1] <= 3000 and meldungen_ == sorted(meldungen_)
+
+    def abbrechen(n, gesamt, b, gb):
+        if n >= 1000:
+            raise KeyboardInterrupt
+    monkeypatch.setattr(steuerung, "melden", abbrechen)
+    with pytest.raises(KeyboardInterrupt):
+        zielindex.dateien_im_ziel(ziel, zielindex.Ergebnis())

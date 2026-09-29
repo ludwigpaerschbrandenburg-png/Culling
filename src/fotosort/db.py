@@ -27,6 +27,7 @@ ARCHIV_ID_DATEI = "archiv-id.txt"
 SICHERUNG = "fotosort.db.sicherung"
 SICHERUNG_NEU = "fotosort.db.sicherung.neu"
 SICHERUNG_VORHER = "fotosort.db.sicherung.vorher"
+SICHERUNG_LOKAL = "fotosort.db.sicherung.lokal"   # im Archiv-Ordner, nur waehrend des Sicherns
 DATENBANK_NEU = "fotosort.db.neu"            # Zwischenstand beim Wiederherstellen
 DATENBANK_ERSETZT = "fotosort.db.ersetzt_"      # aufgehobene lokale Datenbank (nie geloescht)
 
@@ -126,9 +127,17 @@ CREATE TABLE IF NOT EXISTS dateien (
 );
 
 CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
-CREATE INDEX IF NOT EXISTS dateien_wurzel  ON dateien (quellwurzel);
-CREATE INDEX IF NOT EXISTS dateien_zielpfad ON dateien (zielpfad);
 CREATE INDEX IF NOT EXISTS dateien_status_typ ON dateien (status, dateityp);
+-- Seitenweise Abfragen (Analyse, Pruefen, Aufraeumen, Bericht) laufen ueber
+-- quellpfad bzw. zielpfad weiter: Mit diesen Indizes liest jede Seite nur
+-- ihre eigenen Zeilen und muss nicht neu sortieren. Sie ersetzen die frueheren
+-- Indizes nur auf quellwurzel bzw. zielpfad. Neue Indizes aendern nichts an
+-- den Daten; auch ein aelterer Programmstand kann die Datei weiter oeffnen.
+CREATE INDEX IF NOT EXISTS dateien_wurzel_pfad ON dateien (quellwurzel, quellpfad);
+CREATE INDEX IF NOT EXISTS dateien_status_pfad ON dateien (status, quellpfad);
+CREATE INDEX IF NOT EXISTS dateien_ziel_pfad ON dateien (zielpfad, quellpfad);
+DROP INDEX IF EXISTS dateien_wurzel;
+DROP INDEX IF EXISTS dateien_zielpfad;
 CREATE INDEX IF NOT EXISTS dateien_hash ON dateien (hash);
 CREATE INDEX IF NOT EXISTS dateien_gruppe ON dateien (quellwurzel, gruppe, quellpfad);
 CREATE TABLE IF NOT EXISTS ziel_index (
@@ -158,6 +167,7 @@ CREATE TABLE IF NOT EXISTS lauf_ereignisse (
 );
 
 CREATE INDEX IF NOT EXISTS ereignisse_lauf ON lauf_ereignisse (lauf_nummer, art);
+CREATE INDEX IF NOT EXISTS ereignisse_art ON lauf_ereignisse (art, lauf_nummer);
 """
 
 # Sammelschreiben: alle 500 Dateien oder 2 Sekunden (SPEC Abschnitt 6).
@@ -791,7 +801,7 @@ class Datenbank:
         quellwurzel = pfad_text(quellwurzel)
         self._beginnen()
         zeile = self.verbindung.execute(
-            "SELECT groesse, mtime FROM dateien WHERE quellpfad = ?", (quellpfad,)
+            "SELECT groesse, mtime, quellwurzel FROM dateien WHERE quellpfad = ?", (quellpfad,)
         ).fetchone()
 
         if zeile is None:
@@ -808,12 +818,19 @@ class Datenbank:
             zeile["mtime"], mtime
         )
         if unveraendert:
-            # Die Zeile bleibt, wie sie ist. Nur das Gesehen-Datum wandert mit.
-            self.verbindung.execute(
-                "UPDATE dateien SET zuletzt_gesehen_in_lauf = ?, quellwurzel = ?"
-                " WHERE quellpfad = ?",
-                (lauf, quellwurzel, quellpfad),
-            )
+            # Die Zeile bleibt, wie sie ist. Nur das Gesehen-Datum wandert mit;
+            # die Quellwurzel (in zwei Indizes) nur, wenn sie sich aendert.
+            if zeile["quellwurzel"] == quellwurzel:
+                self.verbindung.execute(
+                    "UPDATE dateien SET zuletzt_gesehen_in_lauf = ? WHERE quellpfad = ?",
+                    (lauf, quellpfad),
+                )
+            else:
+                self.verbindung.execute(
+                    "UPDATE dateien SET zuletzt_gesehen_in_lauf = ?, quellwurzel = ?"
+                    " WHERE quellpfad = ?",
+                    (lauf, quellwurzel, quellpfad),
+                )
             self._vielleicht_schreiben()
             return "unveraendert"
 
@@ -993,13 +1010,15 @@ class Datenbank:
             " datum_quelle, datum_sicher, datum_hinweis, zielpfad, gruppe, mtime, groesse,"
             " fehlergrund"
             " FROM dateien WHERE quellpfad > ? AND quellpfad < ?"
+            # Nur direkte Kinder: kein weiterer Trenner hinter dem Anfang - schon
+            # in der Abfrage, sonst kaeme ein ganzer Unterbaum nach Python.
+            " AND instr(substr(quellpfad, ?), ?) = 0"
             f" AND dateityp IN {self.ECHTE_TYPEN_SQL} ORDER BY quellpfad",
             # Obergrenze: das hoechste UTF-8-Zeichen (F4 8F BF BF). U+FFFF
             # (EF BF BF) laege VOR Emoji und allem ab U+10000 - Dateien mit
             # solchen Namen fielen sonst still aus dem Bereich.
-            (anfang, anfang + "\U0010ffff"),
+            (anfang, anfang + "\U0010ffff", len(anfang) + 1, trenner),
         ).fetchall()
-        # Nur direkte Kinder: kein weiterer Trenner hinter dem Anfang.
         return [z for z in zeilen if trenner not in z["quellpfad"][len(anfang):]]
 
     def analyse_setzen(
@@ -1032,6 +1051,19 @@ class Datenbank:
         )
         self._vielleicht_schreiben()
 
+    def modelle_liste(self) -> list[tuple[str, str, int]]:
+        """(Kameramodell, Ordnername, Anzahl) der analysierten, noch nicht
+        kopierten Dateien - allein, ohne die ganze Analyse-Zusammenfassung."""
+        self.stapel_schreiben()
+        return [
+            (z["kamera_modell"], z["kamera"], int(z["n"]))
+            for z in self.verbindung.execute(
+                "SELECT kamera_modell, kamera, COUNT(*) AS n FROM dateien"
+                " WHERE status = 'analysiert' AND dateityp != 'sidecar'"
+                " GROUP BY kamera_modell, kamera ORDER BY n DESC, kamera_modell"
+            )
+        ]
+
     def analyse_zusammenfassung(self) -> dict:
         """Zahlen fuer die Zusammenfassung nach der Analyse (SPEC Abschnitt 4 Phase 2)."""
         self.stapel_schreiben()
@@ -1043,14 +1075,7 @@ class Datenbank:
             " FROM dateien WHERE status = 'analysiert' GROUP BY quellwurzel, jahr"
         ):
             je_jahr_quelle.setdefault(z["quellwurzel"], {})[z["jahr"]] = int(z["n"])
-        modelle = [
-            (z["kamera_modell"], z["kamera"], int(z["n"]))
-            for z in v.execute(
-                "SELECT kamera_modell, kamera, COUNT(*) AS n FROM dateien"
-                " WHERE status = 'analysiert' AND dateityp != 'sidecar'"
-                " GROUP BY kamera_modell, kamera ORDER BY n DESC, kamera_modell"
-            )
-        ]
+        modelle = self.modelle_liste()
         def zaehlen(sql: str) -> int:
             return int(v.execute(sql).fetchone()[0])
         return {
@@ -1310,9 +1335,12 @@ class Datenbank:
     # -- Pruefen (SPEC Abschnitt 4 Phase 4) --------------------------------
 
     # verschoben: nur solange der Hash noch fehlt (er wird hier nachgetragen).
+    # Das "+" vor status und hash haelt SQLite davon ab, das ODER ueber die
+    # Indizes auf status und hash aufzuloesen (dann muesste jede Seite neu
+    # sortiert werden); so laeuft die Abfrage ueber (zielpfad, quellpfad).
     ZU_PRUEFEN_SQL = (
-        "zielpfad != '' AND (status IN ('kopiert', 'duplikat')"
-        " OR (status = 'verschoben' AND hash = ''))"
+        "zielpfad != '' AND (+status IN ('kopiert', 'duplikat')"
+        " OR (+status = 'verschoben' AND +hash = ''))"
     )
 
     def zu_pruefen_summe(self) -> tuple[int, int]:
@@ -1519,6 +1547,11 @@ class Datenbank:
         )
 
     def ereignisse_liste(self, art: str | None = None, lauf: int | None = None) -> list[sqlite3.Row]:
+        return self.ereignisse_zeiger(art, lauf).fetchall()
+
+    def ereignisse_zeiger(self, art: str | None = None, lauf: int | None = None) -> sqlite3.Cursor:
+        """Wie ereignisse_liste, aber als Cursor: Fuer den Bericht muessen nicht
+        alle Ereignisse zugleich im Speicher liegen (eine Million: ~180 MB)."""
         self.stapel_schreiben()
         sql = "SELECT rowid, * FROM lauf_ereignisse WHERE 1"
         werte: list = []
@@ -1528,7 +1561,11 @@ class Datenbank:
         if lauf is not None:
             sql += " AND lauf_nummer = ?"
             werte.append(lauf)
-        return self.verbindung.execute(sql + " ORDER BY lauf_nummer, rowid", werte).fetchall()
+        return self.verbindung.execute(sql + " ORDER BY lauf_nummer, rowid", werte)
+
+    def dateien_zaehlen(self, bedingung: str = "1", werte: tuple = ()) -> int:
+        self.stapel_schreiben()
+        return int(self.verbindung.execute(f"SELECT COUNT(*) FROM dateien WHERE {bedingung}", werte).fetchone()[0])
 
     def ereignisse_summen(self) -> dict[str, int]:
         """Anzahl je Ereignisart ueber alle Laeufe."""
@@ -1604,11 +1641,26 @@ class Datenbank:
 
         if neu.exists():
             neu.unlink()
-        sicherung = sqlite3.connect(str(pfade.lang(neu)))
+        # Erst lokal sichern (SQLite-Backup, schnell und in sich stimmig),
+        # dann die fertige Datei am Stueck ins Ziel kopieren: Auf einem
+        # Netzlaufwerk entsteht so nie eine SQLite-Datei in Arbeit (SPEC §6),
+        # und statt Zehntausender kleiner Schreibaufrufe gibt es grosse Bloecke.
+        lokal = self.pfad.with_name(SICHERUNG_LOKAL)
+        if lokal.exists():
+            lokal.unlink()
+        sicherung = sqlite3.connect(str(pfade.lang(lokal)))
         try:
             self.verbindung.backup(sicherung)
         finally:
             sicherung.close()
+        try:
+            shutil.copyfile(pfade.lang(lokal), pfade.lang(neu))
+            with open(pfade.lang(neu), "rb+") as f:
+                os.fsync(f.fileno())
+            if os.stat(pfade.lang(neu)).st_size != os.stat(pfade.lang(lokal)).st_size:
+                raise OSError(f"Sicherungskopie unvollstaendig: {neu}")
+        finally:
+            lokal.unlink()
 
         # Die einzige Stelle, an der ein Umbenennen ersetzen darf: eigene
         # Sicherungsstaende, keine Bild- oder Videodateien.

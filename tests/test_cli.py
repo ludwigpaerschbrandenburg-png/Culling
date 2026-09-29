@@ -814,3 +814,18 @@ def test_strg_c_im_scan_schliesst_den_lauf(capsys, quelle, ziel, monkeypatch, na
         lauf = d.letzter_lauf()
         assert lauf["ende"] and lauf["befehl"].startswith("fotosort scan")
         assert d.ereignisse_zaehlen(lauf["nummer"], scan.ART_ABGEBROCHEN) == 1
+
+
+def test_hilfe_und_eingabefehler_auf_deutsch(capsys):
+    """--help und Eingabefehler waren teils englisch ("usage:", "invalid choice"),
+    und der interne Befehl "arbeit" stand in der Befehlsliste."""
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    aus = capsys.readouterr().out
+    assert "Aufruf: fotosort" in aus and "Optionen:" in aus and "diese Hilfe zeigen" in aus
+    assert "usage" not in aus and "show this help" not in aus
+    assert "\n    arbeit" not in aus and "\n    scan" in aus
+    with pytest.raises(SystemExit):
+        cli.main(["gibtsnicht"])
+    fehler = capsys.readouterr().err
+    assert "Fehler:" in fehler and "unbekannt: 'gibtsnicht'" in fehler and "invalid choice" not in fehler

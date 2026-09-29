@@ -67,6 +67,7 @@ def test_exiftool_prozess_bekommt_die_argumente(monkeypatch):
 
 def test_exiftool_pruefung_bekommt_die_argumente(monkeypatch):
     monkeypatch.setattr(prozesse, "unsichtbar", lambda: {"creationflags": 0, "startupinfo": None})
+    monkeypatch.setattr(cli, "_exiftool_startbar_gemerkt", set())   # ein frueherer Test hat schon gestartet
     aufrufe = _mitschreiben(monkeypatch, cli, "run")
     assert cli.exiftool_startbar(testbaum.exiftool_pfad()) is True
     assert aufrufe and "creationflags" in aufrufe[0] and "startupinfo" in aufrufe[0]

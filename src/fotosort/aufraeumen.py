@@ -274,18 +274,28 @@ def _quelle_fehlt(z, dbank, lauf, e) -> None:
 
 
 def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], konf, dbank, lauf, e,
-                   dry_run: bool, liste: list[Path], melden: bool) -> bool:
+                   dry_run: bool, liste: list[Path], melden: bool,
+                   ziel_auf: Path | None = None, pfad_auf: Path | None = None) -> bool:
     """Liefert True, wenn der Ordner leer ist (oder es nach dem Entfernen der
     Reste waere). Entfernt im Ernstfall Reste und dann den Ordner selbst -
-    nie den Wurzelordner, nie den Papierkorb, nie das Ziel."""
-    ziel_auf = pfade.aufloesen(ziel)
-    if pfad != wurzel and (loeschen.ist_papierkorb(pfad.name) or pfade.liegt_in(pfad, ziel_auf) or pfad == ziel_auf):
+    nie den Wurzelordner, nie den Papierkorb, nie das Ziel.
+
+    Ziel und Wurzel werden einmal aufgeloest und nach unten weitergereicht
+    (Kind = aufgeloester Elternordner / Name) - Verknuepfungen werden nie
+    betreten, also stimmt das. Frueher loeste jeder Ordner das Ziel und sich
+    selbst mehrfach neu auf (rund 50 Plattenzugriffe je Ordner, auf einem
+    Netzlaufwerk je ein Netzweg)."""
+    if ziel_auf is None:
+        ziel_auf = pfade.aufloesen(ziel)
+    if pfad_auf is None:
+        pfad_auf = pfade.aufloesen(pfad)
+    if pfad != wurzel and (loeschen.ist_papierkorb(pfad.name) or scan._liegt_in_aufgeloest(pfad_auf, ziel_auf)):
         return False
     if pfade.archiv_kennung_in(pfad):
         # Ein fotosort-Archiv (auch das Ziel ueber einen zweiten Weg): nie
         # betreten, nie leeren.
         return False
-    if pfade.liegt_in(ziel_auf, pfad):
+    if scan._liegt_in_aufgeloest(ziel_auf, pfad_auf):
         # Das Ziel liegt unterhalb: Dieser Ordner ist nie leer.
         leer_unten = False
     else:
@@ -304,7 +314,8 @@ def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], konf,
             leer = False
             continue
         if k.is_dir(follow_symlinks=False):
-            if not _ordner_leeren(kind, wurzel, ziel, reste, konf, dbank, lauf, e, dry_run, liste, melden):
+            if not _ordner_leeren(kind, wurzel, ziel, reste, konf, dbank, lauf, e, dry_run, liste, melden,
+                                  ziel_auf, pfad_auf / k.name):
                 leer = False
             continue
         if k.name.lower() in reste:

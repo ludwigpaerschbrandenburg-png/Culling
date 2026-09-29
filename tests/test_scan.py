@@ -217,6 +217,9 @@ def test_datei_verknuepfung_ins_ziel_wird_uebersprungen(quelle, ziel, datenbank,
     assert zeile["fehlergrund"] == scan.GRUND_INS_ZIEL
     # Der Pfad der Archivdatei steht nirgends als quellpfad.
     assert datenbank.zeile(archivbild.resolve()) is None
+    # Der Bericht nennt die Datei (frueher nur den ausgeschlossenen Zielordner).
+    from fotosort import bericht
+    assert str(link) in bericht.text(ziel, datenbank)
 
 
 def test_ordner_verknuepfung_ins_ziel_wird_uebersprungen(quelle, ziel, datenbank, konf):

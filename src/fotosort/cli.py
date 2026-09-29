@@ -117,23 +117,37 @@ def exiftool_pruefen(befehl: str, konf, konsole) -> None:
     Befehlen, die Metadaten brauchen.
     """
     gefunden, wo = exiftool_finden(konf)
-    if gefunden and (gefunden in _exiftool_startbar_gemerkt or exiftool_startbar(gefunden)):
-        _exiftool_startbar_gemerkt.add(gefunden)   # je Programmlauf nur einmal starten
+    grund = exiftool_probestart(gefunden) if gefunden else None
+    if gefunden and grund is None:
         return
     if befehl in BRAUCHT_EXIFTOOL:
-        raise FotosortFehler(meldungen.exiftool_fehlt(wo))
+        raise FotosortFehler(meldungen.exiftool_startet_nicht(wo, grund) if gefunden else meldungen.exiftool_fehlt(wo))
     konsole.print(meldungen.exiftool_hinweis(wo))
 
 
-def exiftool_startbar(pfad: str) -> bool:
+def exiftool_probestart(pfad: str) -> str | None:
+    """None, wenn ExifTool startet und antwortet; sonst der Grund in Worten.
+    Ein gelungener Start wird je Programmlauf gemerkt (der Virenscanner
+    haelt ein Programm oft nur beim ersten Start lange fest)."""
+    if pfad in _exiftool_startbar_gemerkt:
+        return None
     try:
         fertig = subprocess.run(
             metadaten.exiftool_befehl(pfad) + ["-ver"], capture_output=True, timeout=20, check=False,
             **prozesse.unsichtbar(),
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return fertig.returncode == 0
+    except subprocess.TimeoutExpired:
+        return "keine Antwort innerhalb von 20 Sekunden"
+    except (OSError, subprocess.SubprocessError) as fehler:
+        return str(getattr(fehler, "strerror", None) or fehler)
+    if fertig.returncode != 0:
+        return f"Rueckgabewert {fertig.returncode}"
+    _exiftool_startbar_gemerkt.add(pfad)
+    return None
+
+
+def exiftool_startbar(pfad: str) -> bool:
+    return exiftool_probestart(pfad) is None
 
 
 # ---------------------------------------------------------------- Archiv ----
@@ -846,19 +860,21 @@ def _start_phase_text(zaehler: dict) -> str:
     return meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
 
 
-def _start_quelle_pruefen(antwort: str, ziel: Path, bekannt_auf: set, quellen: list[str]) -> str | None:
-    """Grund, warum dieser Quellordner nicht genommen wird - oder None."""
+def _start_quelle_pruefen(antwort: str, ziel: Path, bekannt_auf: set, quellen: list[str],
+                          fenster: bool = False) -> str | None:
+    """Grund, warum dieser Quellordner nicht genommen wird - oder None.
+    fenster: die Texte fuer das Fenster (mit Umlauten, ohne "Abbruch")."""
     q = Path(antwort)
     if not q.is_dir():
-        return meldungen.start_quelle_kein_ordner(q)
+        return (meldungen.ob_quelle_kein_ordner if fenster else meldungen.start_quelle_kein_ordner)(q)
     lage = pfade.lage_pruefen(q, ziel) if ziel.exists() else "getrennt"
     if lage == "gleich":
-        return meldungen.quelle_gleich_ziel(pfade.aufloesen(q))
+        return (meldungen.ob_quelle_gleich_ziel if fenster else meldungen.quelle_gleich_ziel)(pfade.aufloesen(q))
     if lage == "quelle_in_ziel":
-        return meldungen.quelle_in_ziel(pfade.aufloesen(q))
+        return (meldungen.ob_quelle_in_ziel if fenster else meldungen.quelle_in_ziel)(pfade.aufloesen(q))
     auf = pfade.aufloesen(q)
     if auf in bekannt_auf or any(pfade.aufloesen(Path(x)) == auf for x in quellen):
-        return meldungen.start_quelle_schon_dabei(auf)
+        return (meldungen.ob_quelle_schon_dabei if fenster else meldungen.start_quelle_schon_dabei)(auf)
     return None
 
 
@@ -1329,7 +1345,17 @@ def _gemeinsam(unter: argparse.ArgumentParser) -> None:
     )
 
 
+def _argparse_deutsch() -> None:
+    """Die festen Texte von argparse ("usage:", "options", "invalid choice" ...)
+    auf Deutsch (meldungen.ARGPARSE). argparse holt sie bei jedem Aufruf ueber
+    die Funktion _ seines Moduls; unbekannte Texte bleiben, wie sie sind."""
+    def uebersetzen(text: str) -> str:
+        return meldungen.ARGPARSE.get(text, text)
+    argparse._ = uebersetzen
+
+
 def parser_bauen() -> argparse.ArgumentParser:
+    _argparse_deutsch()
     eltern = argparse.ArgumentParser(
         prog="fotosort",
         description="Sortiert Fotos und Videos nach Aufnahmedatum und Kamera.",
@@ -1424,7 +1450,8 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--fotos", metavar="ORDNER", help="beim Durchlauf ein Bildschirmfoto je Ansicht in diesen Ordner legen")
     _gemeinsam(p)
 
-    p = unterbefehle.add_parser("arbeit", help="ein Schritt im Auftrag der Oberflaeche (intern)")
+    # Ohne help: intern, erscheint nicht in der Befehlsliste von --help.
+    p = unterbefehle.add_parser("arbeit")
     p.add_argument("--auftrag", metavar="DATEI", required=True, help="JSON-Datei mit dem Auftrag")
     _gemeinsam(p)
 

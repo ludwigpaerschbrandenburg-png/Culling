@@ -345,6 +345,7 @@ class Ablauf:
                     env=_umgebung(), cwd=str(self.ordner), **_losgeloest(),
                 )
             self.lauf = Lauf(schritt, prozess, prozess.pid, jetzt, auftrag)
+            self._stand_gemerkt = None   # der Schritt aendert den Stand
             self._speichern()
             return {"gestartet": schritt, "pid": prozess.pid}
 
@@ -397,7 +398,10 @@ class Ablauf:
                 "schritt": schritt,
                 "schritt_name": self._schritt_name(schritt),
                 "zustand": zustand,
-                "zustand_text": meldungen.OB_ZUSTAND.get(zustand, zustand),
+                # Mit Grund beendet (zu wenig Platz, Archiv belegt ...): nicht
+                # "mit Fehlern durchgelaufen", sondern nicht fertig geworden.
+                "zustand_text": meldungen.OB_ZUSTAND["nicht_fertig"]
+                if zustand == steuerung.ZUSTAND_FEHLER and st.get("hinweis") else meldungen.OB_ZUSTAND.get(zustand, zustand),
                 "dateien": dateien, "gesamt": gesamt, "bytes": bytes_, "gesamt_bytes": gesamt_bytes,
                 "anteil": anteil,
                 "bytes_pro_s": float(st.get("bytes_pro_s") or 0.0),
@@ -409,7 +413,7 @@ class Ablauf:
                 "text": {
                     "dateien": meldungen.anzahl(dateien) + (f" von {meldungen.anzahl(gesamt)}" if gesamt else ""),
                     "bytes": meldungen.groesse(bytes_) + (f" von {meldungen.groesse(gesamt_bytes)}" if gesamt_bytes else ""),
-                    "rate": (f"{float(st.get('bytes_pro_s') or 0.0) / (1024 * 1024):.1f}".replace(".", ",") + " MB/s")
+                    "rate": (meldungen.dezimal(float(st.get('bytes_pro_s') or 0.0) / (1024 * 1024)) + " MB/s")
                     if bytes_ else "",
                     "restzeit": meldungen.ob_restzeit(rest, str(st.get("restzeit_zustand") or "")),
                     "dauer": meldungen.dauer(float(st.get("sekunden") or 0.0)),
@@ -464,12 +468,46 @@ class Ablauf:
         if self.lauf_lebt():
             raise FotosortFehler(meldungen.ob_datenbank_belegt())
 
+    def _stand_kennung(self) -> tuple:
+        """Woran sich erkennen laesst, dass sich an Datenbank und Einstellungen
+        nichts geaendert hat: Groesse und Aenderungszeit der Dateien (jede
+        Schreibung aendert die -wal-Datei)."""
+        try:
+            _ziel, lokal, _im_ziel = self._archiv_orte()
+        except FotosortFehler:
+            return ()
+        kennung: list = [self.ziel, self.config_pfad]
+        for p in (db.datenbank_pfad(lokal), Path(str(db.datenbank_pfad(lokal)) + "-wal"),
+                  Path(self.config_pfad) if self.config_pfad else lokal / config.DATEINAME):
+            try:
+                st = p.stat()
+                kennung.append((st.st_size, st.st_mtime_ns))
+            except OSError:
+                kennung.append(None)
+        return tuple(kennung)
+
     def archiv_lesen(self) -> dict:
-        """Zaehler und Kennzahlen aus dem Archiv - wie der gefuehrte Modus, nur lesend."""
+        """Zaehler und Kennzahlen aus dem Archiv - wie der gefuehrte Modus, nur lesend.
+
+        Nach einem Schritt fragt das Fenster mehrmals kurz hintereinander
+        (Startseite, naechster Schritt); solange sich nichts geaendert hat,
+        wird der Stand nicht noch einmal aus der Datenbank gerechnet - bei
+        einer Million Dateien sind das Sekunden."""
         with self.sperre:
             self._datenbank_frei()
             if not self._archiv_da():
                 raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+            kennung = self._stand_kennung()
+            gemerkt = getattr(self, "_stand_gemerkt", None)
+            if kennung and gemerkt is not None and gemerkt[0] == kennung:
+                return dict(gemerkt[1])
+            stand = self._archiv_lesen_frisch()
+            # Das Oeffnen selbst kann schreiben (Anhebung, Index): danach neu messen.
+            self._stand_gemerkt = (self._stand_kennung(), stand)
+            return dict(stand)
+
+    def _archiv_lesen_frisch(self) -> dict:
+        with self.sperre:
             stille = _StilleKonsole()
             archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
             d = archiv.datenbank
@@ -487,7 +525,7 @@ class Ablauf:
                     "pruefen": d.zu_pruefen_summe(),
                     "aufraeumen": (sum(n for n, _ in loeschbar.values()), sum(b for _, b in loeschbar.values())),
                     "loeschbar_je_quelle": {str(w): (n, b) for w, (n, b) in loeschbar.items()},
-                    "modelle": [(m, o, n) for m, o, n in d.analyse_zusammenfassung()["modelle"] if m],
+                    "modelle": [(m, o, n) for m, o, n in d.modelle_liste() if m],
                     "konf_pfad": archiv.konf_pfad,
                     "phase": meldungen.ob_phase_kurz(niedrigster, sum(zaehler.values()) > 0),
                     "letzter_lauf": dict(letzter) if letzter is not None else None,
@@ -662,7 +700,7 @@ class Ablauf:
             bekannt = self._bekannte_quellen()
             bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
             ziel = Path(self.ziel) if self.ziel else Path(os.devnull)
-            grund = cli._start_quelle_pruefen(pfad, ziel, bekannt_auf, self.quellen)
+            grund = cli._start_quelle_pruefen(pfad, ziel, bekannt_auf, self.quellen, fenster=True)
             if grund is not None:
                 raise FotosortFehler(grund)
             art = quelle_warnung(pfad)
@@ -690,20 +728,20 @@ class Ablauf:
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self.lauf.schritt if self.lauf else ""))
             if not self.ziel:
-                raise FotosortFehler(meldungen.ziel_fehlt())
+                raise FotosortFehler(meldungen.ob_ziel_fehlt())
             ziel = Path(self.ziel)
             archiv_da = self._archiv_da()
             bekannt = self._bekannte_quellen() if archiv_da else []
             if not bekannt and not self.quellen:
                 raise FotosortFehler(meldungen.ob_quelle_noetig())
             if not ziel.exists() and not ziel.parent.is_dir():
-                raise FotosortFehler(meldungen.ziel_eltern_fehlt(ziel, ziel.parent))
+                raise FotosortFehler(meldungen.ob_ziel_eltern_fehlt(ziel, ziel.parent))
             # Erst alles pruefen, was ohne Rueckfrage scheitern kann (Quellen,
             # ExifTool) - damit eine beantwortete Frage nicht noch einmal kommt.
             bekannt_auf = {pfade.aufloesen(Path(b)) for b in bekannt}
             geprueft: list[str] = []
             for q in self.quellen:
-                grund = cli._start_quelle_pruefen(q, ziel, bekannt_auf, geprueft)
+                grund = cli._start_quelle_pruefen(q, ziel, bekannt_auf, geprueft, fenster=True)
                 if grund is not None:
                     raise FotosortFehler(grund)
                 geprueft.append(q)
@@ -715,8 +753,11 @@ class Ablauf:
                 archiv.datenbank.schliessen()
                 konf = archiv.konf
             gefunden, wo = cli.exiftool_finden(konf)
-            if not gefunden or not cli.exiftool_startbar(gefunden):
-                raise FotosortFehler(meldungen.exiftool_fehlt(wo))
+            if not gefunden:
+                raise FotosortFehler(meldungen.ob_exiftool_fehlt(wo))
+            grund = cli.exiftool_probestart(gefunden)
+            if grund is not None:
+                raise FotosortFehler(meldungen.ob_exiftool_startet_nicht(wo, grund))
             # Dann die Rueckfragen.
             if not ziel.exists():
                 if not ziel_anlegen:
@@ -1063,7 +1104,7 @@ class Ablauf:
                     zeilen.append(["Dauer", meldungen.dauer(sek)])
                     b = int(zahlen.get("bytes", 0) or 0)
                     if b and sek > 0:
-                        zeilen.append(["Geschwindigkeit", f"{b / sek / (1024 * 1024):.1f}".replace(".", ",") + " MB/s"])
+                        zeilen.append(["Geschwindigkeit", meldungen.dezimal(b / sek / (1024 * 1024)) + " MB/s"])
                 niedrigster = next((s for s in db.STUFEN if zaehler.get(s, 0) > 0), None)
                 return {
                     "schritt": schritt, "name": self._schritt_name(schritt), "zeilen": zeilen,
@@ -1148,7 +1189,8 @@ class Ablauf:
             letzter = self._letzter_bericht() if art in ("txt", "csv") else {}
             pfad = Path(letzter["txt" if art == "txt" else "csv"]) if letzter.get("txt" if art == "txt" else "csv") else None
             if pfad is None:
-                self._datenbank_frei()
+                if self.lauf_lebt():
+                    raise FotosortFehler(meldungen.ob_bericht_erst_danach())
                 stille = _StilleKonsole()
                 archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
                 try:

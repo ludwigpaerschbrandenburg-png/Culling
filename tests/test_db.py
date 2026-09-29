@@ -633,3 +633,107 @@ def test_dieselbe_datei_ueber_zwei_einhaengungen():
     kopie = S(st_dev=2, st_ino=999, st_size=10, st_mtime_ns=5, st_ctime_ns=7)
     assert loeschen.dieselbe_datei(Path("/mnt/a/x"), Path("/mnt/b/x"), a, b) is True
     assert loeschen.dieselbe_datei(Path("/mnt/a/x"), Path("/mnt/b/x"), a, kopie) is False
+
+
+# ------------------------------------------ Abfrageplaene (Tempo) --------
+
+
+def _plan(d: db.Datenbank, sql: str, werte: tuple) -> str:
+    return " | ".join(z[3] for z in d.verbindung.execute("EXPLAIN QUERY PLAN " + sql, werte))
+
+
+def test_seitenabfragen_nutzen_einen_index_ohne_neu_zu_sortieren(tmp_path):
+    """Pruefen, Aufraeumen und Analyse holen ihre Zeilen seitenweise. Ohne
+    passenden Index las jede Seite die ganze Restmenge und sortierte neu - der
+    Aufwand wuchs quadratisch (500.000 Dateien: Pruefen 49 s nur fuer Abfragen)."""
+    d = db.Datenbank.oeffnen(tmp_path / "a")
+    try:
+        abfragen = {
+            "zu_pruefen": (f"SELECT * FROM dateien WHERE {d.ZU_PRUEFEN_SQL} AND (zielpfad, quellpfad) > (?, ?)"
+                           " ORDER BY zielpfad, quellpfad LIMIT ?", ("", "", 10)),
+            "zu_loeschen": (f"SELECT * FROM dateien WHERE quellwurzel = ? AND {d.ZU_LOESCHEN_SQL} AND quellpfad > ?"
+                            " ORDER BY quellpfad LIMIT ?", ("/q", "", 10)),
+            "zu_analysieren": ("SELECT quellpfad FROM dateien WHERE status = 'gefunden'"
+                               f" AND dateityp IN {d.ECHTE_TYPEN_SQL} AND quellpfad > ? ORDER BY quellpfad LIMIT ?", ("", 10)),
+            "ereignisse": ("SELECT rowid, * FROM lauf_ereignisse WHERE 1 AND art = ? ORDER BY lauf_nummer, rowid", ("x",)),
+        }
+        for name, (sql, werte) in abfragen.items():
+            plan = _plan(d, sql, werte)
+            assert "TEMP B-TREE" not in plan, (name, plan)
+            assert "USING INDEX" in plan or "USING COVERING INDEX" in plan, (name, plan)
+            assert "MULTI-INDEX OR" not in plan, (name, plan)
+    finally:
+        d.schliessen()
+
+
+def test_ordner_inhalt_holt_nur_direkte_kinder_aus_der_datenbank(tmp_path, monkeypatch):
+    """Eine lose Datei neben einem grossen Unterbaum: Frueher kam der ganze
+    Unterbaum nach Python (300.000 Zeilen, 207 MB), um eine Zeile zu finden."""
+    import os
+    t = os.sep
+    d = db.Datenbank.oeffnen(tmp_path / "a")
+    try:
+        lauf = d.lauf_beginnen("test")
+        w = f"{t}q"
+        d.datei_gesehen(f"{w}{t}A{t}lose.jpg", w, 1, 1.0, "foto", lauf)
+        for i in range(50):
+            d.datei_gesehen(f"{w}{t}A{t}2019{t}{i}.jpg", w, 1, 1.0, "foto", lauf)
+        d.stapel_schreiben()
+        gelesen = []
+        echt = d.verbindung
+
+        class Zaehler:
+            def execute(self, sql, werte=()):
+                cur = echt.execute(sql, werte)
+                zeilen = cur.fetchall()
+                gelesen.append(len(zeilen))
+                return _Liste(zeilen)
+
+            def __getattr__(self, name):
+                return getattr(echt, name)
+
+        class _Liste(list):
+            def fetchall(self):
+                return list(self)
+
+        d.verbindung = Zaehler()
+        try:
+            zeilen = d.ordner_inhalt(f"{w}{t}A", t)
+        finally:
+            d.verbindung = echt
+        assert [z["quellpfad"] for z in zeilen] == [f"{w}{t}A{t}lose.jpg"]
+        assert gelesen == [1]
+    finally:
+        d.schliessen()
+
+
+def test_sicherung_entsteht_lokal_und_wird_am_stueck_ins_ziel_kopiert(tmp_path, monkeypatch):
+    """Frueher schrieb SQLite die Sicherung Seite fuer Seite (4 KiB je Aufruf)
+    direkt ins Ziel - auf einem Netzlaufwerk Zehntausende Netzwege, und eine
+    SQLite-Datei in Arbeit auf dem Netzlaufwerk (SPEC §6: nie). Jetzt entsteht
+    sie lokal und wird als fertige Datei kopiert."""
+    d = db.Datenbank.oeffnen(tmp_path / "a")
+    try:
+        lauf = d.lauf_beginnen("test")
+        d.datei_gesehen("/q/a.jpg", "/q", 1, 1.0, "foto", lauf)
+        ziel = tmp_path / "Ziel"
+        ziel.mkdir()
+        geoeffnet = []
+        echt = sqlite3.connect
+        monkeypatch.setattr(db.sqlite3, "connect", lambda pfad, *a, **k: geoeffnet.append(str(pfad)) or echt(pfad, *a, **k))
+        d.sichern_nach(ziel)
+        d.sichern_nach(ziel)
+        assert geoeffnet and not [p for p in geoeffnet if str(ziel) in p]
+        monkeypatch.setattr(db.sqlite3, "connect", echt)
+        assert db.sicherung_pfad(ziel).is_file() and db.sicherung_vorher_pfad(ziel).is_file()
+        con = sqlite3.connect(db.sicherung_pfad(ziel))
+        try:
+            assert con.execute("SELECT quellpfad FROM dateien").fetchall() == [("/q/a.jpg",)]
+            assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            con.close()
+        # Nichts Halbes bleibt liegen, weder lokal noch im Ziel.
+        assert not list((tmp_path / "a").glob("*sicherung*"))
+        assert not list((ziel / db.ARCHIV_UNTERORDNER).glob("*.neu"))
+    finally:
+        d.schliessen()

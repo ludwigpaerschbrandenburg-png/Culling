@@ -17,6 +17,7 @@ jeder Ansicht - fuer die CI (offscreen) und fuer docs/oberflaeche/.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -458,9 +459,14 @@ class StartSeite(QWidget):
             self.archiv_text.setText("Noch kein Zielordner gewählt.")
             return
         if not archiv.get("da"):
+            if archiv.get("ziel_existiert") is False:
+                # Meist eine nicht angeschlossene Platte oder ein umbenannter
+                # Ordner - kein neues Archiv (SPEC §8, --ziel-anlegen).
+                self.karte.kicker.setText("ZIELORDNER NICHT GEFUNDEN")
+                self.archiv_text.setText(meldungen.ob_ziel_nicht_gefunden())
+                return
             self.karte.kicker.setText("NEUES ARCHIV")
-            self.archiv_text.setText("Ordner wird bei „Los geht's“ nach Rückfrage angelegt." if archiv.get("ziel_existiert") is False
-                                     else "Ordner ist da · noch kein Archiv darin.")
+            self.archiv_text.setText("Ordner ist da · noch kein Archiv darin.")
             return
         self.karte.kicker.setText("ANGEFANGENES ARCHIV")
         if archiv.get("laeuft"):
@@ -625,7 +631,7 @@ class HauptSeite(QWidget):
             w.setTextFormat(Qt.TextFormat.RichText)
             w.setText(f'<span style="color:{stil.TEXT}">{t["rate"].replace(" MB/s", "")}</span> MB/s')
             self.kennzahlen.addWidget(w)
-        if t.get("restzeit"):
+        if t.get("restzeit") and l.get("zustand") not in ENDE:
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
             w.setText(f'Rest <span style="color:{stil.TEXT}">{t["restzeit"]}</span>')
@@ -677,7 +683,7 @@ class ListenSeite(QWidget):
         info = LISTEN[art]
         self.titel.setText(info[0])
         self.gesamt.setText(f'{l["gesamt_text"]} {"Eintrag" if l["gesamt"] == 1 else "Einträge"} · 100 je Seite')
-        self.stand.setText(f'{l["seite"]} / {l["seiten"]}')
+        self.stand.setText(f'{meldungen.anzahl(l["seite"])} / {meldungen.anzahl(l["seiten"])}')
         self.zurueck.setEnabled(l["seite"] > 1)
         self.vor.setEnabled(l["seite"] < l["seiten"])
         t = self.tabelle
@@ -722,6 +728,17 @@ def _leeren(lay) -> None:
 # ------------------------------------------------------------ Hauptfenster --
 
 
+def fenstermasse(breite: int, hoehe: int) -> tuple[int, int, int, int]:
+    """(Breite, Hoehe, Mindestbreite, Mindesthoehe) fuer die verfuegbare
+    Bildschirmflaeche. Vorgabe 1180x800, Mindestens 1040x700 (SPEC §8) - auf
+    einem kleineren Bildschirm (Laptop mit 150 % Skalierung: etwa 1280x672)
+    passt sich beides an, sonst laegen die Knoepfe unter der Bildschirmkante.
+    Der Inhalt laesst sich scrollen."""
+    b = min(1180, int(breite * 0.95))
+    h = min(800, int(hoehe * 0.92))
+    return b, h, min(1040, b), min(700, h)
+
+
 class Hauptfenster(QMainWindow):
     def __init__(self, ab: ablauf_modul.Ablauf, konsole=None) -> None:
         super().__init__()
@@ -739,8 +756,14 @@ class Hauptfenster(QMainWindow):
         self.gezeigt = False
 
         self.setWindowTitle("fotosort")
-        self.setMinimumSize(1040, 700)
-        self.resize(1180, 800)
+        bildschirm = QApplication.primaryScreen()
+        flaeche = bildschirm.availableGeometry() if bildschirm is not None else None
+        b, h, mb, mh = fenstermasse(flaeche.width(), flaeche.height()) if flaeche is not None else (1180, 800, 1040, 700)
+        self.setMinimumSize(mb, mh)
+        self.resize(b, h)
+        if flaeche is not None:
+            self.move(flaeche.x() + max(0, (flaeche.width() - b) // 2), flaeche.y() + max(0, (flaeche.height() - h) // 2))
+        self._gesperrt = False
         self.setWindowIcon(stil.programm_symbol())
 
         inhalt = QWidget()
@@ -865,6 +888,32 @@ class Hauptfenster(QMainWindow):
         klasse_setzen(self.meldung_label, "hell" if gut else "titel")
         self.meldung_label.show()
         self.scroll.verticalScrollBar().setValue(0)
+
+    @contextlib.contextmanager
+    def beschaeftigt(self):
+        """Fuer Arbeiten, die im Fenster selbst laufen und dauern koennen
+        (ExifTool-Probestart bis 20 s, Bericht schreiben, Datenbank lesen):
+        Wartezeiger und gesperrte Knoepfe, damit Klicks nicht auflaufen."""
+        knoepfe = [self.aktionen.itemAt(i).widget() for i in range(self.aktionen.count())]
+        knoepfe = [(k, k.isEnabled()) for k in knoepfe if isinstance(k, QPushButton)]
+        for k, _ in knoepfe:
+            k.setEnabled(False)
+        self._gesperrt = True
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            yield
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._gesperrt = False
+            for k, an in knoepfe:
+                try:
+                    k.setEnabled(an)
+                except RuntimeError:
+                    pass   # inzwischen ersetzt
+
+    def aktionen_gesperrt(self) -> bool:
+        return self._gesperrt
 
     def _versuchen(self, fn, *args):
         """Fehler des Kerns (FotosortFehler) als Meldung, nie als Absturz."""
@@ -996,7 +1045,8 @@ class Hauptfenster(QMainWindow):
             self.zustand["profil"] = a["profil"]
 
     def los(self, ziel_anlegen: bool, ziel_trotzdem: bool = False) -> None:
-        a = self._versuchen(self.ab.los, ziel_anlegen, ziel_trotzdem)
+        with self.beschaeftigt():
+            a = self._versuchen(self.ab.los, ziel_anlegen, ziel_trotzdem)
         if a is None:
             return
         if a.get("frage") == "ziel_anlegen":
@@ -1023,7 +1073,8 @@ class Hauptfenster(QMainWindow):
             ja, _ = frage(self, "Datenbank zurückholen?", a["text"], ja="Zurückholen", nein="Nicht jetzt")
             if not ja:
                 return
-            a = self._versuchen(self.ab.archiv_wiederherstellen, True)
+            with self.beschaeftigt():
+                a = self._versuchen(self.ab.archiv_wiederherstellen, True)
             if a is None:
                 return
             self.laden("start")
@@ -1055,6 +1106,10 @@ class Hauptfenster(QMainWindow):
             return
         a = self._versuchen(self.ab.archiv_verwerfen, wort)
         if a is None:
+            return
+        if a.get("frage"):
+            # Leeres Wort: wie ein falsches, nie als Erfolg melden.
+            self.meldung(meldungen.ob_wort_falsch(a.get("wort") or meldungen.BESTAETIGUNGSWORT["verwerfen"]))
             return
         self.laden("start")
         self.meldung(a.get("text", ""), gut=True)
@@ -1119,6 +1174,9 @@ class Hauptfenster(QMainWindow):
         if l.get("log"):
             self.haupt.log.setPlainText(l["log"])
             self.haupt.log.show()
+        if l.get("zustand") == "fehler" and l.get("hinweis"):
+            # Der Grund (zu wenig Platz, Archiv belegt ...) gross, nicht nur im Protokoll.
+            self.meldung(l["hinweis"])
 
     def lauf_aktionen(self, l: dict) -> None:
         eintraege = [((self.kurzname(self.letzter_schritt) + " läuft …") if self.letzter_schritt else "läuft …", "primary", None, False)]
@@ -1152,6 +1210,10 @@ class Hauptfenster(QMainWindow):
         self.lauf_abfragen()
 
     def ruhe_zeigen(self, l: dict | None = None) -> None:
+        with self.beschaeftigt():
+            self._ruhe_zeigen(l)
+
+    def _ruhe_zeigen(self, l: dict | None = None) -> None:
         self.haupt.karten_sperren(True)
         z = self._versuchen(self.ab.zustand)
         if z is None:
@@ -1219,9 +1281,9 @@ class Hauptfenster(QMainWindow):
         else:
             eintraege.append(("Bericht öffnen", "primary", lambda: self.bericht_oeffnen("neu"), True))
         if zf.get("fehler"):
-            eintraege.append((f'Fehler {zf["fehler"]}', "ghost", lambda: self.liste_zeigen("fehler", 1), True))
+            eintraege.append((f'Fehler {meldungen.anzahl(zf["fehler"])}', "ghost", lambda: self.liste_zeigen("fehler", 1), True))
         if zf.get("duplikate"):
-            eintraege.append((f'Duplikate {zf["duplikate"]}', "ghost", lambda: self.liste_zeigen("duplikate", 1), True))
+            eintraege.append((f'Duplikate {meldungen.anzahl(zf["duplikate"])}', "ghost", lambda: self.liste_zeigen("duplikate", 1), True))
         eintraege.append(("Ohne Datum", "ghost", lambda: self.liste_zeigen("ohne_datum", 1), True))
         eintraege.append(("Archiv neu einlesen…", "ghost", self.neuaufbau, True))
         eintraege.append(("Einstellungen", "secondary", self.einstellungen_oeffnen, True))
@@ -1237,7 +1299,8 @@ class Hauptfenster(QMainWindow):
         if not n.get("wort"):
             self.schritt_starten("kopieren")
             return
-        ja, wort = frage(self, "Verschieben bestätigen", f'{n["text"]} Zum Bestätigen „{n["wort"]}“ tippen:', eingabe=True, ja="Verschieben")
+        text = n["text"] if f'„{n["wort"]}“' in n["text"] else f'{n["text"]} Zum Bestätigen „{n["wort"]}“ tippen:'
+        ja, wort = frage(self, "Verschieben bestätigen", text, eingabe=True, ja="Verschieben")
         if ja:
             self.schritt_starten("kopieren", wort=wort)
 
@@ -1279,7 +1342,7 @@ class Hauptfenster(QMainWindow):
         zeile = QHBoxLayout()
         zeile.addWidget(knopf("Ordnernamen übernehmen", "ghost", self.aliase_senden))
         if ohne:
-            zeile.addWidget(label(f"ohne Modell: {ohne} → Ordner „Unbekannt“", "hinweis"))
+            zeile.addWidget(label(f"ohne Modell: {meldungen.anzahl(ohne)} → Ordner „Unbekannt“", "hinweis"))
         zeile.addStretch(1)
         h.kameras_lay.addLayout(zeile)
         h.kameras.show()
@@ -1329,7 +1392,8 @@ class Hauptfenster(QMainWindow):
     # -- Bericht, Einstellungen, Listen -----------------------------------------------------
 
     def bericht_oeffnen(self, art: str) -> None:
-        a = self._versuchen(self.ab.bericht_oeffnen, art)
+        with self.beschaeftigt():
+            a = self._versuchen(self.ab.bericht_oeffnen, art)
         if a is None:
             return
         self.meldung(a.get("text", ""), True)

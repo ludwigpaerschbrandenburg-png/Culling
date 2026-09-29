@@ -36,7 +36,11 @@ def test_fenster_baut_sich_auf_und_schreibt_marker(app, tmp_path):
     f = desktop.Hauptfenster(ab)
     f.show()
     _ereignisse(app, 0.3)
-    assert f.minimumWidth() == 1040 and f.minimumHeight() == 700
+    # SPEC §8: 1040x700 - auf einem kleineren Bildschirm (offscreen: 800x800) angepasst.
+    flaeche = app.primaryScreen().availableGeometry()
+    _b, _h, mb, mh = desktop.fenstermasse(flaeche.width(), flaeche.height())
+    assert (f.minimumWidth(), f.minimumHeight()) == (mb, mh)
+    assert f.width() <= flaeche.width() and f.height() <= flaeche.height()
     assert f.windowTitle() == "fotosort" and not f.windowIcon().isNull()
     assert f.ansicht == "start" and f.primaer() is not None and f.primaer().text() == "Los geht's"
     marker = tmp_path / "ob" / desktop.MARKER
@@ -288,4 +292,134 @@ def test_durchlauf_laeuft_nur_am_testbaum(app, tmp_path, quelle, ziel, capsys):
     assert (fremd / "IMG_0001.JPG").exists() and ab.lauf is None
     # Der Testbaum selbst traegt die Marke.
     assert (Path(quelle).parent / desktop.TESTBAUM_MARKE).is_file()
+    f.close()
+
+
+# --------------------------------------- Befunde "Fehlersuche Bedienung" --
+
+
+def _kennzahl_texte(f) -> list[str]:
+    texte = []
+    for i in range(f.haupt.kennzahlen.count()):
+        w = f.haupt.kennzahlen.itemAt(i).widget()
+        if w is not None:
+            texte.append(w.text())
+    return texte
+
+
+def _aktion_texte(f) -> list[str]:
+    return [f.aktionen.itemAt(i).widget().text() for i in range(f.aktionen.count())
+            if f.aktionen.itemAt(i).widget() is not None]
+
+
+def test_restzeit_steht_nach_dem_ende_nicht_mehr_da(app, tmp_path):
+    """Frueher stand "Rest wird berechnet" neben "Fertig" und "Rest 7 min" neben
+    "Abgebrochen" - bis zum naechsten Lauf."""
+    from fotosort import steuerung
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    for zustand in (steuerung.ZUSTAND_FERTIG, steuerung.ZUSTAND_ABGEBROCHEN):
+        st = steuerung.Steuerung(ab.status_datei, ab.steuer_datei, "kopieren")
+        st.melden(21, 21, 7900, 7900)
+        st.beenden(zustand, 0)
+        l = ab.lauf_status()
+        assert l["restzeit_s"] is None and l["text"]["restzeit"] == ""
+        f.haupt.kennzahlen_setzen(l)
+        assert not [t for t in _kennzahl_texte(f) if t.startswith("Rest")]
+        # Auch ein alter Stand mit Restzeit zeigt sie nach dem Ende nicht.
+        l["text"]["restzeit"] = "7 min"
+        f.haupt.kennzahlen_setzen(l)
+        assert not [t for t in _kennzahl_texte(f) if t.startswith("Rest")]
+    f.close()
+
+
+def test_nicht_ausgefuehrter_schritt_nennt_den_grund(app, tmp_path):
+    """Scheitert ein Schritt vor dem Anfangen (zu wenig Platz), hiess es "Beendet,
+    aber mit Fehlern" - der Grund stand nur im grauen Protokollkasten."""
+    from fotosort import steuerung
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    st = steuerung.Steuerung(ab.status_datei, ab.steuer_datei, "kopieren")
+    st.beenden(steuerung.ZUSTAND_FEHLER, 1, meldungen.zu_wenig_platz(tmp_path, 10 ** 9, 10 ** 6))
+    l = ab.lauf_status()
+    assert "Beendet" not in l["zustand_text"] and "nicht" in l["zustand_text"].lower()
+    f.lauf_fuellen(l)
+    assert "Beendet" not in f.haupt.aktuell.text()
+    assert "wenig Platz" in f.meldung_label.text()
+    f.close()
+
+
+def test_fehlender_gemerkter_zielordner_ist_kein_neues_archiv(app, tmp_path, monkeypatch):
+    """Platte nicht angeschlossen oder Ordner umbenannt: frueher "NEUES ARCHIV"
+    und eine Anlegen-Frage ohne Warnung vor einem zweiten, leeren Archiv."""
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    weg = tmp_path / "Archiv auf der USB-Platte"
+    f.start.ziel_setzen(str(weg))
+    assert f.start.karte.kicker.text() == "ZIELORDNER NICHT GEFUNDEN"
+    assert "angeschlossen" in f.start.archiv_text.text()
+    assert "angeschlossen" in meldungen.ob_frage_ziel_anlegen(weg)
+    f.close()
+
+
+def test_verwerfen_mit_leerem_wort_ist_keine_erfolgsmeldung(app, tmp_path, quelle, ziel, monkeypatch):
+    antworten = [(True, "")]
+    monkeypatch.setattr(desktop, "frage", lambda *a, **k: antworten.pop(0))
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.start.ziel_setzen(str(ziel))
+    f.archiv_verwerfen()
+    assert f.meldung_label.text() == meldungen.ob_wort_falsch(meldungen.BESTAETIGUNGSWORT["verwerfen"])
+    assert f.meldung_label.property("klasse") != "hell"
+    assert (ziel / ".fotosortierer" / "archiv-id.txt").is_file()
+    f.close()
+
+
+def test_zahlen_im_fenster_mit_tausenderpunkt(app, tmp_path):
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.zustand = {"verschieben": False}
+    f.ruhe_aktionen({"schritt": "fertig"}, {"fehler": 12345, "duplikate": 2000})
+    texte = _aktion_texte(f)
+    assert "Fehler 12.345" in texte and "Duplikate 2.000" in texte
+    assert meldungen.dezimal(1234.5) == "1.234,5"
+    assert meldungen.groesse(1023.5 * 1024 * 1024) == "1.023,5 MB"
+    f.close()
+
+
+def test_startgroesse_passt_auf_kleine_bildschirme():
+    """1920x1080 mit 150 % Skalierung laesst etwa 1280x672 - "Los geht's" lag
+    frueher unter der Bildschirmkante."""
+    b, h, mb, mh = desktop.fenstermasse(1280, 672)
+    assert b <= 1280 and h <= 672 and mb <= b and mh <= h
+    assert desktop.fenstermasse(2560, 1400) == (1180, 800, 1040, 700)   # grosse Bildschirme wie bisher
+
+
+def test_lange_arbeit_zeigt_den_wartezeiger(app, tmp_path, monkeypatch):
+    """Probestart von ExifTool (bis 20 s) lief ohne jede Rueckmeldung; Windows
+    meldet dann "Keine Rueckmeldung". Jetzt: Wartezeiger und gesperrte Knoepfe."""
+    gesehen = []
+
+    def langsam(*a, **k):
+        gesehen.append((QApplication.overrideCursor() is not None, f.aktionen_gesperrt()))
+        return {"frage": None}
+
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    monkeypatch.setattr(ab, "los", langsam)
+    f.los(False)
+    assert gesehen == [(True, True)]
+    assert QApplication.overrideCursor() is None and not f.aktionen_gesperrt()
+    f.close()
+
+
+def test_verschieben_bestaetigung_nennt_die_anweisung_nur_einmal(app, tmp_path, monkeypatch):
+    texte = []
+    monkeypatch.setattr(desktop, "frage", lambda _e, _t, text, **k: texte.append(text) or (False, ""))
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    n = {"schritt": "kopieren", "wort": "verschieben", "text": meldungen.ob_kopieren_text(3, 3000, True)}
+    f.kopieren_starten(n)
+    assert texte and texte[0].count("verschieben“") <= 1 and "Zum Bestätigen „verschieben“ tippen" not in texte[0]
     f.close()

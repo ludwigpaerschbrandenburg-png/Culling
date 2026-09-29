@@ -205,7 +205,7 @@ def test_abbruch_und_fortsetzen_ergeben_dasselbe(vorbereitet, ziel, konf, monkey
     dbank, lauf, _ = vorbereitet
     # Kleine Seiten, Abbruch nach der ersten
     monkeypatch.setattr(analyse, "SEITE", 4)
-    original = analyse._seite_bearbeiten
+    original = analyse._seite_abschliessen
     aufrufe = []
 
     def unterbrechen(*args, **kwargs):
@@ -214,13 +214,13 @@ def test_abbruch_und_fortsetzen_ergeben_dasselbe(vorbereitet, ziel, konf, monkey
             raise KeyboardInterrupt
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(analyse, "_seite_bearbeiten", unterbrechen)
+    monkeypatch.setattr(analyse, "_seite_abschliessen", unterbrechen)
     e1 = _analyse(dbank, lauf, ziel, konf)
     assert e1.abgebrochen and 0 < e1.bearbeitet
     teil = dbank.zaehler_je_status()
     assert teil.get("gefunden", 0) > 0 and teil.get("analysiert", 0) > 0
 
-    monkeypatch.setattr(analyse, "_seite_bearbeiten", original)
+    monkeypatch.setattr(analyse, "_seite_abschliessen", original)
     e2 = _analyse(dbank, lauf, ziel, konf)
     assert not e2.abgebrochen and dbank.zaehler_je_status().get("gefunden", 0) == 0
     fortgesetzt = {z["quellpfad"]: (z["status"], z["aufnahme_zeit"], z["kamera"], z["zielpfad"], z["gruppe"])
@@ -349,8 +349,13 @@ def test_nicht_utf8_dateiname_bekommt_sichtbaren_fehler(vorbereitet, ziel, konf,
     assert any("UTF-8" in z[0] for z in fehler) and e.fehler == 1
 
 
-def test_ordner_mit_unterordnern_liest_jede_datei_genau_einmal(ziel, archiv_basis, konf, tmp_path, monkeypatch):
+@pytest.mark.parametrize("seite", [5000, 2, 1])
+def test_ordner_mit_unterordnern_liest_jede_datei_genau_einmal(ziel, archiv_basis, konf, tmp_path, monkeypatch, seite):
+    """Auch mit kleinen Seiten: Ein Ordner, der ueber die Seitengrenze reicht,
+    wird nur einmal gelesen (die naechste Seite laeuft schon, waehrend die
+    vorige geschrieben wird)."""
     from fotosort import metadaten
+    monkeypatch.setattr(analyse, "SEITE", seite)
 
     quelle = tmp_path / "q"
     (quelle / "o" / "b").mkdir(parents=True)
