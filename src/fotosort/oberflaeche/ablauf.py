@@ -264,6 +264,8 @@ class Ablauf:
         # Quellen vorgeschlagen, bis der Nutzer es selbst waehlt.
         self.profil_von_hand = False
         self.profil_erkannt = ""
+        self._konf_profil = ""                                   # ausdruecklich in der config.toml des Archivs
+        self._arten: dict[str, tuple[str | None, float]] = {}   # Pfad -> (Laufwerksart, wann gefragt)
         self.fenster = False      # True, wenn ein pywebview-Fenster den Ordnerdialog anbieten kann
         self._laden()
 
@@ -277,7 +279,11 @@ class Ablauf:
         self.verschieben = bool(alt.get("verschieben", False))
         profil = str(alt.get("profil") or "hdd")
         self.profil = profil if profil in kopieren.PROFILE else "hdd"
-        self.profil_von_hand = bool(alt.get("profil_von_hand", False))
+        if "profil_von_hand" in alt:
+            self.profil_von_hand = bool(alt["profil_von_hand"])
+        else:
+            # Zustand aus v0.7: "hdd" war der Standard, alles andere eine eigene Wahl.
+            self.profil_von_hand = self.profil != "hdd"
         # Laeuft von einem frueheren Fenster noch ein Schritt? Dann uebernehmen
         # (SPEC Abschnitt 8: Fenster schliessen beeinflusst den Lauf nicht).
         st = steuerung.json_lesen(self.status_datei) or {}
@@ -718,25 +724,45 @@ class Ablauf:
 
     # -- Startseite --------------------------------------------------------
 
+    def _laufwerksart(self, pfad: str, quelle: bool) -> str | None:
+        """Art des Laufwerks, je Pfad nur einmal gefragt: Ein nicht erreichbares
+        Netzlaufwerk kostet bei jeder Frage eine Wartezeit. None: eine Quelle,
+        die gerade nicht da ist - sie zaehlt nicht mit (nach einer Minute wird
+        wieder gefragt, sie koennte inzwischen eingesteckt sein). Ein Ziel, das
+        es noch nicht gibt, zaehlt mit: Es entsteht auf dem Laufwerk darueber."""
+        alt = self._arten.get(pfad)
+        if alt is not None and (alt[0] is not None or time.monotonic() - alt[1] < 60):
+            return alt[0]
+        if quelle and not os.path.isdir(pfade.lang(Path(pfad))):
+            art = None
+        else:
+            art = pfade.laufwerksart(Path(pfad))
+        self._arten[pfad] = (art, time.monotonic())
+        return art
+
     def _profil_vorschlagen(self, bekannt: list[str] | None = None) -> None:
         """Profil aus der Art der Laufwerke von Ziel und Quellen vorschlagen
         (SPEC §8 seit v0.8) - nur, solange der Nutzer nicht selbst gewaehlt hat.
-        Erkannt wird bei jeder Aenderung von Ziel oder Quellen neu."""
+        Steht in der config.toml des Archivs ausdruecklich "ssd" oder
+        "netzwerk", gilt das als seine Wahl."""
         if self.profil_von_hand:
             self.profil_erkannt = ""
             return
-        quellen = list(dict.fromkeys((bekannt or []) + self.quellen))
-        wege = ([self.ziel] if self.ziel and os.path.isdir(pfade.lang(Path(self.ziel))) else []) + [
-            q for q in quellen if os.path.isdir(pfade.lang(Path(q)))]
-        if not wege:
+        if self._konf_profil:
+            self.profil = self._konf_profil
+            self.profil_erkannt = meldungen.ob_profil_aus_einstellungen(self._konf_profil)
+            return
+        ziel_art = self._laufwerksart(self.ziel, quelle=False) if self.ziel else None
+        quellen = []
+        for q in dict.fromkeys((bekannt or []) + self.quellen):
+            art = self._laufwerksart(q, quelle=True)
+            if art is not None:
+                quellen.append((q, art))
+        if ziel_art is None and not quellen:
             self.profil_erkannt = ""
             return
-        profil, details = kopieren.profil_erkennen(wege)
-        arten = dict(details)
-        ziel_art = arten.get(str(self.ziel)) if wege[0] == self.ziel else None
-        self.profil = profil
-        self.profil_erkannt = meldungen.ob_profil_erkannt(
-            profil, ziel_art, [(q, arten[str(q)]) for q in wege if q != self.ziel])
+        self.profil = kopieren.profil_aus_arten(([ziel_art] if ziel_art is not None else []) + [a for _q, a in quellen])
+        self.profil_erkannt = meldungen.ob_profil_erkannt(self.profil, ziel_art, quellen)
 
     def _profil_antwort(self) -> dict:
         return {"profil": self.profil, "profil_erkannt": self.profil_erkannt, "profil_von_hand": self.profil_von_hand}
@@ -744,9 +770,12 @@ class Ablauf:
     def ziel_setzen(self, ziel: str) -> dict:
         with self.sperre:
             self.ziel = _fest(ziel)
-            self._profil_vorschlagen(self._bekannte_quellen())
+            info = self.archiv_info()
+            konf_profil = str(info.get("profil") or "")
+            self._konf_profil = konf_profil if konf_profil in ("ssd", "netzwerk") else ""
+            self._profil_vorschlagen([str(q) for q in info.get("quellen") or []])
             self._speichern()
-            return {"ziel": self.ziel, "archiv": self.archiv_info(), **self._profil_antwort()}
+            return {"ziel": self.ziel, "archiv": info, **self._profil_antwort()}
 
     def einstellungen_setzen(self, verschieben: bool | None = None, profil: str | None = None) -> dict:
         with self.sperre:
@@ -970,7 +999,7 @@ class Ablauf:
                 raise FotosortFehler(meldungen.ob_verwerfen_unvollstaendig(fehler))
             # Startseite leer: kein Ziel, keine Quellen, kein alter Lauf.
             self.ziel, self.quellen, self.verschieben, self.profil, self.lauf = "", [], False, "hdd", None
-            self.profil_von_hand, self.profil_erkannt = False, ""
+            self.profil_von_hand, self.profil_erkannt, self._konf_profil = False, "", ""
             for datei in (self.status_datei, self.steuer_datei, self.auftrag_datei):
                 try:
                     datei.unlink()

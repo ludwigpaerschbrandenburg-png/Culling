@@ -894,6 +894,7 @@ class Hauptfenster(QMainWindow):
             self.reiter_stapel.setCurrentWidget(self.sichten)
             self.sichten.raster.setFocus()
         else:
+            self.sichten.pausieren()
             self.reiter_stapel.setCurrentWidget(self.archiv_reiter)
 
     def _marker_schreiben(self, sichtbar: bool) -> None:

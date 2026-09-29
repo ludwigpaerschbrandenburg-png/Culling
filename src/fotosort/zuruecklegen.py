@@ -11,9 +11,11 @@ Was nie geschieht:
   - Die Datei im Ordner _geloescht_ wird nie geloescht. Zurueck geht sie nur
     durch dasselbe nicht ueberschreibende Umbenennen wie ueberall (§5). Kann
     das Dateisystem das nicht (exFAT), wird an den alten Ort kopiert, die Kopie
-    zurueckgelesen - und das Original bleibt im Ordner liegen: Es steht im
-    Status quelle_geloescht, und aus diesem Status darf nie geloescht werden
-    (CLAUDE.md). Der Nutzer loescht den Ordner dann selbst.
+    zurueckgelesen - und das Original bleibt im Ordner liegen. Seine Zeile
+    gehoert dann der Kopie am alten Ort (Status gefunden); fuer die Datei im
+    Ordner _geloescht_ gibt es keine Zeile mehr, und das Programm fasst sie nie
+    an: Der Scan ueberspringt den Ordner, geloescht wird nur, was in der
+    Datenbank steht. Der Nutzer loescht den Ordner selbst (das Programm sagt es).
   - Dateien im Ordner ohne passende Zeile bleiben unberuehrt.
 
 Die zurueckgelegte Zeile geht auf "gefunden" (Groesse und Aenderungsdatum
@@ -180,21 +182,29 @@ def _fehler(quellpfad, ort: Path, grund: str, dbank, lauf, e: Ergebnis) -> None:
     dbank.ereignis(lauf, ART_FEHLER, quellpfad, 1, grund)
 
 
+def _verknuepfung(pfad: Path) -> bool:
+    try:
+        return pfad.is_symlink() or bool(getattr(os.path, "isjunction", lambda _p: False)(pfad))
+    except OSError:
+        return True
+
+
 def _leere_ordner_entfernen(korb: Path, e: Ergebnis) -> None:
     """Leer gewordene Ordner im Ordner _geloescht_ entfernen, von unten nach
-    oben; nur Ordner (rmdir scheitert an allem, was nicht leer ist)."""
-    if not pfade.lang(korb).is_dir() or pfade.lang(korb).is_symlink():
+    oben; nur Ordner (rmdir scheitert an allem, was nicht leer ist). Hinter
+    eine Verknuepfung (auch eine Windows-Junction) geht es nie."""
+    if not pfade.lang(korb).is_dir() or _verknuepfung(pfade.lang(korb)):
         return
-    for oben, ordner, _dateien in os.walk(pfade.lang(korb), topdown=False):
-        for name in ordner:
-            pfad = Path(oben) / name
-            if pfad.is_symlink():
-                continue
-            try:
-                os.rmdir(pfad)
-                e.ordner_entfernt += 1
-            except OSError:
-                pass
+    gefunden: list[Path] = []
+    for oben, ordner, _dateien in os.walk(pfade.lang(korb), topdown=True):
+        ordner[:] = [n for n in ordner if not _verknuepfung(Path(oben) / n)]
+        gefunden.extend(Path(oben) / n for n in ordner)
+    for pfad in reversed(gefunden):          # tiefste zuerst
+        try:
+            os.rmdir(pfad)
+            e.ordner_entfernt += 1
+        except OSError:
+            pass
     try:
         os.rmdir(pfade.lang(korb))
         e.ordner_entfernt += 1

@@ -200,3 +200,13 @@ def test_vorhandener_ordner_in_anderer_unicode_form_wird_wiederverwendet(tmp_pat
     assert ort.ordner == tmp_path / "2026" / nfd
     ort = s.finden(["2026", "2026-04 April"])
     assert ort.ordner.name == unicodedata.normalize("NFD", "2026-04 April Ägypten") and ort.wiederverwendet
+
+
+def test_vorhandener_ordner_in_anderer_schreibweise_wird_benutzt(tmp_path, konf):
+    """Pruefer-Befund (v0.8): Wie Dateinamen (Entscheidung 11) duerfen auch
+    Ordner sich nicht nur in Gross-/Kleinschreibung unterscheiden - ueber SMB
+    unter Windows waere einer davon nicht erreichbar."""
+    (tmp_path / "2026" / "2026-01 Januar" / "2026-01-01" / "Canon EOS 5D").mkdir(parents=True)
+    s = ziel.Zielstruktur(tmp_path)
+    pfad, _ort = ziel.zielpfad(s, _d(2026, 1, 1, 12, 30), "CANON EOS 5D", "IMG_0001.JPG", konf)
+    assert pfad == tmp_path / "2026" / "2026-01 Januar" / "2026-01-01" / "Canon EOS 5D" / "IMG_0001.JPG"

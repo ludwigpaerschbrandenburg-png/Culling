@@ -17,10 +17,12 @@ from pathlib import Path
 
 from . import metadaten, pfade
 
-#: Klein fuer die Uebersicht, gross fuer die grosse Ansicht - je in dieser
-#: Reihenfolge; das erste vorhandene Feld gewinnt.
-FELDER_KLEIN = ("PreviewImage", "ThumbnailImage", "JpgFromRaw")
-FELDER_GROSS = ("JpgFromRaw", "PreviewImage", "ThumbnailImage")
+#: Je Anfrage die Felder in dieser Reihenfolge, das erste vorhandene gewinnt.
+#: Fuer die Uebersicht erst die kleinen Vorschaubilder; das oft mehrere MB
+#: grosse JpgFromRaw nur, wenn beide fehlen (ExifTool liefert jedes erfragte
+#: Feld, das es gibt - also nicht alle auf einmal fragen).
+STUFEN_KLEIN = (("PreviewImage", "ThumbnailImage"), ("JpgFromRaw",))
+STUFEN_GROSS = (("JpgFromRaw", "PreviewImage", "ThumbnailImage"),)
 ZEITLIMIT = 30.0
 
 
@@ -36,10 +38,16 @@ class Vorschauleser:
         self.programm = programm
         self._prozess: metadaten._Prozess | None = None
         self._sperre = threading.Lock()
+        self._zu = False
 
     def _lesen(self, pfad: Path, felder: tuple[str, ...]) -> dict:
+        if self._zu:
+            return {}   # geschlossen: nie wieder ein ExifTool starten
         if self._prozess is None:
-            self._prozess = metadaten._Prozess(self.programm)
+            try:
+                self._prozess = metadaten._Prozess(self.programm)
+            except metadaten.MetadatenFehler:
+                return {}
         try:
             antwort = self._prozess.lesen([(str(pfad), "")], limit=ZEITLIMIT, argumente=_argumente(felder))
         except metadaten.MetadatenFehler:
@@ -51,30 +59,42 @@ class Vorschauleser:
 
     def lesen(self, pfad: Path, gross: bool = False) -> tuple[bytes | None, int]:
         """(JPEG-Daten oder None, Drehung nach EXIF 1-8)."""
-        if metadaten.unzulaessig_fuer_exiftool(pfad) or not os.path.isfile(pfade.lang(Path(pfad))):
+        if self._zu or metadaten.unzulaessig_fuer_exiftool(pfad) or not os.path.isfile(pfade.lang(Path(pfad))):
             return None, 1
-        felder = FELDER_GROSS if gross else FELDER_KLEIN
-        with self._sperre:
-            werte = self._lesen(Path(pfad), felder)
-        try:
-            drehung = int(str(werte.get("Orientation") or 1))
-        except ValueError:
-            drehung = 1
-        if not 1 <= drehung <= 8:
-            drehung = 1
-        for feld in felder:
-            wert = werte.get(feld)
-            if isinstance(wert, str) and wert.startswith("base64:"):
-                try:
-                    daten = base64.b64decode(wert[len("base64:"):], validate=False)
-                except ValueError:
-                    continue
-                if daten[:2] == b"\xff\xd8":
-                    return daten, drehung
-        return None, drehung if werte else 1
+        drehung = 1
+        for felder in STUFEN_GROSS if gross else STUFEN_KLEIN:
+            with self._sperre:
+                werte = self._lesen(Path(pfad), felder)
+            try:
+                drehung = int(str(werte.get("Orientation") or drehung))
+            except ValueError:
+                pass
+            if not 1 <= drehung <= 8:
+                drehung = 1
+            for feld in felder:
+                wert = werte.get(feld)
+                if isinstance(wert, str) and wert.startswith("base64:"):
+                    try:
+                        daten = base64.b64decode(wert[len("base64:"):], validate=False)
+                    except ValueError:
+                        continue
+                    if daten[:2] == b"\xff\xd8":
+                        return daten, drehung
+        return None, 1
 
     def schliessen(self) -> None:
-        with self._sperre:
-            if self._prozess is not None:
-                self._prozess.beenden()
-                self._prozess = None
+        """Beenden, ohne auf ein langsames Bild zu warten: Ist der Prozess
+        gerade beschaeftigt, wird er hart beendet (die laufende Anfrage endet
+        dann ohne Vorschau). Danach startet dieser Leser nie wieder ExifTool."""
+        self._zu = True
+        if self._sperre.acquire(timeout=0.5):
+            try:
+                if self._prozess is not None:
+                    self._prozess.beenden()
+                    self._prozess = None
+            finally:
+                self._sperre.release()
+            return
+        prozess = self._prozess
+        if prozess is not None:
+            prozess._abwuergen()

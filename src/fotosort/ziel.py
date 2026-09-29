@@ -153,6 +153,12 @@ class Zielstruktur:
             # aussehender Ordner. Benutzt wird der vorhandene Name, wie er ist.
             gleich = _nfc(gewuenscht)
             vorhanden_gleich = next((n for n in vorhanden if n == gewuenscht or _nfc(n) == gleich), None)
+            if vorhanden_gleich is None:
+                # Auch ohne Gross-/Kleinschreibung (seit v0.8, wie bei Dateinamen):
+                # "CANON EOS 5D" landet im vorhandenen "Canon EOS 5D" - zwei
+                # Ordner, die sich nur darin unterscheiden, waeren ueber SMB
+                # unter Windows nicht beide erreichbar.
+                vorhanden_gleich = next((n for n in sorted(vorhanden) if _nfc(n).casefold() == gleich.casefold()), None)
             if vorhanden_gleich is not None:
                 aktuell = aktuell / vorhanden_gleich
                 continue

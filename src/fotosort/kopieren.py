@@ -138,17 +138,21 @@ def worker_zahlen(konf, profil=None, kopier=None, hash_=None) -> tuple[int, int,
     return max(1, k), max(1, h), profil
 
 
-def profil_erkennen(wege) -> tuple[str, list[tuple[str, str]]]:
-    """Profil aus der Laufwerksart von Ziel und Quellen (SPEC §8, seit v0.8):
-    der langsamste Teil entscheidet - netzwerk vor hdd vor ssd; was sich nicht
-    feststellen laesst, gilt als hdd. Liefert (Profil, [(Pfad, Art)])."""
-    details = [(str(w), pfade.laufwerksart(Path(w))) for w in wege]
-    arten = [a for _w, a in details]
+def profil_aus_arten(arten) -> str:
+    """Der langsamste Teil entscheidet - netzwerk vor hdd vor ssd; was sich
+    nicht feststellen laesst (""), gilt als hdd (SPEC §8, seit v0.8)."""
+    arten = list(arten)
     if "netzwerk" in arten:
-        return "netzwerk", details
+        return "netzwerk"
     if arten and all(a == "ssd" for a in arten):
-        return "ssd", details
-    return "hdd", details
+        return "ssd"
+    return "hdd"
+
+
+def profil_erkennen(wege) -> tuple[str, list[tuple[str, str]]]:
+    """Profil aus der Laufwerksart von Ziel und Quellen. Liefert (Profil, [(Pfad, Art)])."""
+    details = [(str(w), pfade.laufwerksart(Path(w))) for w in wege]
+    return profil_aus_arten(a for _w, a in details), details
 
 
 # --------------------------------------------------------- Bausteine ----

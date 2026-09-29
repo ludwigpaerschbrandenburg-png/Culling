@@ -220,6 +220,7 @@ class SichtenSeite(QWidget):
         self.gezeigt: list[int] = []                 # Nummern (in alle) der gezeigten, in Reihenfolge
         self.stand: dict[str, tuple[int, str]] = {}  # Bewertungen des Ordners
         self.vorschau: dict[int, QPixmap] = {}       # geladene Vorschaubilder des Ordners
+        self.eintraege: dict[int, QListWidgetItem] = {}  # Nummer -> Kachel (grosse Ordner: kein Suchen)
         self.ordner_jetzt: Path | None = None
         self.durchgang = 0
         self.gross_nr: int | None = None
@@ -283,7 +284,9 @@ class SichtenSeite(QWidget):
     # -- Oeffnen und Ordner -----------------------------------------------------
 
     def oeffnen(self, info: dict) -> None:
-        """Mit dem Archiv aus ablauf.sichten_info(); gleiches Archiv: nur der Baum wird frisch."""
+        """Mit dem Archiv aus ablauf.sichten_info(). Gleiches Archiv: der Stand
+        bleibt, fehlende Vorschaubilder werden weiter geladen ("Neu einlesen"
+        liest Ordner und Bilder frisch)."""
         if info.get("text"):
             self.schliessen()
             self.info, self.ziel, self.bew = {}, None, None
@@ -301,6 +304,20 @@ class SichtenSeite(QWidget):
             self.bew = sichten.Bewertungen(Path(info["archiv_ordner"]))
             self.leser = vorschau.Vorschauleser(info["exiftool"]) if info.get("exiftool") else None
             self.neu_einlesen()
+        else:
+            self._fehlende_laden()
+
+    def pausieren(self) -> None:
+        """Reiter verlassen: keine weiteren Vorschaubilder lesen - die Platte
+        gehoert dem Ablauf im Reiter „Archiv“. Was gerade gelesen wird, kommt
+        noch an; der Rest folgt beim Zurueckkommen (_fehlende_laden)."""
+        self.pool.clear()
+
+    def _fehlende_laden(self) -> None:
+        for i in self.gezeigt:
+            b = self.alle[i]
+            if b.art != dateitypen.VIDEO and i not in self.vorschau:
+                self.pool.start(_Laden(self.signale, self.durchgang, i, b, KACHEL, self.leser, False))
 
     def neu_einlesen(self) -> None:
         if self.ziel is None:
@@ -381,18 +398,17 @@ class SichtenSeite(QWidget):
         self.durchgang += 1
         self.gross_nr = None
         filter_ = self.filter.currentData() or "alle"
-        geladen = self.vorschau
         self.gezeigt = [i for i, b in enumerate(self.alle) if sichten.passt(self.stand.get(b.schluessel), filter_)]
         self.raster.clear()
+        self.eintraege = {}
         for i in self.gezeigt:
-            b = self.alle[i]
             eintrag = QListWidgetItem("")
             eintrag.setData(ROLLE_NR, i)
             eintrag.setSizeHint(QSize(KACHEL + 20, KACHEL + 48))
             self.raster.addItem(eintrag)
+            self.eintraege[i] = eintrag
             self._beschriften(eintrag)
-            if b.art != dateitypen.VIDEO and i not in geladen:
-                self.pool.start(_Laden(self.signale, self.durchgang, i, b, KACHEL, self.leser, False))
+        self._fehlende_laden()
         self.stapel.setCurrentWidget(self.raster if self.alle or self.ordner_jetzt else self.hinweis)
         if not self.alle and self.ordner_jetzt is None:
             self.hinweis.setText(meldungen.SICHTEN_ORDNER_WAEHLEN)
@@ -435,11 +451,9 @@ class SichtenSeite(QWidget):
         if durchgang != self.durchgang:
             return   # anderer Ordner oder Filter inzwischen
         self.vorschau[nr] = QPixmap() if bild.isNull() else QPixmap.fromImage(bild)
-        for zeile in range(self.raster.count()):
-            e = self.raster.item(zeile)
-            if e.data(ROLLE_NR) == nr:
-                self._beschriften(e)
-                break
+        e = self.eintraege.get(nr)
+        if e is not None:
+            self._beschriften(e)
 
     # -- Bewerten ---------------------------------------------------------------
 
@@ -476,10 +490,9 @@ class SichtenSeite(QWidget):
                 self.stand[s] = neu[s]
             else:
                 self.stand.pop(s, None)       # keine Sterne, keine Markierung mehr
-        for zeile in range(self.raster.count()):
-            e = self.raster.item(zeile)
-            if e.data(ROLLE_NR) in nummern:
-                self._beschriften(e)
+        for i in nummern:
+            if i in self.eintraege:
+                self._beschriften(self.eintraege[i])
         if self.stapel.currentWidget() is self.gross:
             self._gross_titel()
         self._zahlen()
@@ -529,13 +542,15 @@ class SichtenSeite(QWidget):
     # -- Ende ---------------------------------------------------------------------
 
     def schliessen(self) -> None:
-        """Hintergrund anhalten und ExifTool beenden (Reiter verlassen, Fenster zu)."""
+        """Hintergrund anhalten und ExifTool beenden (anderes Archiv, Fenster zu).
+        Erst den Leser schliessen - ein haengendes Bild wird dabei abgebrochen,
+        und danach startet kein Strang mehr ein ExifTool -, dann warten."""
         self.durchgang += 1
         self.pool.clear()
-        self.pool.waitForDone(5000)
         if self.leser is not None:
             self.leser.schliessen()
-            self.leser = None
+        self.pool.waitForDone(5000)
+        self.leser = None
         self.ordner_jetzt = None
         # Beim naechsten Oeffnen alles frisch (auch ExifTool).
         self.ziel = None

@@ -776,6 +776,12 @@ einem zweiten Reiter beginnen, ohne das Hauptprogramm zu ersetzen. Umsetzung: �
 - [x] 15: Reiter „Sichten“, erster Ausbau (ansehen, Sterne, Auswahl/Ausschuss, Filter).
 - [ ] Prüfung durch unabhängige Prüfer, volle Tests, CI, Release v0.8.
 
+**Aus der Prüfung von v0.8 (offen, kein Verlust möglich):** Der Rückfall von `zuruecklegen`
+auf exFAT kopiert ohne `.part`-Datei an den alten Ort (Umbenennen geht dort nicht); bricht er
+mittendrin ab, bleibt dort eine unvollständige Datei, die der nächste Durchgang als neues Bild
+ins Archiv nähme. Das Original liegt unversehrt im Ordner `_geloescht_`. Abhilfe wäre eine
+Vormerkung in der Datenbank vor dem Kopieren, wie beim Kopieren ins Archiv.
+
 **Später (15, nächste Ausbaustufen des Reiters „Sichten“):** Bewertungen als XMP-Sidecar
 zurückschreiben (für Lightroom & Co.), Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder
 finden. Dazu aus dem ersten Ausbau: `bewertungen.db` mit der Datenbank-Sicherung ins Ziel

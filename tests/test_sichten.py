@@ -150,3 +150,78 @@ def test_vorschau_aus_der_raw_datei(tmp_path):
     finally:
         leser.schliessen()
     assert (hashes.blake3_datei(raw), raw.stat().st_mtime_ns) == vorher
+
+
+def test_vorschauleser_startet_nach_dem_schliessen_nichts_mehr(tmp_path, monkeypatch):
+    """Pruefer-Befund (v0.8): Ein Hintergrundstrang, der erst nach dem
+    Schliessen an die Reihe kommt, darf kein neues ExifTool starten - es
+    liefe sonst nach dem Ende des Programms weiter."""
+    gestartet: list = []
+
+    class Prozess:
+        def __init__(self, programm):
+            gestartet.append(self)
+            self.beendet = False
+
+        def lesen(self, pfade_typ, limit=None, argumente=None):
+            return {}
+
+        def beenden(self):
+            self.beendet = True
+
+    monkeypatch.setattr(vorschau.metadaten, "_Prozess", Prozess)
+    raw = testbaum._schreiben(tmp_path / "a.nef", b"x")
+    leser = vorschau.Vorschauleser("exiftool")
+    leser.lesen(raw)
+    assert len(gestartet) == 1
+    leser.schliessen()
+    assert gestartet[0].beendet
+    assert leser.lesen(raw) == (None, 1) and len(gestartet) == 1
+
+
+def test_kleine_vorschau_holt_das_grosse_bild_nur_wenn_noetig(tmp_path, monkeypatch):
+    """Pruefer-Befund (v0.8): Fuer die Uebersicht erst PreviewImage und
+    ThumbnailImage; das oft mehrere MB grosse JpgFromRaw nur, wenn beide fehlen."""
+    import base64
+    anfragen: list[list[str]] = []
+    jpeg = "base64:" + base64.b64encode(testbaum._JPEG).decode()
+
+    class Prozess:
+        def __init__(self, programm):
+            pass
+
+        def lesen(self, pfade_typ, limit=None, argumente=None):
+            anfragen.append(argumente)
+            pfad = pfade_typ[0][0]
+            if "-JpgFromRaw" in argumente and "ohne" in pfad:
+                return {pfad: {"JpgFromRaw": jpeg}}
+            if "-PreviewImage" in argumente and "mit" in pfad:
+                return {pfad: {"PreviewImage": jpeg, "Orientation": "1"}}
+            return {pfad: {}}
+
+        def beenden(self):
+            pass
+
+    monkeypatch.setattr(vorschau.metadaten, "_Prozess", Prozess)
+    mit = testbaum._schreiben(tmp_path / "mit.nef", b"x")
+    ohne = testbaum._schreiben(tmp_path / "ohne.nef", b"x")
+    leser = vorschau.Vorschauleser("exiftool")
+    assert leser.lesen(mit)[0] == testbaum._JPEG
+    assert len(anfragen) == 1 and "-JpgFromRaw" not in anfragen[0]
+    anfragen.clear()
+    assert leser.lesen(ohne)[0] == testbaum._JPEG
+    assert "-JpgFromRaw" not in anfragen[0] and "-JpgFromRaw" in anfragen[1]
+    leser.schliessen()
+
+
+def test_unerreichbarer_pfad_ist_eine_meldung_kein_absturz(ziel, monkeypatch):
+    _archiv(ziel)
+
+    def weg(_p):
+        raise OSError(1231, "Netzwerkadresse nicht erreichbar")
+
+    monkeypatch.setattr(sichten.pfade, "aufloesen", weg)
+    with pytest.raises(FotosortFehler):
+        sichten.ordner(ziel)
+    with pytest.raises(FotosortFehler):
+        sichten.bilder(ziel / "2026", ziel, config.Konfiguration())

@@ -101,7 +101,11 @@ def begrenzen(ordner: Path, behalten: int = BEHALTEN) -> None:
         return
     for e in eintraege:
         m = _BERICHT_DATEI.match(e.name)
-        if m and e.is_file(follow_symlinks=False):
+        try:
+            eigene = bool(m) and e.is_file(follow_symlinks=False)
+        except OSError:
+            eigene = False
+        if eigene:
             je_stamm.setdefault(m.group(1), []).append(Path(ordner) / e.name)
     staemme = sorted(je_stamm)
     for stamm in staemme[:-behalten] if len(staemme) > behalten else []:
@@ -117,18 +121,34 @@ def begrenzen(ordner: Path, behalten: int = BEHALTEN) -> None:
 
 
 def _packen(datei: Path) -> None:
+    """Eine CSV packen. Nur eigene Dateien: Die Zwischendatei wird exklusiv
+    angelegt (nie ueber eine vorhandene Datei oder Verknuepfung hinweg), die
+    gepackte nie ersetzt (Umbenennen ohne Ueberschreiben, §5). Geht etwas
+    nicht, bleibt die CSV ungepackt liegen, und entfernt wird nur die eben
+    selbst angelegte Zwischendatei."""
     gepackt = datei.with_name(datei.name + ".gz")
     neu = datei.with_name(datei.name + ".gz.neu")
+    if os.path.lexists(pfade.lang(gepackt)):
+        return
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        with open(pfade.lang(datei), "rb") as ein, gzip.open(pfade.lang(neu), "wb") as aus:
-            shutil.copyfileobj(ein, aus, 1024 * 1024)
-        pfade.geduldig(os.replace, pfade.lang(neu), pfade.lang(gepackt), fehlernummern=pfade.GESPERRT_ERSETZEN)
+        fd = os.open(pfade.lang(neu), flags, 0o644)
+    except OSError:
+        return   # Name belegt (auch durch eine Verknuepfung): nicht packen
+    angelegt = True
+    try:
+        with os.fdopen(fd, "wb") as roh:
+            with open(pfade.lang(datei), "rb") as ein, gzip.GzipFile(filename=datei.name, mode="wb", fileobj=roh) as aus:
+                shutil.copyfileobj(ein, aus, 1024 * 1024)
+        pfade.umbenennen_ohne_ueberschreiben(neu, gepackt)
+        angelegt = False
         pfade.geduldig(os.unlink, pfade.lang(datei))
     except OSError:
-        try:
-            os.unlink(pfade.lang(neu))
-        except OSError:
-            pass
+        if angelegt:
+            try:
+                os.unlink(pfade.lang(neu))
+            except OSError:
+                pass
 
 
 def _csv_wert(wert):

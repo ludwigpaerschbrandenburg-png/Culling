@@ -1135,14 +1135,15 @@ def ob_profil_erkannt(profil: str, ziel_art: str | None, quellen: list) -> str:
     ziel_art: Art des Ziels (None = kein Ziel); quellen: [(Pfad, Art)]."""
     teile = []
     if ziel_art is not None:
-        teile.append(f"Ziel: {LAUFWERKSART_NAME.get(ziel_art, ziel_art)}")
+        teile.append(f"Ziel {LAUFWERKSART_NAME.get(ziel_art, ziel_art)}")
     for pfad, art in quellen:
         name = Path(str(pfad)).name or str(pfad)
-        teile.append(f"Quelle „{name}“: {LAUFWERKSART_NAME.get(art, art)}")
-    return (
-        "Erkannt – " + ", ".join(teile) + f". Vorgeschlagen: {OB_PROFIL_NAME.get(profil, profil)}"
-        " (der langsamste Teil entscheidet). Sie können es hier ändern."
-    )
+        teile.append(f"„{name}“ {LAUFWERKSART_NAME.get(art, art)}")
+    return "Erkannt: " + ", ".join(teile) + " – daher dieser Vorschlag."
+
+
+def ob_profil_aus_einstellungen(profil: str) -> str:
+    return f"Aus den Einstellungen dieses Archivs (config.toml): {OB_PROFIL_NAME.get(profil, profil)}."
 
 
 def ziel_nicht_beschreibbar(ziel, grund: str) -> str:
@@ -2500,6 +2501,10 @@ def ob_durchlauf(ok: bool, einzelheit: str) -> str:
 
 def sichten_ausserhalb(ordner, ziel) -> str:
     return f"Der Ordner {ordner} liegt nicht im Archiv {ziel} – das Sichten bleibt im Zielordner."
+
+
+def sichten_nicht_lesbar(ordner, grund: str) -> str:
+    return f"Der Ordner {ordner} lässt sich gerade nicht lesen ({grund}). Ist das Laufwerk angeschlossen?"
 
 
 def sichten_filter_ungueltig(wert, erlaubt) -> str:

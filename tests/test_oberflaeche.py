@@ -905,3 +905,36 @@ def test_profil_wird_vorgeschlagen_bis_der_nutzer_waehlt(ob, quelle, ziel, monke
     z = client.get("/api/zustand").json()
     assert z["profil"] == "ssd" and z["profil_von_hand"] is True
     assert ablauf_modul.Ablauf(ordner=ab.ordner).profil == "ssd"     # gemerkt
+
+
+def test_profil_vorschlag_schont_langsame_laufwerke_und_alte_wahl(ob, quelle, ziel, tmp_path, monkeypatch):
+    """Pruefer-Befunde (v0.8): Jedes Laufwerk wird je Sitzung nur einmal
+    befragt (ein nicht erreichbares Netzlaufwerk kostet sonst bei jedem Klick
+    eine Wartezeit); ein Ziel, das es noch nicht gibt, zaehlt mit; ein Profil,
+    das jemand in v0.7 selbst gewaehlt hat, bleibt."""
+    ab, client = ob
+    gefragt: list[str] = []
+
+    def art(p):
+        gefragt.append(str(p))
+        return "hdd" if "neu" in str(p) else "ssd"
+
+    monkeypatch.setattr(ablauf_modul.kopieren.pfade, "laufwerksart", art)
+    neues_ziel = tmp_path / "neu" / "Archiv"                       # gibt es noch nicht
+    a = _post(client, "/api/ziel", {"ziel": str(neues_ziel)})
+    assert a["profil"] == "hdd" and "Festplatte" in a["profil_erkannt"]
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    _post(client, "/api/quelle", {"pfad": str(quelle), "entfernen": True})
+    _post(client, "/api/quelle", {"pfad": str(quelle)})
+    assert sorted(set(gefragt)) == sorted(gefragt)                  # jeder Pfad nur einmal
+    # Zustand aus v0.7: kein profil_von_hand, aber ein ausdruecklich gewaehltes Profil.
+    ordner = tmp_path / "alt"
+    ordner.mkdir()
+    (ordner / "zustand.json").write_text(json.dumps({"ziel": str(ziel), "quellen": [], "profil": "netzwerk"}),
+                                         encoding="utf-8")
+    alt = ablauf_modul.Ablauf(ordner=ordner)
+    assert alt.profil == "netzwerk" and alt.profil_von_hand is True
+    alt.ziel_setzen(str(ziel))
+    assert alt.profil == "netzwerk"
+    (ordner / "zustand.json").write_text(json.dumps({"ziel": "", "quellen": [], "profil": "hdd"}), encoding="utf-8")
+    assert ablauf_modul.Ablauf(ordner=ordner).profil_von_hand is False   # hdd war nur der Standard

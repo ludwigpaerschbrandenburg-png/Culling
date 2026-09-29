@@ -411,3 +411,31 @@ def test_lange_listen_werden_im_text_gekuerzt():
     assert z[0] == "Titel: 1.500"
     eintraege = [x for x in z if x.startswith("  ")]
     assert len(eintraege) == 1001 and "500 weitere" in eintraege[-1] and "CSV" in eintraege[-1]
+
+
+def test_packen_folgt_keiner_verknuepfung_und_ersetzt_nichts(tmp_path):
+    """Pruefer-Befund (v0.8): Die Zwischendatei beim Packen wird exklusiv
+    angelegt - eine Verknuepfung unter ihrem Namen fuehrt nie in eine fremde
+    Datei, und eine vorhandene .csv.gz wird nie ersetzt."""
+    import os
+    ordner = tmp_path / "berichte"
+    ordner.mkdir()
+    bild = tmp_path / "bild.jpg"
+    bild.write_bytes(b"\xff\xd8 bilddaten " * 50)
+    vorher = bild.read_bytes()
+    staemme = [f"bericht_2030-01-01_0000{i:02d}_lauf{i}" for i in range(12)]
+    for s in staemme:
+        (ordner / f"{s}.txt").write_text("t", encoding="utf-8")
+        (ordner / f"{s}_dateien.csv").write_text("quellwurzel\n", encoding="utf-8")
+    try:
+        os.symlink(bild, ordner / f"{staemme[5]}_dateien.csv.gz.neu")
+    except OSError:
+        pytest.skip("Verknuepfungen nicht erlaubt")
+    schon = ordner / f"{staemme[6]}_dateien.csv.gz"
+    schon.write_bytes(b"alt")
+    bericht.begrenzen(ordner)
+    assert bild.read_bytes() == vorher                                    # nie hindurch geschrieben
+    assert os.path.islink(ordner / f"{staemme[5]}_dateien.csv.gz.neu")    # und nicht entfernt
+    assert (ordner / f"{staemme[5]}_dateien.csv").exists()                # bleibt dann ungepackt
+    assert schon.read_bytes() == b"alt" and (ordner / f"{staemme[6]}_dateien.csv").exists()
+    assert (ordner / f"{staemme[7]}_dateien.csv.gz").exists()             # die anderen wie sonst

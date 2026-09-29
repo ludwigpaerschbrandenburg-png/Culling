@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fotosort import cli, hashes, pfade, zuruecklegen
+import pytest
+
+from fotosort import cli, hashes, loeschen, pfade, zuruecklegen
 from test_aufraeumen import _bis_geprueft, _echte, _papierkorb, _quelldateien, antwort  # noqa: F401
 from test_kopieren import _cli, _ereignisse, _zeilen, _zieldateien
 
@@ -74,8 +76,9 @@ def test_belegter_alter_ort_wird_nie_ueberschrieben(baum, quelle, ziel, nachscha
 
 def test_ohne_umbenennen_wird_kopiert_und_das_original_bleibt(baum, quelle, ziel, nachschauen, antwort, monkeypatch, capsys):
     """exFAT kann kein nicht ueberschreibendes Umbenennen: zurueckkopieren,
-    Kopie zuruecklesen - die Datei im Ordner _geloescht_ bleibt liegen (sie
-    steht im Status quelle_geloescht und darf nicht geloescht werden)."""
+    Kopie zuruecklesen - die Datei im Ordner _geloescht_ bleibt liegen. Ihre
+    Zeile gehoert jetzt der Kopie am alten Ort; die Datei im Ordner hat keine
+    mehr, und das Programm fasst sie nie an."""
     vorher, korb = _aufgeraeumt(ziel, quelle, antwort)
     im_korb = _quelldateien(korb)
 
@@ -91,6 +94,10 @@ def test_ohne_umbenennen_wird_kopiert_und_das_original_bleibt(baum, quelle, ziel
     for rel, h in vorher.items():
         assert jetzt.get(rel) == h
     assert _ereignisse(nachschauen, ziel, zuruecklegen.ART_KOPIERT)
+    # Der naechste Scan uebergeht den Ordner _geloescht_ - nichts darin bekommt eine Zeile.
+    assert _cli("scan", "--ziel", ziel) == cli.OK
+    assert not any(loeschen.ist_papierkorb(Path(q).relative_to(quelle).parts[0])
+                   for q in _zeilen(nachschauen, ziel))
 
 
 def test_kaputte_kopie_wird_zurueckgenommen(baum, quelle, ziel, nachschauen, antwort, monkeypatch):
@@ -127,3 +134,37 @@ def test_endgueltig_geloeschtes_bleibt_unberuehrt(baum, quelle, ziel, nachschaue
     assert _cli("zuruecklegen", "--ziel", ziel) == cli.OK
     assert "nichts" in capsys.readouterr().out.lower()
     assert _zeilen(nachschauen, ziel) == vorher
+
+
+def test_von_hand_zurueckgeholte_datei_nimmt_der_scan_wieder_auf(baum, quelle, ziel, nachschauen, antwort):
+    """Pruefer-Befund (v0.8): Liegt eine Datei im Status quelle_geloescht
+    wieder an ihrem Ort - von Hand zurueckgeholt oder das Zuruecklegen wurde
+    zwischen Umbenennen und Datenbank unterbrochen -, nimmt der naechste Scan
+    sie wieder auf, auch wenn Groesse und Aenderungszeit gleich sind."""
+    import os
+    _vorher, korb = _aufgeraeumt(ziel, quelle, antwort)
+    ort = Path(baum["analog"])
+    zeile = _zeilen(nachschauen, ziel)[str(ort)]
+    im_korb = Path(zeile["schreibpfad"])
+    os.link(im_korb, ort)            # wie von Hand zurueckgeholt: gleicher Inhalt, gleiche Zeit
+    os.unlink(im_korb)
+    assert _cli("scan", "--ziel", ziel) == cli.OK
+    neu = _zeilen(nachschauen, ziel)[str(ort)]
+    assert neu["status"] == "gefunden" and neu["schreibpfad"] == "" and neu["hash"] == ""
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert _zeilen(nachschauen, ziel)[str(ort)]["status"] == "duplikat"   # Inhalt liegt schon im Archiv
+    assert ort.exists()
+
+
+def test_leere_ordner_nur_im_ordner_geloescht_nie_hinter_einer_verknuepfung(baum, quelle, ziel, antwort, tmp_path):
+    import os
+    _vorher, korb = _aufgeraeumt(ziel, quelle, antwort)
+    draussen = tmp_path / "draussen"
+    (draussen / "leer").mkdir(parents=True)
+    try:
+        os.symlink(draussen, korb / "verlinkt", target_is_directory=True)
+    except OSError:
+        pytest.skip("Verknuepfungen nicht erlaubt")
+    assert _cli("zuruecklegen", "--ziel", ziel) == cli.OK
+    assert (draussen / "leer").is_dir()            # hinter der Verknuepfung wird nichts entfernt

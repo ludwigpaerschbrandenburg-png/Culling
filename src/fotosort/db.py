@@ -824,7 +824,7 @@ class Datenbank:
         quellwurzel = pfad_text(quellwurzel)
         self._beginnen()
         zeile = self.verbindung.execute(
-            "SELECT groesse, mtime, quellwurzel FROM dateien WHERE quellpfad = ?", (quellpfad,)
+            "SELECT groesse, mtime, quellwurzel, status FROM dateien WHERE quellpfad = ?", (quellpfad,)
         ).fetchone()
 
         if zeile is None:
@@ -840,6 +840,20 @@ class Datenbank:
         unveraendert = int(zeile["groesse"]) == int(groesse) and _gleiche_zeit(
             zeile["mtime"], mtime
         )
+        if zeile["status"] in ("quelle_geloescht", "verschoben"):
+            # Wieder da, obwohl die Quelle schon entfernt war (von Hand aus dem
+            # Ordner _geloescht_ geholt, oder "zuruecklegen" wurde zwischen
+            # Umbenennen und Datenbank unterbrochen): neu einordnen (seit v0.8).
+            # Ihr Inhalt liegt im Archiv; sie wird dort als Duplikat erkannt.
+            self.verbindung.execute(
+                "UPDATE dateien SET quellwurzel = ?, groesse = ?, mtime = ?, dateityp = ?,"
+                " hash = '', zielpfad = '', schreibpfad = '', bestaetigt_in_lauf = NULL,"
+                " kopiert_in_lauf = NULL, status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?"
+                " WHERE quellpfad = ?",
+                (quellwurzel, int(groesse), float(mtime), dateityp, lauf, quellpfad),
+            )
+            self._vielleicht_schreiben()
+            return "veraendert"
         if unveraendert:
             # Die Zeile bleibt, wie sie ist. Nur das Gesehen-Datum wandert mit;
             # die Quellwurzel (in zwei Indizes) nur, wenn sie sich aendert.

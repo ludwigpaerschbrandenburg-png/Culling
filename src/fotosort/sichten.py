@@ -62,8 +62,11 @@ class Bild:
 
 
 def _verknuepfung(eintrag: os.DirEntry) -> bool:
+    """Verknuepfung oder Windows-Junction? Aus den Angaben der Ordnerliste
+    (DirEntry.is_junction, Python 3.12) - ohne je Datei die Platte oder das
+    Netz zu fragen."""
     try:
-        return eintrag.is_symlink() or bool(getattr(os.path, "isjunction", lambda _p: False)(eintrag.path))
+        return eintrag.is_symlink() or bool(getattr(eintrag, "is_junction", lambda: False)())
     except OSError:
         return True
 
@@ -74,6 +77,8 @@ def _im_archiv(ordner: Path, ziel: Path) -> None:
         pfade.aufloesen(Path(ordner)).relative_to(pfade.aufloesen(Path(ziel)))
     except ValueError:
         raise FotosortFehler(meldungen.sichten_ausserhalb(ordner, ziel)) from None
+    except OSError as fehler:   # Netzlaufwerk nicht erreichbar
+        raise FotosortFehler(meldungen.sichten_nicht_lesbar(ordner, str(fehler.strerror or fehler))) from None
 
 
 def _eintraege(ordner: Path) -> list[os.DirEntry]:

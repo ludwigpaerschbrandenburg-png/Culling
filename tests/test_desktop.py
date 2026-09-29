@@ -207,7 +207,7 @@ def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys, monkeypatch
     assert rc == cli.OK, aus
     assert "Durchlauf bestanden" in aus
     bilder = sorted(p.name for p in fotos.glob("*.png"))
-    assert len(bilder) == 12 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "12-dialog-ordner-anlegen.png"
+    assert len(bilder) == 13 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "13-sichten.png"
     # Die Bildschirmfotos fuer die Anleitung zeigen das Fenster in voller Groesse.
     bild = QImage(str(fotos / "03-uebersicht-nach-scan.png"))
     assert (bild.width(), bild.height()) == (1180, 800)

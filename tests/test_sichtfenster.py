@@ -158,3 +158,38 @@ def test_drehung_wie_in_der_datei(tmp_path):
         von_hand = sichtfenster.aus_daten(daten, 0, drehung)
         assert von_qt is not None and von_hand is not None
         assert von_hand == von_qt, drehung
+
+
+def test_reiter_verlassen_haelt_das_laden_an_und_zurueck_geht_es_weiter(app, tmp_path, quelle, ziel, monkeypatch):
+    """Pruefer-Befund (v0.8): Wer zum Reiter „Archiv“ wechselt, soll die Platte
+    nicht weiter mit Vorschaubildern belasten; zurueck im Reiter „Sichten“
+    werden die fehlenden nachgeladen."""
+    _vorbereiten(ziel, quelle)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    probe = ziel / "2027" / "2027-01-01"                      # der neueste Tag: beim Oeffnen gewaehlt
+    for i in range(6):
+        testbaum._schreiben(probe / f"P_{i:04d}.jpg", testbaum._JPEG)
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob", ziel=str(ziel))
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    geladen: list = []
+    echt = sichtfenster.bild_laden
+
+    def langsam(*a, **k):
+        geladen.append(1)
+        time.sleep(0.2)                    # eine langsame Platte
+        return echt(*a, **k)
+
+    monkeypatch.setattr(sichtfenster, "bild_laden", langsam)
+    f.sichten.pool.setMaxThreadCount(1)
+    f.reiter_wechseln("sichten")
+    s = f.sichten
+    assert s.ordner_jetzt == probe and len(s.alle) == 6
+    f.reiter_wechseln("archiv")
+    _fertig_laden(app, s)
+    assert len(geladen) < len(s.alle)                          # angehalten, nicht alles gelesen
+    f.reiter_wechseln("sichten")
+    _fertig_laden(app, s)
+    assert all(nr in s.vorschau for nr in s.gezeigt if s.alle[nr].art != "video")   # fehlende nachgeladen
+    f.close()
