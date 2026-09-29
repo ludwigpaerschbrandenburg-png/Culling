@@ -37,10 +37,10 @@ ART_QUELLE_NICHT_ERREICHBAR = "quelle_nicht_erreichbar"
 ART_QUELLE_ABGELEHNT = "quelle_abgelehnt"
 ART_NICHT_MEHR_VORHANDEN = "quelle_nicht_mehr_vorhanden"
 
-TEXT_QUELLE_VERAENDERT = "Quelle veraendert, wird neu eingeordnet"
+TEXT_QUELLE_VERAENDERT = meldungen.TEXT_QUELLE_VERAENDERT
 
-GRUND_INS_ZIEL = "zeigt ins Ziel"
-GRUND_NACH_TYP = "übersprungen nach Typ"
+GRUND_INS_ZIEL = meldungen.GRUND_INS_ZIEL
+GRUND_NACH_TYP = meldungen.GRUND_NACH_TYP
 
 _ANZEIGE_ALLE = 50
 
@@ -321,19 +321,19 @@ def _verbuchen(fund: Fund, quelle_auf: Path, dbank, lauf: int, ergebnis: Ergebni
         if len(ergebnis.nicht_lesbare_ordner) < _BEISPIELE:
             ergebnis.nicht_lesbare_ordner.append(str(fund.pfad))
         dbank.ereignis(
-            lauf, ART_ORDNER_NICHT_LESBAR, fund.pfad, 1, f"Ordner nicht lesbar: {fund.text}"
+            lauf, ART_ORDNER_NICHT_LESBAR, fund.pfad, 1, meldungen.ereignis_ordner_nicht_lesbar(fund.text)
         )
         return
     if fund.art == "verknuepfung":
         ergebnis.verknuepfungen += 1
-        dbank.ereignis(lauf, ART_VERKNUEPFUNG, fund.pfad, 1, "Ordner-Verknuepfung nicht verfolgt")
+        dbank.ereignis(lauf, ART_VERKNUEPFUNG, fund.pfad, 1, meldungen.EREIGNIS_VERKNUEPFUNG)
         return
     if fund.art == "ausgeschlossen":
         ergebnis.ausgeschlossen += 1
         dbank.ereignis(lauf, ART_AUSGESCHLOSSEN, fund.pfad, 1, fund.text)
         return
     if fund.art == "ins_ziel":
-        dbank.ereignis(lauf, ART_INS_ZIEL, fund.pfad, 1, "Zielordner vom Scan ausgeschlossen")
+        dbank.ereignis(lauf, ART_INS_ZIEL, fund.pfad, 1, meldungen.EREIGNIS_ZIEL_AUSGESCHLOSSEN)
         return
 
     # ---------------------------------------------------------- Datei ----
@@ -386,7 +386,7 @@ def _abschliessen(quelle_auf: Path, muster, dbank, lauf: int, ergebnis: Ergebnis
         if ergebnis.verschwunden:
             # Fuer den Bericht (SPEC Abschnitt 10): jeden Pfad einzeln.
             for pfad in dbank.nicht_mehr_gesehen(quelle_auf, lauf):
-                dbank.ereignis(lauf, ART_NICHT_MEHR_VORHANDEN, pfad, 1, "beim Scan nicht mehr gefunden")
+                dbank.ereignis(lauf, ART_NICHT_MEHR_VORHANDEN, pfad, 1, meldungen.EREIGNIS_NICHT_MEHR_GEFUNDEN)
     ergebnis.alles_ausgeschlossen = bool(
         muster and ergebnis.dateien == 0 and ergebnis.ausgeschlossen > 0
     )
@@ -489,7 +489,7 @@ def ausfuehren_mehrere(
             if quelle_auf in bekannt:
                 gesamt.nicht_erreichbar.append(str(quelle_auf))
                 dbank.quelle_gescannt(quelle_auf, lauf, False)
-                dbank.ereignis(lauf, ART_QUELLE_NICHT_ERREICHBAR, quelle_auf, 1, "nicht erreichbar")
+                dbank.ereignis(lauf, ART_QUELLE_NICHT_ERREICHBAR, quelle_auf, 1, meldungen.EREIGNIS_NICHT_ERREICHBAR)
                 _sagen(konsole, meldungen.quelle_nicht_erreichbar(quelle_auf))
             else:
                 grund = meldungen.quelle_existiert_nicht(quelle)
@@ -506,7 +506,7 @@ def ausfuehren_mehrere(
         if ueberschneidung is not None:
             grund = meldungen.quelle_abgelehnt_ueberschneidung(quelle_auf, ueberschneidung)
             gesamt.abgelehnt.append((str(quelle_auf), grund))
-            dbank.ereignis(lauf, ART_QUELLE_ABGELEHNT, quelle_auf, 1, f"ueberschneidet {ueberschneidung}")
+            dbank.ereignis(lauf, ART_QUELLE_ABGELEHNT, quelle_auf, 1, meldungen.ereignis_quelle_ueberschneidet(ueberschneidung))
             _sagen(konsole, grund)
             continue
 

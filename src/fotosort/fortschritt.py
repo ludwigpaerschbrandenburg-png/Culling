@@ -1,4 +1,5 @@
-"""Laufende Anzeige fuer Kopieren und Pruefen (SPEC Abschnitt 7 und 8).
+"""Laufende Anzeige fuer Analyse, Kopieren, Pruefen, Aufraeumen und den
+Neuaufbau des Ziel-Index (SPEC Abschnitt 7 und 8).
 
 Dateien und Datenmenge (erledigt/gesamt), MB/s und geschaetzte Restzeit
 (restzeit.py: erst nach 60 s und 3 %, gleitender Durchschnitt, abgerundet);
@@ -40,7 +41,8 @@ class Fortschritt:
                 TextColumn("{task.fields[rest]}"),
                 console=konsole, refresh_per_second=2, transient=True,
             )
-            self.aufgabe = self.balken.add_task(self._text(), total=gesamt_bytes or None, rest="")
+            # Ohne Datenmenge (Analyse) zaehlt der Balken Dateien.
+            self.aufgabe = self.balken.add_task(self._text(), total=(gesamt_bytes or gesamt) or None, rest="")
             self.balken.start()
 
     def _text(self) -> str:
@@ -63,9 +65,11 @@ class Fortschritt:
             return
         self._zuletzt = jetzt
         if self.balken is not None:
-            self.balken.update(self.aufgabe, completed=self.bytes, description=self._text(), rest=self._rest())
+            self.balken.update(self.aufgabe, completed=self.bytes if self.gesamt_bytes else self.dateien,
+                               description=self._text(), rest=self._rest())
         elif self.konsole is not None:
-            self.konsole.print(self._text())
+            rest = self._rest()
+            self.konsole.print(f"{self._text()}  {rest}" if rest else self._text())
 
     def stop(self) -> None:
         if self.balken is not None:

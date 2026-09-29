@@ -342,7 +342,7 @@ def ziel_index_stand(stand: dict, ziel) -> str:
 def ziel_index_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str, fortgesetzt_von) -> str:
     text = (
         f"Ziel-Index wird neu aufgebaut: {anzahl(dateien)} Dateien, {groesse(bytes_)} im Ziel werden"
-        f" vollstaendig gelesen. Profil {profil}: {anzahl(hash_worker)} Hash-Worker."
+        f" vollstaendig gelesen, {anzahl(hash_worker)} gleichzeitig (Hash-Worker)."
     )
     if fortgesetzt_von:
         text += (
@@ -398,7 +398,7 @@ def ziel_index_ergebnis(e) -> str:
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         zeilen.append(f"  Durchsatz:       {durchsatz(e.gehasht, e.bytes_gelesen, e.sekunden)}")
-    zeilen.append(f"  Hash-Worker:     {anzahl(e.hash_worker)} (Profil {e.profil})")
+    zeilen.append(f"  Hash-Worker:     {anzahl(e.hash_worker)}")
     zeilen.append("  Im Ziel wurde nichts geloescht und nichts verschoben; entfernt wurden nur Eintraege der Datenbank.")
     return "\n".join(zeilen)
 
@@ -1058,6 +1058,36 @@ GRUND_QUELLE_WAEHREND_KOPIE = "Quelle hat sich waehrend des Kopierens veraendert
 GRUND_KOPIE = "Kopieren fehlgeschlagen"
 GRUND_PART_BELEGT = "Zwischendatei (.part) ist von einem anderen Vorgang belegt"
 GRUND_PART_INHALT = "Inhalt der .part-Datei stimmt nicht mehr"
+# Gruende und Ereignistexte aus Scan und Analyse. Sie landen in der Datenbank
+# und werden im Bericht per Gleichheit verglichen: Wortlaut nie aendern.
+TEXT_QUELLE_VERAENDERT = "Quelle veraendert, wird neu eingeordnet"
+GRUND_INS_ZIEL = "zeigt ins Ziel"
+GRUND_NACH_TYP = "übersprungen nach Typ"
+GRUND_SIDECAR_OHNE_HAUPT = "Sidecar ohne Hauptdatei"
+GRUND_METADATEN = "Metadaten nicht lesbar"
+GRUND_ZEILENUMBRUCH = "Zeilenumbruch im Dateinamen - bitte umbenennen"
+GRUND_KEIN_UTF8 = "Dateiname ist kein gueltiges UTF-8 - bitte umbenennen"
+GRUND_HAUPTDATEI = "Hauptdatei"
+EREIGNIS_VERKNUEPFUNG = "Ordner-Verknuepfung nicht verfolgt"
+EREIGNIS_ZIEL_AUSGESCHLOSSEN = "Zielordner vom Scan ausgeschlossen"
+EREIGNIS_NICHT_MEHR_GEFUNDEN = "beim Scan nicht mehr gefunden"
+EREIGNIS_NICHT_ERREICHBAR = "nicht erreichbar"
+EREIGNIS_ORDNER_MEHRDEUTIG = "mehrere passende Ordner mit Zusatz, alphabetisch erster gewaehlt"
+EREIGNIS_SAUBER_ABGEBROCHEN = "sauber abgebrochen"
+
+
+def ereignis_ordner_nicht_lesbar(grund: str) -> str:
+    return f"Ordner nicht lesbar: {grund}"
+
+
+def ereignis_quelle_ueberschneidet(andere) -> str:
+    return f"ueberschneidet {andere}"
+
+
+def ereignis_wiederhergestellt(geaendert, letzter_lauf: str) -> str:
+    return f"Stand vom {geaendert}; {letzter_lauf or 'kein Lauf'}"
+
+
 EREIGNIS_PART_AUFGERAEUMT = "liegengebliebene .part-Datei entfernt"
 EREIGNIS_ANGEFANGENE_ENTFERNT = "angefangene Zieldatei aus abgebrochenem Lauf entfernt"
 EREIGNIS_NACHTRAEGLICH = "Kopie aus abgebrochenem Lauf war vollstaendig"
@@ -1096,7 +1126,7 @@ def kopieren_beginnt(dateien: int, bytes_: int, kopier_worker: int, hash_worker:
                      profil: str, direkt: bool) -> str:
     zeilen = [
         f"Kopieren laeuft: {anzahl(dateien)} Dateien, {groesse(bytes_)}."
-        f" Profil {profil}: {anzahl(kopier_worker)} Kopier-Worker, {anzahl(hash_worker)} Hash-Worker."
+        f" Profil {profil}: {anzahl(kopier_worker)} Kopier-Worker; dazu {anzahl(hash_worker)} Hash-Worker."
     ]
     if direkt:
         zeilen.append(
@@ -1255,7 +1285,7 @@ def grund_pruefung_groesse(erwartet: int, gefunden: int) -> str:
 def pruefen_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str) -> str:
     return (
         f"Pruefen laeuft: {anzahl(dateien)} Dateien, {groesse(bytes_)} werden vollstaendig neu gelesen."
-        f" Profil {profil}: {anzahl(hash_worker)} Hash-Worker."
+        f" {anzahl(hash_worker)} gleichzeitig (Hash-Worker)."
     )
 
 
@@ -1298,7 +1328,7 @@ def pruefen_ergebnis(e) -> str:
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         zeilen.append(f"  Durchsatz:       {durchsatz(e.bearbeitet, e.bytes_gelesen, e.sekunden)}")
-    zeilen.append(f"  Hash-Worker:     {anzahl(e.hash_worker)} (Profil {e.profil})")
+    zeilen.append(f"  Hash-Worker:     {anzahl(e.hash_worker)}")
     return "\n".join(zeilen)
 
 

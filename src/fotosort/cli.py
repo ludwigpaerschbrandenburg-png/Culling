@@ -433,7 +433,7 @@ def _abschliessen(archiv, konsole, lauf: int, zusammenfassung: dict | None = Non
 def _lauf_sauber_abbrechen(datenbank, lauf: int) -> None:
     """Den Lauf mit Ende und Vermerk schliessen (geordneter Abbruch)."""
     try:
-        datenbank.ereignis(lauf, scan.ART_ABGEBROCHEN, "", 1, "sauber abgebrochen")
+        datenbank.ereignis(lauf, scan.ART_ABGEBROCHEN, "", 1, meldungen.EREIGNIS_SAUBER_ABGEBROCHEN)
         datenbank.lauf_beenden(lauf)
     except sqlite3.Error:  # pragma: no cover - der Abbruch bleibt wichtiger
         pass
@@ -1309,7 +1309,7 @@ def befehl_wiederherstellen(args, konsole) -> int:
     try:
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         datenbank.ereignis(lauf, db.ART_DATENBANK_WIEDERHERGESTELLT, db.pfad_text(sicherung), 1,
-                           f"Stand vom {stand.geaendert}; {stand.letzter_lauf or 'kein Lauf'}")
+                           meldungen.ereignis_wiederhergestellt(stand.geaendert, stand.letzter_lauf))
         datenbank.lauf_beenden(lauf, {"dateien": stand.dateien, "bytes": 0, "sekunden": time.monotonic() - begonnen})
         konsole.print(meldungen.wiederherstellen_fertig(stand, lokal, beiseite))
         konsole.print("")
@@ -1330,6 +1330,12 @@ _argumente: list[str] = []
 
 def _befehlszeile() -> str:
     return " ".join(["fotosort", *_argumente])
+
+
+#: Bei pruefen, aufraeumen und ziel-index bestimmt das Profil nichts: Wie
+#: viele Dateien gleichzeitig gelesen werden, stellt --hash-worker bzw.
+#: hash_worker in [leistung] ein (0 = so viele wie Prozessorkerne).
+HILFE_PROFIL_OHNE_WIRKUNG = "ohne Wirkung bei diesem Befehl; gleichzeitige Leser: --hash-worker"
 
 
 def _gemeinsam(unter: argparse.ArgumentParser) -> None:
@@ -1393,7 +1399,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("pruefen", help="Zieldateien vollstaendig neu lesen und vergleichen")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
@@ -1403,7 +1409,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
     p.add_argument("--endgueltig", action="store_true",
                    help="endgueltig loeschen statt in den Ordner _geloescht_<Datum> zu verschieben")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
@@ -1416,7 +1422,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p = unterbefehle.add_parser("ziel-index", help="Ziel-Index zeigen oder das Ziel vollstaendig neu einlesen")
     p.add_argument("--neu-aufbauen", action="store_true",
                    help="jede Datei im Ziel lesen und hashen, Index vollstaendig neu; legt eine fehlende Datenbank an")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 

@@ -40,7 +40,7 @@ CSV_KODIERUNG = "utf-8-sig"
 DATEI_SPALTEN = (
     "quellwurzel", "quellpfad", "status", "dateityp", "groesse", "mtime", "kamera", "kamera_modell",
     "aufnahme_zeit", "datum_quelle", "datum_sicher", "datum_hinweis", "gruppe", "zielpfad",
-    "schreibpfad", "hash", "fehlergrund", "bestaetigt_in_lauf", "kopiert_in_lauf",
+    "schreibpfad", "umbenannt", "hash", "fehlergrund", "bestaetigt_in_lauf", "kopiert_in_lauf",
     "gefunden_in_lauf", "zuletzt_gesehen_in_lauf",
 )
 EREIGNIS_SPALTEN = ("lauf_nummer", "art", "pfad", "anzahl", "text")

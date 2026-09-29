@@ -1,6 +1,6 @@
 """Was hinter der Oberflaeche passiert (Phase 7).
 
-Jeder Schritt (scan, analyse, kopieren, pruefen, aufraeumen) laeuft als
+Jeder Schritt (scan, analyse, kopieren, pruefen, aufraeumen, ziel-index) laeuft als
 eigener Prozess "fotosort arbeit --auftrag <datei>". Die Oberflaeche
 schreibt den Auftrag, startet den Prozess losgeloest (Fenster schliessen
 beendet ihn nicht) und liest waehrend des Laufs nur die kleine Statusdatei,

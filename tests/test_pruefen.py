@@ -341,3 +341,15 @@ def test_bericht_csv_mit_nicht_utf8_pfad(baum, quelle, ziel, nachschauen, capsys
     with open(neueste, encoding="utf-8-sig", newline="") as f:
         zeilen = list(csv.reader(f, delimiter=";"))
     assert any("latin1_" in r[1] for r in zeilen[1:])
+
+
+def test_dateien_csv_hat_alle_spalten_der_tabelle(tmp_path):
+    """SPEC §10: "alle Spalten der Tabelle dateien". Die Spalte umbenannt fehlte -
+    gerade sie trennt nach einem Absturz ein fertiges Umbenennen von einer
+    abgebrochenen Kopie. Neue Spalten fallen hier kuenftig sofort auf."""
+    d = db.Datenbank.oeffnen(tmp_path / "a")
+    try:
+        spalten = [r[1] for r in d.verbindung.execute("PRAGMA table_info(dateien)")]
+    finally:
+        d.schliessen()
+    assert sorted(bericht.DATEI_SPALTEN) == sorted(spalten)

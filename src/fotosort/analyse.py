@@ -13,23 +13,21 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten, pfade, steuerung
+from . import FotosortFehler, dateitypen, db, fortschritt, gruppen, kamera, meldungen, metadaten, pfade, steuerung
 from . import datum as datum_modul
 from . import ziel as ziel_modul
 
 ART_ZIELORDNER_MEHRDEUTIG = "zielordner_mehrdeutig"
-GRUND_SIDECAR_OHNE_HAUPT = "Sidecar ohne Hauptdatei"
-GRUND_METADATEN = "Metadaten nicht lesbar"
-GRUND_ZEILENUMBRUCH = "Zeilenumbruch im Dateinamen - bitte umbenennen"
-GRUND_KEIN_UTF8 = "Dateiname ist kein gueltiges UTF-8 - bitte umbenennen"
-GRUND_HAUPTDATEI = "Hauptdatei"
+GRUND_SIDECAR_OHNE_HAUPT = meldungen.GRUND_SIDECAR_OHNE_HAUPT
+GRUND_METADATEN = meldungen.GRUND_METADATEN
+GRUND_ZEILENUMBRUCH = meldungen.GRUND_ZEILENUMBRUCH
+GRUND_KEIN_UTF8 = meldungen.GRUND_KEIN_UTF8
+GRUND_HAUPTDATEI = meldungen.GRUND_HAUPTDATEI
 
 #: Ereignis: eine Zeile mit voruebergehendem Fehler wird erneut versucht.
 ART_ERNEUT_VERSUCHT = "neu_nach_fehler"
 
 SEITE = 5000
-_ANZEIGE_ALLE = 100
-_STILLE_SEKUNDEN = 5.0
 
 
 @dataclass
@@ -235,8 +233,7 @@ def _seite_abschliessen(seite: _Seite, struktur, konf, dbank, lauf, ergebnis, an
                 ergebnis.mehrdeutig += 1
                 if ort.ordner not in ergebnis.mehrdeutig_gemeldet:
                     ergebnis.mehrdeutig_gemeldet.add(ort.ordner)
-                    dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1,
-                                   "mehrere passende Ordner mit Zusatz, alphabetisch erster gewaehlt")
+                    dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1, meldungen.EREIGNIS_ORDNER_MEHRDEUTIG)
             if ort.wiederverwendet:
                 ergebnis.wiederverwendet += 1
             zielordner = ort.ordner
@@ -371,45 +368,14 @@ def _gruppe_fehler(g, nach_name, dbank, grund, ergebnis, anzeige) -> None:
 # ----------------------------------------------------------- Fortschritt ----
 
 
-class _Anzeige:
-    """Fortschritt: Balken im Terminal, sonst hoechstens alle 5 s eine Zeile."""
+class _Anzeige(fortschritt.Fortschritt):
+    """Fortschritt der Analyse wie bei den anderen Phasen: Balken im Terminal
+    mit Restzeit (nach der Zahl der Dateien), sonst hoechstens alle 5 s eine
+    Zeile; dazu die Meldung an die Oberflaeche (steuerung)."""
 
     def __init__(self, konsole, gesamt: int) -> None:
-        self.konsole = konsole
-        self.gesamt = gesamt
-        self.bisher = 0
-        self._seit = 0
-        self._zuletzt = time.monotonic()
-        self.balken = None
-        self.aufgabe = None
-        if konsole is not None and getattr(konsole, "is_terminal", False):
-            from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
+        super().__init__(konsole, gesamt, 0, lambda d, g, _b, _gb, _r: meldungen.analyse_laeuft(d, g))
 
-            self.balken = Progress(
-                TextColumn("{task.description}"), BarColumn(bar_width=None),
-                TextColumn("{task.completed}/{task.total}"), TimeElapsedColumn(),
-                console=konsole, refresh_per_second=4, transient=True,
-            )
-            self.aufgabe = self.balken.add_task(meldungen.analyse_laeuft(0, gesamt), total=gesamt or None)
-            self.balken.start()
-
-    def weiter(self, n: int) -> None:
-        if n <= 0:
-            return
-        self.bisher += n
-        self._seit += n
-        steuerung.melden(self.bisher, self.gesamt, 0, 0)
-        if self.balken is not None:
-            if self._seit >= _ANZEIGE_ALLE:
-                self.balken.update(self.aufgabe, advance=self._seit,
-                                   description=meldungen.analyse_laeuft(self.bisher, self.gesamt))
-                self._seit = 0
-        elif self.konsole is not None:
-            jetzt = time.monotonic()
-            if jetzt - self._zuletzt >= _STILLE_SEKUNDEN:
-                self._zuletzt = jetzt
-                self.konsole.print(meldungen.analyse_laeuft(self.bisher, self.gesamt))
-
-    def stop(self) -> None:
-        if self.balken is not None:
-            self.balken.stop()
+    def weiter(self, n: int, bytes_: int = 0) -> None:
+        if n > 0:
+            super().weiter(n, 0)

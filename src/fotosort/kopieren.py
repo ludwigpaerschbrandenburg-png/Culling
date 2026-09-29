@@ -1,4 +1,4 @@
-"""Phase 3: Uebertragen im Kopier-Modus (SPEC Abschnitt 4 Phase 3, 5, 7).
+"""Phase 3: Uebertragen - Kopieren und Verschieben (SPEC Abschnitt 4 Phase 3, 5, 7).
 
 Ablauf je Datei:
   1. Zielpfad in der Datenbank beanspruchen (Status kopieren_laeuft).
@@ -18,7 +18,11 @@ Entscheidungen, alles Umbenennen und jeder Datenbankzugriff geschehen im
 Hauptstrang. Quellen auf verschiedenen Laufwerken werden abwechselnd
 bedient, innerhalb eines Laufwerks in Ordnerreihenfolge (SPEC Abschnitt 7).
 
-Es wird in dieser Phase NICHTS in der Quelle geloescht oder veraendert.
+Im Kopier-Modus wird in der Quelle NICHTS geloescht oder veraendert. Im
+Verschieben-Modus (--verschieben) wird eine Quelldatei erst entfernt, nachdem
+Quelle und Ziel in diesem Lauf frisch gelesen wurden - ausschliesslich ueber
+loeschen.quelldatei_entfernen (die eine Loeschstelle); auf demselben
+Laufwerk wird nicht ueberschreibend umbenannt.
 Geloescht wird im Ziel ausschliesslich, was dieser Lauf selbst angelegt hat
 (eine eigene .part-Datei oder eine im Rueckfall selbst exklusiv angelegte
 Datei), sowie liegengebliebene .part-Dateien nach SPEC Abschnitt 5.
