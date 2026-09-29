@@ -170,6 +170,110 @@ def ist_netzpfad(p: Path) -> bool:
     return typ in NETZ_DATEISYSTEME
 
 
+# ---------------------------------------------- Laufwerksart (v0.8) ----
+
+
+def _netz_sicher(p: Path) -> bool:
+    """Nachweislich ein Netzlaufwerk - fuer die Wahl des Profils. (ist_netzpfad
+    antwortet vorsichtiger: Unbekanntes gilt dort als Netz.)"""
+    if _IST_WINDOWS:
+        return _windows_netzlaufwerk(p)
+    return dateisystem_typ(p) in NETZ_DATEISYSTEME
+
+
+def _block_art(geraet: Path, tiefe: int = 0) -> str:
+    """"hdd"/"ssd" eines Blockgeraets in sysfs; "" wenn nicht feststellbar.
+    LVM, Verschluesselung, RAID: entscheidend sind die Geraete darunter."""
+    if tiefe > 8:
+        return ""
+    try:
+        unter = [u.resolve(strict=True) for u in (geraet / "slaves").iterdir()] if (geraet / "slaves").is_dir() else []
+    except OSError:
+        unter = []
+    if unter:
+        arten = [_block_art(u, tiefe + 1) for u in unter]
+        if "hdd" in arten:
+            return "hdd"
+        return "ssd" if all(a == "ssd" for a in arten) else ""
+    # Eine Partition (sda1) hat keine eigene Warteschlange - das Laufwerk darueber schon.
+    ort = geraet.parent if (geraet / "partition").exists() else geraet
+    try:
+        wert = (ort / "queue" / "rotational").read_text(encoding="ascii").strip()
+    except OSError:
+        return ""
+    return {"1": "hdd", "0": "ssd"}.get(wert, "")
+
+
+def _linux_art(major: int, minor: int, sys_wurzel: Path = Path("/sys")) -> str:
+    """Linux: Festplatte oder SSD ueber /sys/dev/block/MAJ:MIN. Geraet 0 (ZFS,
+    btrfs, overlay, tmpfs) hat keine Blockgeraet-Kennung: nicht feststellbar."""
+    if major == 0:
+        return ""
+    try:
+        geraet = (sys_wurzel / "dev" / "block" / f"{major}:{minor}").resolve(strict=True)
+    except OSError:
+        return ""
+    return _block_art(geraet)
+
+
+def _windows_art(p: Path) -> str:  # pragma: no cover - nur Windows
+    """Windows: Laufwerkseigenschaft "Suchzeit" (Festplatte ja, SSD nein)."""
+    import ctypes
+    from ctypes import wintypes
+
+    text = str(aufloesen(p))
+    if text.startswith(_PRAEFIX):
+        text = text[len(_PRAEFIX):]
+    laufwerk = os.path.splitdrive(text)[0]
+    if len(laufwerk) != 2 or laufwerk[1] != ":":
+        return ""
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    k32.DeviceIoControl.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                    wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    # Ohne Zugriffsrechte (0) geoeffnet: Das geht ohne Administrator.
+    griff = k32.CreateFileW(f"\\\\.\\{laufwerk}", 0, 3, None, 3, 0, None)
+    if not griff or griff == wintypes.HANDLE(-1).value:
+        return ""
+    try:
+        class Anfrage(ctypes.Structure):   # STORAGE_PROPERTY_QUERY
+            _fields_ = [("PropertyId", wintypes.DWORD), ("QueryType", wintypes.DWORD),
+                        ("AdditionalParameters", ctypes.c_ubyte * 1)]
+
+        class Antwort(ctypes.Structure):   # DEVICE_SEEK_PENALTY_DESCRIPTOR
+            _fields_ = [("Version", wintypes.DWORD), ("Size", wintypes.DWORD),
+                        ("IncursSeekPenalty", wintypes.BOOLEAN)]
+
+        anfrage = Anfrage(7, 0)   # StorageDeviceSeekPenaltyProperty, PropertyStandardQuery
+        antwort = Antwort()
+        erhalten = wintypes.DWORD()
+        if not k32.DeviceIoControl(griff, 0x2D1400, ctypes.byref(anfrage), ctypes.sizeof(anfrage),
+                                   ctypes.byref(antwort), ctypes.sizeof(antwort), ctypes.byref(erhalten), None):
+            return ""
+        return "hdd" if antwort.IncursSeekPenalty else "ssd"
+    finally:
+        k32.CloseHandle(griff)
+
+
+def laufwerksart(p: Path) -> str:
+    """"netzwerk", "hdd", "ssd" - oder "", wenn es sich nicht feststellen
+    laesst (SPEC §8 seit v0.8: das Profil der Startseite wird vorgeschlagen)."""
+    try:
+        if _netz_sicher(Path(p)):
+            return "netzwerk"
+        if _IST_WINDOWS:
+            return _windows_art(Path(p))
+        if sys.platform.startswith("linux"):
+            st = os.stat(_vorhandener_teil(Path(p)))
+            return _linux_art(os.major(st.st_dev), os.minor(st.st_dev))
+    except Exception:   # nur ein Vorschlag - scheitert die Erkennung, entscheidet der Nutzer
+        return ""
+    return ""
+
+
 def gleiches_laufwerk(a: Path, b: Path) -> bool:
     """Liegen beide Pfade nachweislich auf demselben Laufwerk?
 

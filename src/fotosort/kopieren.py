@@ -61,6 +61,13 @@ GRUND_PART_BELEGT = meldungen.GRUND_PART_BELEGT
 
 PART = ".part"
 PROFILE: dict[str, int] = {"hdd": 2, "netzwerk": 4, "ssd": 8}
+#: "auto": Laufwerksart von Quelle und Ziel erkennen (SPEC §8, seit v0.8).
+PROFIL_AUTO = "auto"
+PROFIL_WAHL = (PROFIL_AUTO, "hdd", "netzwerk", "ssd")
+#: Gleichzeitig gelesene Dateien beim Pruefen und Aufraeumen, wenn
+#: leistung.hash_worker = 0 ist (SPEC §9 seit v0.8); 0 = Anzahl Kerne.
+HASH_JE_PROFIL: dict[str, int] = {"hdd": 2, "netzwerk": 4, "ssd": 0}
+HASH_HOECHSTENS = 16
 SEITE = 2000
 
 
@@ -121,11 +128,27 @@ def worker_zahlen(konf, profil=None, kopier=None, hash_=None) -> tuple[int, int,
     automatisch (SPEC Abschnitt 9).
     """
     profil = (profil or str(konf.wert("leistung.profil") or "hdd")).strip().lower()
+    if profil == PROFIL_AUTO:
+        profil = "hdd"   # nicht aufgeloest (profil_erkennen): die vorsichtige Wahl
     if profil not in PROFILE:
-        raise FotosortFehler(meldungen.profil_ungueltig(profil, sorted(PROFILE)))
+        raise FotosortFehler(meldungen.profil_ungueltig(profil, list(PROFIL_WAHL)))
     k = int(kopier or 0) or int(konf.wert("leistung.kopier_worker") or 0) or PROFILE[profil]
-    h = int(hash_ or 0) or int(konf.wert("leistung.hash_worker") or 0) or max(1, os.cpu_count() or 1)
+    h = int(hash_ or 0) or int(konf.wert("leistung.hash_worker") or 0) or HASH_JE_PROFIL[profil] \
+        or min(max(1, os.cpu_count() or 1), HASH_HOECHSTENS)
     return max(1, k), max(1, h), profil
+
+
+def profil_erkennen(wege) -> tuple[str, list[tuple[str, str]]]:
+    """Profil aus der Laufwerksart von Ziel und Quellen (SPEC §8, seit v0.8):
+    der langsamste Teil entscheidet - netzwerk vor hdd vor ssd; was sich nicht
+    feststellen laesst, gilt als hdd. Liefert (Profil, [(Pfad, Art)])."""
+    details = [(str(w), pfade.laufwerksart(Path(w))) for w in wege]
+    arten = [a for _w, a in details]
+    if "netzwerk" in arten:
+        return "netzwerk", details
+    if arten and all(a == "ssd" for a in arten):
+        return "ssd", details
+    return "hdd", details
 
 
 # --------------------------------------------------------- Bausteine ----

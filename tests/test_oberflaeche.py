@@ -34,6 +34,8 @@ def ob(tmp_path, monkeypatch):
     haelt den Test mit einem "Oeffnen mit"-Dialog an."""
     geoeffnet: list = []
     monkeypatch.setattr(cli, "_editor_oeffnen", lambda pfad: geoeffnet.append(Path(pfad)) or False)
+    # Die Laufwerksart des Testrechners soll kein Ergebnis veraendern (Windows-CI: SSD).
+    monkeypatch.setattr(ablauf_modul.kopieren.pfade, "laufwerksart", lambda p: "")
     ab = ablauf_modul.Ablauf(ordner=tmp_path / "oberflaeche")
     ab.geoeffnet = geoeffnet
     client = TestClient(server_modul.app_bauen(ab))
@@ -875,3 +877,25 @@ def test_zuruecklegen_aus_der_oberflaeche(ob, quelle, ziel, nachschauen, monkeyp
 def meldungen_anzahl(n: int) -> str:
     from fotosort import meldungen
     return meldungen.anzahl(n)
+
+
+
+def test_profil_wird_vorgeschlagen_bis_der_nutzer_waehlt(ob, quelle, ziel, monkeypatch):
+    """Entscheidung 1: Die Startseite fragt weiter nach dem Profil, schlaegt aber
+    vor, was sie erkannt hat - bis der Nutzer selbst waehlt."""
+    ab, client = ob
+    erkannt = {"art": "ssd"}
+    monkeypatch.setattr(ablauf_modul.kopieren.pfade, "laufwerksart", lambda p: erkannt["art"])
+    a = _post(client, "/api/ziel", {"ziel": str(ziel)})
+    assert a["profil"] == "ssd" and "SSD" in a["profil_erkannt"]
+    z = client.get("/api/zustand").json()
+    assert z["profil"] == "ssd" and z["profil_von_hand"] is False
+    erkannt["art"] = "hdd"
+    a = _post(client, "/api/quelle", {"pfad": str(quelle)})
+    assert a["profil"] == "hdd" and "Festplatte" in a["profil_erkannt"]
+    _post(client, "/api/einstellungen", {"profil": "ssd"})          # von Hand
+    erkannt["art"] = "netzwerk"
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    z = client.get("/api/zustand").json()
+    assert z["profil"] == "ssd" and z["profil_von_hand"] is True
+    assert ablauf_modul.Ablauf(ordner=ab.ordner).profil == "ssd"     # gemerkt

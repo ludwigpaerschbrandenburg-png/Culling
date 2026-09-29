@@ -1114,6 +1114,37 @@ def profil_ungueltig(profil, erlaubt: list) -> str:
     )
 
 
+LAUFWERKSART_NAME: dict[str, str] = {
+    "hdd": "Festplatte", "ssd": "SSD", "netzwerk": "Netzlaufwerk", "": "nicht feststellbar",
+}
+
+
+def profil_erkannt(profil: str, details) -> str:
+    """Befehlszeile, --profil auto (SPEC §8 seit v0.8)."""
+    zeilen = [
+        f"Profil {profil} erkannt (der langsamste Teil entscheidet;"
+        " was sich nicht feststellen laesst, gilt als Festplatte):"
+    ]
+    for pfad, art in details:
+        zeilen.append(f"  {LAUFWERKSART_NAME.get(art, art)}: {pfad}")
+    return "\n".join(zeilen)
+
+
+def ob_profil_erkannt(profil: str, ziel_art: str | None, quellen: list) -> str:
+    """Hinweis unter der Profil-Wahl der Startseite: was erkannt wurde.
+    ziel_art: Art des Ziels (None = kein Ziel); quellen: [(Pfad, Art)]."""
+    teile = []
+    if ziel_art is not None:
+        teile.append(f"Ziel: {LAUFWERKSART_NAME.get(ziel_art, ziel_art)}")
+    for pfad, art in quellen:
+        name = Path(str(pfad)).name or str(pfad)
+        teile.append(f"Quelle „{name}“: {LAUFWERKSART_NAME.get(art, art)}")
+    return (
+        "Erkannt – " + ", ".join(teile) + f". Vorgeschlagen: {OB_PROFIL_NAME.get(profil, profil)}"
+        " (der langsamste Teil entscheidet). Sie können es hier ändern."
+    )
+
+
 def ziel_nicht_beschreibbar(ziel, grund: str) -> str:
     return (
         "Abbruch: Im Zielordner laesst sich nichts anlegen - er ist nicht beschreibbar.\n"
@@ -1832,8 +1863,8 @@ def start_frage_modus() -> str:
 
 def start_frage_profil(standard: str) -> str:
     return (
-        "Worauf liegen Quelle und Ziel? hdd = mindestens eines auf einer Festplatte, ssd = beide auf SSDs, netzwerk = Netzlaufwerk"
-        f" [{standard}]: "
+        "Worauf liegen Quelle und Ziel? hdd = mindestens eines auf einer Festplatte, ssd = beide auf SSDs, netzwerk = Netzlaufwerk,"
+        f" auto = erkennen [{standard}]: "
     )
 
 
@@ -2069,6 +2100,8 @@ OB_PROFILE: list[tuple[str, str]] = [
     ("ssd", "SSD – Quelle und Ziel liegen beide auf SSDs (mehrere Dateien gleichzeitig, schneller)"),
     ("netzwerk", "Netzlaufwerk – Quelle oder Ziel liegt auf einem NAS oder einer Netzfreigabe"),
 ]
+
+OB_PROFIL_NAME: dict[str, str] = {"hdd": "Festplatte", "ssd": "SSD", "netzwerk": "Netzlaufwerk"}
 
 OB_ZUSTAND: dict[str, str] = {
     "startet": "Wird gestartet …",

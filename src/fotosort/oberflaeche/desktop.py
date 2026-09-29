@@ -439,7 +439,11 @@ class StartSeite(QWidget):
             "Jede Datei wird erst nach geprüfter Kopie in der Quelle gelöscht." if self.modus.wert() == "verschieben"
             else "Die Quelle bleibt unverändert · aufräumen später.")
         p = next((p for p in z.get("profile", []) if p["name"] == self.profil.wert()), None)
-        self.profil_text.setText(p["text"] if p else "")
+        text = p["text"] if p else ""
+        # Entscheidung 1 (v0.8): was die Laufwerkserkennung vorschlaegt
+        if z.get("profil_erkannt") and not z.get("profil_von_hand"):
+            text += "\n" + z["profil_erkannt"]
+        self.profil_text.setText(text)
 
     def quellen_zeigen(self, neu: list) -> None:
         _leeren(self.quellen_box)
@@ -1002,6 +1006,7 @@ class Hauptfenster(QMainWindow):
         if z is None:
             return
         self.zustand = z
+        self.profil_gewaehlt_ = bool(z.get("profil_von_hand"))
         self.lauf = z.get("lauf") or {}
         self.rahmen()
         self.start.fuellen(z)
@@ -1036,11 +1041,16 @@ class Hauptfenster(QMainWindow):
         self.start.quellen_zeigen(self.zustand.get("quellen_neu") or [])
         self.rahmen()
         self.start_aktionen()
-        profil = (a["archiv"] or {}).get("profil")
-        if profil and not self.profil_gewaehlt_:
-            self.start.profil.setzen(profil)
-            self.start.texte(self.zustand)
-            self.einstellungen_senden()
+        self._profil_uebernehmen(a)
+
+    def _profil_uebernehmen(self, a: dict) -> None:
+        """Vorschlag der Laufwerkserkennung zeigen (SPEC §8 seit v0.8); hat der
+        Nutzer selbst gewaehlt, aendert der Hintergrund das Profil nicht mehr."""
+        for k in ("profil", "profil_erkannt", "profil_von_hand"):
+            if k in a:
+                self.zustand[k] = a[k]
+        self.start.profil.setzen(self.zustand.get("profil") or "hdd")
+        self.start.texte(self.zustand)
 
     def quelle_hinzufuegen(self, pfad: str, trotzdem: bool = False) -> None:
         a = self._versuchen(self.ab.quelle_hinzufuegen, pfad, trotzdem)
@@ -1053,6 +1063,7 @@ class Hauptfenster(QMainWindow):
             return
         self.zustand["quellen_neu"] = a["quellen_neu"]
         self.start.quellen_zeigen(a["quellen_neu"])
+        self._profil_uebernehmen(a)
         self.meldung("")
 
     def quelle_entfernen(self, pfad: str) -> None:
@@ -1061,17 +1072,20 @@ class Hauptfenster(QMainWindow):
             return
         self.zustand["quellen_neu"] = a["quellen_neu"]
         self.start.quellen_zeigen(a["quellen_neu"])
+        self._profil_uebernehmen(a)
 
     def profil_gewaehlt(self) -> None:
         self.profil_gewaehlt_ = True
         self.einstellungen_senden()
 
     def einstellungen_senden(self) -> None:
-        self.start.texte(self.zustand)
-        a = self._versuchen(self.ab.einstellungen_setzen, self.start.modus.wert() == "verschieben", self.start.profil.wert())
+        # Das Profil geht nur mit, wenn der Nutzer es selbst gewaehlt hat - sonst
+        # bliebe der Vorschlag der Laufwerkserkennung nach einem Moduswechsel stehen.
+        profil = self.start.profil.wert() if self.profil_gewaehlt_ else None
+        a = self._versuchen(self.ab.einstellungen_setzen, self.start.modus.wert() == "verschieben", profil)
         if a is not None:
             self.zustand["verschieben"] = a["verschieben"]
-            self.zustand["profil"] = a["profil"]
+            self._profil_uebernehmen(a)
 
     def los(self, ziel_anlegen: bool, ziel_trotzdem: bool = False) -> None:
         with self.beschaeftigt():

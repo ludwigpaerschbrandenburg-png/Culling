@@ -260,6 +260,10 @@ class Ablauf:
         self.quellen: list[str] = []
         self.verschieben = False
         self.profil = "hdd"
+        # Entscheidung 1 (v0.8): Das Profil wird aus den Laufwerken von Ziel und
+        # Quellen vorgeschlagen, bis der Nutzer es selbst waehlt.
+        self.profil_von_hand = False
+        self.profil_erkannt = ""
         self.fenster = False      # True, wenn ein pywebview-Fenster den Ordnerdialog anbieten kann
         self._laden()
 
@@ -273,6 +277,7 @@ class Ablauf:
         self.verschieben = bool(alt.get("verschieben", False))
         profil = str(alt.get("profil") or "hdd")
         self.profil = profil if profil in kopieren.PROFILE else "hdd"
+        self.profil_von_hand = bool(alt.get("profil_von_hand", False))
         # Laeuft von einem frueheren Fenster noch ein Schritt? Dann uebernehmen
         # (SPEC Abschnitt 8: Fenster schliessen beeinflusst den Lauf nicht).
         st = steuerung.json_lesen(self.status_datei) or {}
@@ -290,6 +295,7 @@ class Ablauf:
         try:
             steuerung.json_schreiben(self.zustand_datei, {
                 "ziel": self.ziel, "quellen": self.quellen, "verschieben": self.verschieben, "profil": self.profil,
+                "profil_von_hand": self.profil_von_hand,
             })
         except OSError:
             pass
@@ -699,6 +705,8 @@ class Ablauf:
             "quellen_neu": list(self.quellen),
             "verschieben": self.verschieben,
             "profil": self.profil,
+            "profil_von_hand": self.profil_von_hand,
+            "profil_erkannt": self.profil_erkannt,
             "profile": [{"name": n, "text": t} for n, t in meldungen.OB_PROFILE],
             "fenster": self.fenster,
             "woerter": {k: v for k, v in meldungen.BESTAETIGUNGSWORT.items() if k != "verwerfen"},
@@ -710,11 +718,35 @@ class Ablauf:
 
     # -- Startseite --------------------------------------------------------
 
+    def _profil_vorschlagen(self, bekannt: list[str] | None = None) -> None:
+        """Profil aus der Art der Laufwerke von Ziel und Quellen vorschlagen
+        (SPEC §8 seit v0.8) - nur, solange der Nutzer nicht selbst gewaehlt hat.
+        Erkannt wird bei jeder Aenderung von Ziel oder Quellen neu."""
+        if self.profil_von_hand:
+            self.profil_erkannt = ""
+            return
+        quellen = list(dict.fromkeys((bekannt or []) + self.quellen))
+        wege = ([self.ziel] if self.ziel and os.path.isdir(pfade.lang(Path(self.ziel))) else []) + [
+            q for q in quellen if os.path.isdir(pfade.lang(Path(q)))]
+        if not wege:
+            self.profil_erkannt = ""
+            return
+        profil, details = kopieren.profil_erkennen(wege)
+        arten = dict(details)
+        ziel_art = arten.get(str(self.ziel)) if wege[0] == self.ziel else None
+        self.profil = profil
+        self.profil_erkannt = meldungen.ob_profil_erkannt(
+            profil, ziel_art, [(q, arten[str(q)]) for q in wege if q != self.ziel])
+
+    def _profil_antwort(self) -> dict:
+        return {"profil": self.profil, "profil_erkannt": self.profil_erkannt, "profil_von_hand": self.profil_von_hand}
+
     def ziel_setzen(self, ziel: str) -> dict:
         with self.sperre:
             self.ziel = _fest(ziel)
+            self._profil_vorschlagen(self._bekannte_quellen())
             self._speichern()
-            return {"ziel": self.ziel, "archiv": self.archiv_info()}
+            return {"ziel": self.ziel, "archiv": self.archiv_info(), **self._profil_antwort()}
 
     def einstellungen_setzen(self, verschieben: bool | None = None, profil: str | None = None) -> dict:
         with self.sperre:
@@ -724,8 +756,10 @@ class Ablauf:
                 if profil not in kopieren.PROFILE:
                     raise FotosortFehler(meldungen.profil_ungueltig(profil, sorted(kopieren.PROFILE)))
                 self.profil = profil
+                self.profil_von_hand = True
+                self.profil_erkannt = ""
             self._speichern()
-            return {"verschieben": self.verschieben, "profil": self.profil}
+            return {"verschieben": self.verschieben, **self._profil_antwort()}
 
     def _bekannte_quellen(self) -> list[str]:
         if not self._archiv_da() or self.lauf_lebt():
@@ -753,14 +787,16 @@ class Ablauf:
                 return {"frage": "quelle_gross", "art": art, "pfad": pfad,
                         "text": meldungen.ob_frage_quelle_gross(pfad, art)}
             self.quellen.append(pfad)
+            self._profil_vorschlagen(bekannt)
             self._speichern()
-            return {"quellen_neu": list(self.quellen)}
+            return {"quellen_neu": list(self.quellen), **self._profil_antwort()}
 
     def quelle_entfernen(self, pfad: str) -> dict:
         with self.sperre:
             self.quellen = [q for q in self.quellen if q != pfad]
+            self._profil_vorschlagen(self._bekannte_quellen())
             self._speichern()
-            return {"quellen_neu": list(self.quellen)}
+            return {"quellen_neu": list(self.quellen), **self._profil_antwort()}
 
     def los(self, ziel_anlegen: bool = False, ziel_trotzdem: bool = False) -> dict:
         """Der grosse Knopf: Ziel pruefen, ExifTool pruefen, Scan starten.
@@ -914,6 +950,7 @@ class Ablauf:
                 raise FotosortFehler(meldungen.ob_verwerfen_unvollstaendig(fehler))
             # Startseite leer: kein Ziel, keine Quellen, kein alter Lauf.
             self.ziel, self.quellen, self.verschieben, self.profil, self.lauf = "", [], False, "hdd", None
+            self.profil_von_hand, self.profil_erkannt = False, ""
             for datei in (self.status_datei, self.steuer_datei, self.auftrag_datei):
                 try:
                     datei.unlink()

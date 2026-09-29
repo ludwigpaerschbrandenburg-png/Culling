@@ -525,3 +525,26 @@ def test_knopf_zuruecklegen_nur_mit_inhalt_im_ordner(app, tmp_path, quelle, ziel
     assert fragen and fragen[-1][0] == "Zurücklegen?" and "überschrieben" in fragen[-1][1]
     assert ab.lauf is None                     # "Nicht jetzt": nichts gestartet
     f.close()
+
+
+def test_profil_vorschlag_im_fenster(app, tmp_path, quelle, ziel, monkeypatch):
+    """Entscheidung 1 (v0.8): Das Fenster zeigt, was erkannt wurde; ein
+    Moduswechsel macht den Vorschlag nicht zur eigenen Wahl, ein Klick schon."""
+    art = {"wert": "ssd"}
+    monkeypatch.setattr(ablauf_modul.kopieren.pfade, "laufwerksart", lambda p: art["wert"])
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    assert f.start.profil.wert() == "ssd" and "SSD" in f.start.profil_text.text()
+    f.start.modus.setzen("verschieben")
+    f.einstellungen_senden()
+    assert ab.profil_von_hand is False
+    art["wert"] = "hdd"
+    f.quelle_hinzufuegen(str(quelle))
+    assert f.start.profil.wert() == "hdd" and "Festplatte" in f.start.profil_text.text()
+    f.start.profil.knoepfe["netzwerk"].click()
+    assert ab.profil == "netzwerk" and ab.profil_von_hand is True
+    assert "Erkannt" not in f.start.profil_text.text()
+    f.close()

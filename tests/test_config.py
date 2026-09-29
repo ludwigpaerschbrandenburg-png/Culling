@@ -48,7 +48,7 @@ def test_standardwerte_wortwoertlich():
     assert k.wert("sicherheit.byte_vergleich_vor_loeschen") is False
     assert k.wert("datenbank.datenbank_ort") == ""
     assert k.wert("aufraeumen.reste_dateien") == ["Thumbs.db", ".DS_Store", "desktop.ini"]
-    assert k.wert("leistung.profil") == "hdd"
+    assert k.wert("leistung.profil") == "auto"
     assert k.wert("leistung.metadaten_prozesse") == 0
     assert k.wert("leistung.kopier_worker") == 0
     assert k.wert("leistung.hash_worker") == 0
@@ -98,7 +98,7 @@ def test_fehlende_werte_werden_im_speicher_ergaenzt(tmp_path):
     k = config.laden(pfad)
     assert k.wert("ordner.vorlage") == "eigen"
     assert k.wert("ordner.vorlage_ohne_datum") == "_Ohne_Datum/{kamera}"
-    assert k.wert("leistung.profil") == "hdd"
+    assert k.wert("leistung.profil") == "auto"
     # Die Datei bleibt dabei unangetastet.
     assert pfad.read_bytes() == vorher
 
@@ -130,7 +130,7 @@ def test_eigene_aliase_gelten_nicht_als_unbekannt(tmp_path):
 def test_laden_ohne_datei_gibt_standardwerte(tmp_path):
     k = config.laden(tmp_path / "gibt-es-nicht.toml")
     assert k.aus_datei is False
-    assert k.wert("leistung.profil") == "hdd"
+    assert k.wert("leistung.profil") == "auto"
 
 
 def test_aus_ziel_uebernehmen(tmp_path):

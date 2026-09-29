@@ -119,6 +119,7 @@
     $("ziel").value = z.ziel || "";
     radioSetzen("modus", z.verschieben ? "verschieben" : "kopieren");
     radioSetzen("profil", z.profil);
+    Z.profilGewaehlt = !!z.profil_von_hand;
     modusText(); profilText();
     quellenZeigen(z.quellen_neu);
     archivZeigen(z.archiv);
@@ -132,7 +133,15 @@
   function profilText() {
     var z = Z.zustand; if (!z) return;
     var p = z.profile.filter(function (x) { return x.name === radio("profil"); })[0];
-    $("profil-text").textContent = p ? p.text : "";
+    var text = p ? p.text : "";
+    // Entscheidung 1 (v0.8): was die Laufwerkserkennung vorschlaegt
+    if (z.profil_erkannt && !z.profil_von_hand) text += "\n" + z.profil_erkannt;
+    $("profil-text").textContent = text;
+  }
+
+  function profilUebernehmen(a) {
+    ["profil", "profil_erkannt", "profil_von_hand"].forEach(function (k) { if (a && k in a) Z.zustand[k] = a[k]; });
+    radioSetzen("profil", Z.zustand.profil); profilText();
   }
 
   function quellenZeigen(neu) {
@@ -144,7 +153,7 @@
       var weg = el("span", "×", "weg");
       weg.title = "Entfernen";
       weg.onclick = function () {
-        api("/api/quelle", { pfad: q, entfernen: true }).then(function (a) { Z.zustand.quellen_neu = a.quellen_neu; quellenZeigen(a.quellen_neu); }).catch(fehlerZeigen);
+        api("/api/quelle", { pfad: q, entfernen: true }).then(function (a) { Z.zustand.quellen_neu = a.quellen_neu; quellenZeigen(a.quellen_neu); profilUebernehmen(a); }).catch(fehlerZeigen);
       };
       t.appendChild(weg);
       box.appendChild(t);
@@ -201,7 +210,7 @@
     return api("/api/ziel", { ziel: $("ziel").value.trim() }).then(function (a) {
       Z.zustand.ziel = a.ziel; Z.zustand.archiv = a.archiv;
       archivZeigen(a.archiv); quellenZeigen(Z.zustand.quellen_neu); rahmen();
-      if (a.archiv && a.archiv.profil && !Z.profilGewaehlt) { radioSetzen("profil", a.archiv.profil); profilText(); einstellungenSenden(); }
+      profilUebernehmen(a);
     }).catch(fehlerZeigen);
   }
 
@@ -211,8 +220,11 @@
   }
 
   function einstellungenSenden() {
-    return api("/api/einstellungen", { verschieben: radio("modus") === "verschieben", profil: radio("profil") }).then(function (a) {
-      Z.zustand.verschieben = a.verschieben; Z.zustand.profil = a.profil;
+    // Das Profil geht nur mit, wenn der Nutzer es selbst gewaehlt hat.
+    var daten = { verschieben: radio("modus") === "verschieben" };
+    if (Z.profilGewaehlt) daten.profil = radio("profil");
+    return api("/api/einstellungen", daten).then(function (a) {
+      Z.zustand.verschieben = a.verschieben; profilUebernehmen(a);
     }).catch(fehlerZeigen);
   }
 
@@ -226,6 +238,7 @@
       $("quelle-neu").value = "";
       Z.zustand.quellen_neu = a.quellen_neu;
       quellenZeigen(a.quellen_neu);
+      profilUebernehmen(a);
       meldung("");
     }).catch(fehlerZeigen);
   }

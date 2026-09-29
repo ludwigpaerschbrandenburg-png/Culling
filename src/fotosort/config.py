@@ -212,9 +212,9 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
         [
             (
                 "profil",
-                'Grobe Voreinstellung fuer die Worker-Zahlen. Erlaubt: "hdd",\n'
-                '# "ssd", "netzwerk".',
-                "hdd",
+                'Grobe Voreinstellung fuer die Worker-Zahlen. Erlaubt: "auto" (Art der\n'
+                '# Laufwerke von Quelle und Ziel erkennen), "hdd", "ssd", "netzwerk".',
+                "auto",
             ),
             (
                 "metadaten_prozesse",
@@ -230,7 +230,8 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             ),
             (
                 "hash_worker",
-                "Anzahl gleichzeitiger Hash-Berechnungen. 0 = Anzahl Kerne.",
+                "Anzahl gleichzeitiger Hash-Berechnungen. 0 = nach Profil\n"
+                "# (hdd 2, netzwerk 4, ssd Anzahl Kerne, hoechstens 16).",
                 0,
             ),
             (

@@ -449,9 +449,13 @@ def test_zu_wenig_platz_bricht_vorher_ab(baum, quelle, ziel, nachschauen, monkey
 
 
 def test_worker_zahlen(konf):
-    assert kopieren.worker_zahlen(konf) == (2, max(1, os.cpu_count() or 1), "hdd")
-    assert kopieren.worker_zahlen(konf, "ssd")[0] == 8
-    assert kopieren.worker_zahlen(konf, "netzwerk")[0] == 4
+    """Entscheidung 1 (v0.8): Auch die gleichzeitig gelesenen Dateien richten
+    sich nach dem Profil - eine Festplatte liest mit vielen Leser nur langsamer."""
+    kerne = min(max(1, os.cpu_count() or 1), 16)
+    assert kopieren.worker_zahlen(konf, "hdd") == (2, 2, "hdd")
+    assert kopieren.worker_zahlen(konf, "ssd")[:2] == (8, kerne)
+    assert kopieren.worker_zahlen(konf, "netzwerk")[:2] == (4, 4)
+    assert kopieren.worker_zahlen(konf, "auto")[2] == "hdd"     # nicht aufgeloest: die vorsichtige Wahl
     konf.alle()["leistung"]["kopier_worker"] = 3
     konf.alle()["leistung"]["hash_worker"] = 5
     assert kopieren.worker_zahlen(konf)[:2] == (3, 5)
@@ -749,3 +753,23 @@ def test_namen_in_arbeit_gelten_ohne_gross_klein_und_unicode_form():
     assert Path("/z/2026/img_0001.jpg") not in arbeit
     arbeit.clear()
     assert Path(nfd) not in arbeit
+
+
+def test_profil_erkennen_der_langsamste_teil_entscheidet(monkeypatch, tmp_path):
+    arten: dict = {}
+    monkeypatch.setattr(kopieren.pfade, "laufwerksart", lambda p: arten[str(p)])
+    a, b = tmp_path / "a", tmp_path / "b"
+    for werte, erwartet in [(("ssd", "ssd"), "ssd"), (("ssd", "hdd"), "hdd"), (("hdd", "netzwerk"), "netzwerk"),
+                            (("ssd", ""), "hdd")]:
+        arten.update({str(a): werte[0], str(b): werte[1]})
+        profil, details = kopieren.profil_erkennen([a, b])
+        assert profil == erwartet and [art for _p, art in details] == list(werte)
+    assert kopieren.profil_erkennen([])[0] == "hdd"
+
+
+def test_profil_auto_auf_der_befehlszeile(baum, quelle, ziel, capsys):
+    _vorbereiten(ziel, quelle)
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel, "--profil", "auto") == cli.OK
+    aus = capsys.readouterr().out
+    assert "erkannt" in aus

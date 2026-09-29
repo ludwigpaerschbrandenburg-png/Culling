@@ -568,3 +568,40 @@ def test_schreibschutz_wird_am_windows_attribut_erkannt(tmp_path, monkeypatch):
     assert pfade._schreibgeschuetzt(p) is False
     monkeypatch.setattr(pfade.sys, "platform", "linux")
     assert pfade._schreibgeschuetzt(p) is False
+
+
+
+# --- Laufwerksart erkennen (Entscheidung 1, v0.8) ---------------------------
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="sysfs gibt es nur unter Linux")
+def test_laufwerksart_aus_sysfs(tmp_path):
+    sys_w = tmp_path / "sys"
+    geraet = sys_w / "devices" / "pci0" / "block" / "sda"
+    (geraet / "queue").mkdir(parents=True)
+    (geraet / "queue" / "rotational").write_text("1\n")
+    teil = geraet / "sda1"
+    teil.mkdir()
+    (teil / "partition").write_text("1\n")
+    (sys_w / "dev" / "block").mkdir(parents=True)
+    (sys_w / "dev" / "block" / "8:1").symlink_to(teil)
+    assert pfade._linux_art(8, 1, sys_w) == "hdd"
+    (geraet / "queue" / "rotational").write_text("0\n")
+    assert pfade._linux_art(8, 1, sys_w) == "ssd"
+    # LVM/verschluesselt: das Geraet darunter entscheidet
+    dm = sys_w / "devices" / "virtual" / "block" / "dm-0"
+    (dm / "queue").mkdir(parents=True)
+    (dm / "queue" / "rotational").write_text("0\n")
+    (dm / "slaves").mkdir()
+    (dm / "slaves" / "sda1").symlink_to(teil)
+    (sys_w / "dev" / "block" / "253:0").symlink_to(dm)
+    (geraet / "queue" / "rotational").write_text("1\n")
+    assert pfade._linux_art(253, 0, sys_w) == "hdd"
+    assert pfade._linux_art(0, 42, sys_w) == ""        # ZFS, btrfs, overlay: nicht feststellbar
+
+
+def test_laufwerksart_netz_und_unbekannt(tmp_path, monkeypatch):
+    monkeypatch.setattr(pfade, "_netz_sicher", lambda p: True)
+    assert pfade.laufwerksart(tmp_path) == "netzwerk"
+    monkeypatch.setattr(pfade, "_netz_sicher", lambda p: False)
+    assert pfade.laufwerksart(tmp_path) in ("hdd", "ssd", "")   # je nach Rechner, aber nie ein Fehler

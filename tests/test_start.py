@@ -278,3 +278,15 @@ def test_start_bietet_das_zurueckholen_der_datenbank_an(baum, quelle, ziel, nach
     assert (ordner / db.DATEINAME).is_file()
     zeilen = _echte(_zeilen(nachschauen, ziel))
     assert {z["status"] for z in zeilen.values()} == {"geprueft", "duplikat_bestaetigt"}
+
+
+def test_start_ohne_profilangabe_erkennt_die_laufwerke(baum, quelle, ziel, nachschauen, antwort, monkeypatch, capsys):
+    """Entscheidung 1 (v0.8): Enter bei der Profilfrage heisst "auto" - die
+    Laufwerke von Ziel und Quelle werden erkannt, das Ergebnis genannt, und
+    die Schritte arbeiten mit dem erkannten Profil."""
+    monkeypatch.setattr(cli.kopieren.pfade, "laufwerksart", lambda p: "ssd")
+    antwort.extend(_antworten_voll(quelle, profil=""))
+    assert _cli("start", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "Profil ssd erkannt" in aus and "Profil:   ssd" in aus
+    assert str(quelle) in aus.split("Profil ssd erkannt", 1)[1]

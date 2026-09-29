@@ -536,6 +536,29 @@ def _editor_oeffnen(pfad: Path) -> bool:
     return True
 
 
+def _profil_wege(ziel: Path, quellen) -> list[Path]:
+    """Ziel und die erreichbaren Quellen - die Laufwerke, die die Arbeit tragen."""
+    wege = [Path(ziel)]
+    for q in quellen:
+        q = Path(db.text_pfad(q))
+        if os.path.isdir(pfade.lang(q)):
+            wege.append(q)
+    return wege
+
+
+def _profil_aufloesen(args, archiv, konsole) -> None:
+    """--profil auto oder leistung.profil = "auto": das Profil aus der Art der
+    Laufwerke von Ziel und Quellen bestimmen und nennen (SPEC §8 seit v0.8).
+    Danach steht in args.profil ein festes Profil."""
+    gewuenscht = str(getattr(args, "profil", None) or archiv.konf.wert("leistung.profil") or "hdd").strip().lower()
+    if gewuenscht != kopieren.PROFIL_AUTO:
+        return
+    quellen = [z["wurzel"] for z in archiv.datenbank.quellen_liste()]
+    profil, details = kopieren.profil_erkennen(_profil_wege(archiv.ziel, quellen))
+    konsole.print(meldungen.profil_erkannt(profil, details))
+    args.profil = profil
+
+
 def befehl_analyse(args, konsole) -> int:
     """Phase 2: Metadaten lesen, Ziel berechnen (SPEC Abschnitt 4 Phase 2)."""
     archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True)
@@ -544,6 +567,7 @@ def befehl_analyse(args, konsole) -> int:
         # archiv_oeffnen hat ExifTool bereits geprueft (harter Abbruch fuer
         # analyse); hier nur noch den Pfad holen.
         gefunden, _wo = exiftool_finden(archiv.konf)
+        _profil_aufloesen(args, archiv, konsole)
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         offen = datenbank.anzahl_zu_analysieren()
         prozesse = int(getattr(args, "prozesse", 0) or 0) or metadaten.prozesse_bestimmen(
@@ -586,6 +610,7 @@ def befehl_kopieren(args, konsole) -> int:
     datenbank = archiv.datenbank
     try:
         # Ungueltige Worker-Angaben sollen scheitern, bevor ein Lauf entsteht.
+        _profil_aufloesen(args, archiv, konsole)
         kopieren.worker_zahlen(archiv.konf, args.profil, args.kopier_worker, args.hash_worker)
         if probelauf:
             konsole.print(meldungen.kopieren_plan(kopieren.planen(archiv.ziel, datenbank)))
@@ -629,6 +654,7 @@ def befehl_pruefen(args, konsole) -> int:
     archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True)
     datenbank = archiv.datenbank
     try:
+        _profil_aufloesen(args, archiv, konsole)
         kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         try:
@@ -727,6 +753,7 @@ def befehl_aufraeumen(args, konsole) -> int:
     archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=not probelauf)
     datenbank = archiv.datenbank
     try:
+        _profil_aufloesen(args, archiv, konsole)
         kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
         plan = aufraeumen.planen(datenbank, args.quelle)
         if plan.unbekannt:
@@ -1052,18 +1079,23 @@ def befehl_start(args, konsole) -> int:
         verschieben = bool(getattr(args, "verschieben", False))
         if not verschieben:
             verschieben = _fragen(konsole, meldungen.start_frage_modus(), "k").lower() in ("v", "verschieben")
-        profil_standard = stand["profil"] if stand else "hdd"
+        profil_standard = stand["profil"] if stand else kopieren.PROFIL_AUTO
+        if profil_standard not in kopieren.PROFIL_WAHL:
+            profil_standard = kopieren.PROFIL_AUTO
         profil = getattr(args, "profil", None)
         versuche = 0
         while not profil:
             antwort = _fragen(konsole, meldungen.start_frage_profil(profil_standard), profil_standard).lower()
-            if antwort in kopieren.PROFILE:
+            if antwort in kopieren.PROFIL_WAHL:
                 profil = antwort
             else:
-                konsole.print(meldungen.profil_ungueltig(antwort, sorted(kopieren.PROFILE)))
+                konsole.print(meldungen.profil_ungueltig(antwort, list(kopieren.PROFIL_WAHL)))
                 versuche += 1
                 if versuche >= 3:
                     raise _Abbruch()
+        if profil == kopieren.PROFIL_AUTO:
+            profil, details = kopieren.profil_erkennen(_profil_wege(ziel, bekannt + neue_quellen))
+            konsole.print(meldungen.profil_erkannt(profil, details))
 
         # 3. Zusammenfassung
         zaehler = stand["zaehler"] if stand else {}
@@ -1321,6 +1353,7 @@ def befehl_ziel_index(args, konsole) -> int:
     archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=True, datenbank_anlegen=True)
     datenbank = archiv.datenbank
     try:
+        _profil_aufloesen(args, archiv, konsole)
         kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         try:
@@ -1410,7 +1443,8 @@ def _befehlszeile() -> str:
 #: Bei pruefen, aufraeumen und ziel-index bestimmt das Profil nichts: Wie
 #: viele Dateien gleichzeitig gelesen werden, stellt --hash-worker bzw.
 #: hash_worker in [leistung] ein (0 = so viele wie Prozessorkerne).
-HILFE_PROFIL_OHNE_WIRKUNG = "ohne Wirkung bei diesem Befehl; gleichzeitige Leser: --hash-worker"
+HILFE_PROFIL_LESER = ("bestimmt, wie viele Dateien gleichzeitig gelesen werden (auto = Laufwerke erkennen);"
+                      " einzeln festlegen: --hash-worker")
 
 
 def _gemeinsam(unter: argparse.ArgumentParser) -> None:
@@ -1459,7 +1493,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("analyse", help="Metadaten lesen und Ziel berechnen")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE),
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL),
                    help="bestimmt die Zahl der ExifTool-Prozesse (hdd/netzwerk 4, ssd Kerne bis 16)")
     p.add_argument("--prozesse", type=_mindestens_eins, default=None, help="Zahl der ExifTool-Prozesse fest vorgeben (1 oder mehr)")
     _gemeinsam(p)
@@ -1468,7 +1502,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--verschieben", action="store_true",
                    help="verschieben: kopieren, beide Seiten frisch lesen, dann Quelle loeschen; gleiches Laufwerk: umbenennen")
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen")
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL), help="Voreinstellung fuer die Worker-Zahlen")
     p.add_argument("--kopier-worker", type=int, metavar="N", help="gleichzeitige Kopiervorgaenge")
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
@@ -1476,7 +1510,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p = unterbefehle.add_parser("pruefen", help="Zieldateien vollstaendig neu lesen und vergleichen")
     p.add_argument("--alles", action="store_true",
                    help="danach das ganze Archiv erneut lesen: findet veraenderte, kaputte oder fehlende Archivdateien")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL), help=HILFE_PROFIL_LESER)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
@@ -1486,7 +1520,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
     p.add_argument("--endgueltig", action="store_true",
                    help="endgueltig loeschen statt in den Ordner _geloescht_<Datum> zu verschieben")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL), help=HILFE_PROFIL_LESER)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
@@ -1504,7 +1538,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     p = unterbefehle.add_parser("ziel-index", help="Ziel-Index zeigen oder das Ziel vollstaendig neu einlesen")
     p.add_argument("--neu-aufbauen", action="store_true",
                    help="jede Datei im Ziel lesen und hashen, Index vollstaendig neu; legt eine fehlende Datenbank an")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL), help=HILFE_PROFIL_LESER)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
@@ -1527,7 +1561,7 @@ def parser_bauen() -> argparse.ArgumentParser:
         help="einen noch nicht vorhandenen Zielordner wirklich anlegen",
     )
     p.add_argument("--verschieben", action="store_true", help="verschieben statt kopieren (sonst wird gefragt)")
-    p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help="Voreinstellung fuer die Worker-Zahlen (sonst wird gefragt)")
+    p.add_argument("--profil", choices=list(kopieren.PROFIL_WAHL), help="Voreinstellung fuer die Worker-Zahlen (sonst wird gefragt)")
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("fenster", help="die Oberflaeche mit Fenster und Knoepfen oeffnen")
