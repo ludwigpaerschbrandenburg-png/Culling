@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import db, meldungen, pfade
+from . import db, meldungen, nachpruefen, pfade
 from .analyse import ART_ZIELORDNER_MEHRDEUTIG, GRUND_SIDECAR_OHNE_HAUPT
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
@@ -220,6 +220,12 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
     _liste(z, "Uebersprungen, weil die Datei eine Verknuepfung ins Ziel ist",
            dbank.dateien_liste("status = 'uebersprungen' AND fehlergrund = ?", (GRUND_INS_ZIEL,)),
            lambda r: f"{r['quellpfad']}")
+    _ereignis_liste(z, "ARCHIVDATEI VERAENDERT seit der Pruefung (pruefen --alles)",
+                    dbank.ereignisse_zeiger(nachpruefen.ART_VERAENDERT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
+    _ereignis_liste(z, "ARCHIVDATEI FEHLT seit der Pruefung (pruefen --alles)",
+                    dbank.ereignisse_zeiger(nachpruefen.ART_FEHLT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
+    _ereignis_liste(z, "Archivdatei beim Nachpruefen nicht lesbar",
+                    dbank.ereignisse_zeiger(nachpruefen.ART_NICHT_LESBAR), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
     _ereignis_liste(z, "Zielordner mehrdeutig (alphabetisch erster gewaehlt)",
                     dbank.ereignisse_zeiger(ART_ZIELORDNER_MEHRDEUTIG), lambda e: f"{e['pfad']}")
     _ereignis_liste(z, "Datenbank aus der Sicherungskopie zurueckgeholt (fotosort wiederherstellen)",

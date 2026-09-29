@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, pfade, prozesse, steuerung
+from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, nachpruefen, pfade, prozesse, steuerung
 from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
@@ -113,6 +113,17 @@ def ordner_eintraege(ordner: Path, hoechstens: int = 100000) -> int:
     except OSError:
         return 0
     return n
+
+
+def anleitung_pfad() -> Path | None:
+    """Die LIESMICH.md: im Windows-Paket neben start.bat, sonst in der
+    Wurzel des Quellcodes."""
+    kandidaten = []
+    wurzel = cli.paket_wurzel()
+    if wurzel is not None:
+        kandidaten.append(wurzel / "LIESMICH.md")
+    kandidaten.append(Path(__file__).resolve().parent.parent.parent.parent / "LIESMICH.md")
+    return next((p for p in kandidaten if p.is_file()), None)
 
 
 def pid_lebt(pid: int, start: float | None = None) -> bool:
@@ -396,7 +407,7 @@ class Ablauf:
             ergebnis = {
                 "aktiv": self.lauf is not None,
                 "schritt": schritt,
-                "schritt_name": self._schritt_name(schritt),
+                "schritt_name": self._schritt_name(str(st.get("anzeige_schritt") or "") or schritt),
                 "zustand": zustand,
                 # Mit Grund beendet (zu wenig Platz, Archiv belegt ...): nicht
                 # "mit Fehlern durchgelaufen", sondern nicht fertig geworden.
@@ -614,6 +625,23 @@ class Ablauf:
                 raise FotosortFehler("\n".join(stille.zeilen))
         stand = self.archiv_lesen()
         return {"text": meldungen.ob_wiederhergestellt(sum(stand["zaehler"].values()), zeit), "archiv": self.archiv_info()}
+
+    def nachpruefen_starten(self, ja: bool = False) -> dict:
+        """Das ganze Archiv erneut lesen ("fotosort pruefen --alles") als
+        eigener Arbeitsprozess. Ohne "ja" nur die Rueckfrage mit Erklaerung."""
+        if not self.ziel or not self._archiv_da():
+            raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+        if not ja:
+            with self.sperre:
+                self._datenbank_frei()
+                stille = _StilleKonsole()
+                archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
+                try:
+                    n, b = archiv.datenbank.nachpruefbar_summe(nachpruefen.NACHPRUEFBAR)
+                finally:
+                    archiv.datenbank.schliessen()
+            return {"frage": "nachpruefen", "n": n, "text": meldungen.ob_frage_nachpruefen(n, b)}
+        return self.schritt_starten("pruefen", profil=self.profil, alles=True)
 
     def neuaufbau_starten(self, ja: bool = False) -> dict:
         """Das Ziel vollstaendig neu einlesen ("fotosort ziel-index --neu-aufbauen")
@@ -1067,6 +1095,13 @@ class Ablauf:
                     zeilen.append(["duplikat_bestaetigt", meldungen.anzahl(zaehler.get("duplikat_bestaetigt", 0))])
                     n = ereignis("pruefung_fehlgeschlagen")
                     zeilen.append(["Prüfung fehlgeschlagen (wird neu kopiert)", meldungen.anzahl(n)])
+                    if ereignis(nachpruefen.ART_NACHGEPRUEFT):
+                        # Das ganze Archiv wurde erneut gelesen (pruefen --alles).
+                        zeilen.append(["Archivdateien verändert", meldungen.anzahl(ereignis(nachpruefen.ART_VERAENDERT))])
+                        zeilen.append(["Archivdateien fehlen", meldungen.anzahl(ereignis(nachpruefen.ART_FEHLT))])
+                        n = ereignis(nachpruefen.ART_NICHT_LESBAR)
+                        if n:
+                            zeilen.append(["Archivdateien nicht lesbar", meldungen.anzahl(n)])
                     if zaehler.get("kopiert", 0):
                         zeilen.append(["noch nicht geprüft", meldungen.anzahl(zaehler.get("kopiert", 0))])
                 elif schritt == "aufraeumen":

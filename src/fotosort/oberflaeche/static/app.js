@@ -259,6 +259,16 @@
     }
   }
 
+  function nachpruefen() {
+    api("/api/nachpruefen", {}).then(function (a) {
+      if (!a || a.frage !== "nachpruefen") return;
+      return dialog("Archiv nachprüfen?", a.text, { ja: "Nachprüfen", nein: "Nicht jetzt" }).then(function (r) {
+        if (!r.ja) return;
+        return api("/api/nachpruefen", { ja: true }).then(function (b) { if (b && b.gestartet) { hauptZeigen(); laufStarten(b.gestartet); } });
+      });
+    }).catch(fehlerZeigen);
+  }
+
   function neuaufbau() {
     api("/api/neuaufbau", {}).then(function (a) {
       if (!a || a.frage !== "neuaufbau") return;
@@ -465,6 +475,8 @@
     if (zf && zf.fehler) a.appendChild(knopf("Fehler " + zf.fehler, "btn-ghost", function () { listeZeigen("fehler", 1); }));
     if (zf && zf.duplikate) a.appendChild(knopf("Duplikate " + zf.duplikate, "btn-ghost", function () { listeZeigen("duplikate", 1); }));
     a.appendChild(knopf("Ohne Datum", "btn-ghost", function () { listeZeigen("ohne_datum", 1); }));
+    var zz = (Z.zustand.archiv && Z.zustand.archiv.zaehler) || {};
+    if (zz.geprueft || zz.duplikat_bestaetigt || zz.quelle_geloescht || zz.verschoben) a.appendChild(knopf("Archiv nachprüfen…", "btn-ghost", nachpruefen));
     a.appendChild(knopf("Archiv neu einlesen…", "btn-ghost", neuaufbau));
     a.appendChild(knopf("Einstellungen", "btn-secondary", einstellungenOeffnen));
     a.appendChild(knopf("Startseite", "btn-secondary", function () { laden("start"); }));

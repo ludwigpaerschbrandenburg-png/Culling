@@ -100,6 +100,10 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     def wiederherstellen(daten: dict = Body(default={})):
         return ab.archiv_wiederherstellen(bool(daten.get("ja", False)))
 
+    @app.post("/api/nachpruefen")
+    def nachpruefen(daten: dict = Body(default={})):
+        return ab.nachpruefen_starten(bool(daten.get("ja", False)))
+
     @app.post("/api/neuaufbau")
     def neuaufbau(daten: dict = Body(default={})):
         return ab.neuaufbau_starten(bool(daten.get("ja", False)))

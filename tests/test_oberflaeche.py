@@ -802,3 +802,29 @@ def test_stand_wird_nach_einem_schritt_nicht_mehrfach_gerechnet(ob, quelle, ziel
     assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
     n = len(geoeffnet)
     assert ab.naechster()["schritt"] == "kopieren" and len(geoeffnet) == n + 1
+
+
+def test_archiv_nachpruefen_aus_der_oberflaeche(ob, quelle, ziel, nachschauen):
+    """Knopf "Archiv nachpruefen...": Rueckfrage mit Erklaerung, dann laeuft
+    "pruefen --alles" als eigener Schritt; eine veraenderte Archivdatei steht
+    danach in der Zusammenfassung."""
+    from pathlib import Path as _P
+    ab, client = ob
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["kopieren", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["pruefen", "--ziel", str(ziel)]) == cli.OK
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    z = next(z for z in _zeilen(nachschauen, ziel).values() if z["status"] == "geprueft")
+    kaputt = _P(z["zielpfad"])
+    kaputt.write_bytes(kaputt.read_bytes() + b"x")
+    a = _post(client, "/api/nachpruefen")
+    assert a["frage"] == "nachpruefen" and "vollständig" in a["text"] and ab.lauf is None
+    a = _post(client, "/api/nachpruefen", {"ja": True})
+    assert a["gestartet"] == "pruefen"
+    l = _warten(client)
+    assert l["zustand"] == "fehler" and l["schritt_name"] == "Archiv nachprüfen"
+    zf = client.get("/api/zusammenfassung?schritt=pruefen").json()
+    zeilen = dict((x[0], x[1]) for x in zf["zeilen"])
+    assert zeilen["Archivdateien verändert"] == "1"
+    assert _zeilen(nachschauen, ziel)[z["quellpfad"]]["status"] == "fehler"

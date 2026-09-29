@@ -423,3 +423,52 @@ def test_verschieben_bestaetigung_nennt_die_anweisung_nur_einmal(app, tmp_path, 
     f.kopieren_starten(n)
     assert texte and texte[0].count("verschieben“") <= 1 and "Zum Bestätigen „verschieben“ tippen" not in texte[0]
     f.close()
+
+
+def test_knopf_archiv_nachpruefen(app, tmp_path, quelle, ziel, monkeypatch):
+    fragen = []
+    monkeypatch.setattr(desktop, "frage", lambda _e, titel, text, **k: fragen.append((titel, text)) or (False, ""))
+    for befehl in ("scan", "analyse", "kopieren", "pruefen"):
+        args = [befehl, "--ziel", str(ziel)] + (["--quelle", str(quelle)] if befehl == "scan" else [])
+        assert cli.main(args) == cli.OK
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.start.ziel_setzen(str(ziel))
+    f.weitermachen()
+    assert "Archiv nachprüfen…" in _aktion_texte(f)
+    f.nachpruefen()
+    assert fragen and fragen[0][0] == "Archiv nachprüfen?" and "Prüfsumme" in fragen[0][1]
+    assert ab.lauf is None                     # "Nicht jetzt": nichts gestartet
+    f.close()
+
+
+def test_hilfe_zeigt_die_anleitung_im_fenster(app, tmp_path):
+    """F1 oder der Knopf "Hilfe" zeigt die LIESMICH lesbar im Programm - ohne
+    Browser und ohne die Frage, womit man eine .md-Datei oeffnet."""
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    assert ablauf_modul.anleitung_pfad() is not None and ablauf_modul.anleitung_pfad().name == "LIESMICH.md"
+    fenster = f.hilfe_zeigen(modal=False)
+    try:
+        text = fenster.findChild(desktop.QTextBrowser).toPlainText()
+        assert "fotosort" in text and "#" not in text.splitlines()[0]   # als Text dargestellt, nicht roh
+        assert any(k.key().toString() == "F1" for k in f.findChildren(desktop.QShortcut))
+    finally:
+        fenster.close()
+        f.close()
+
+
+def test_fertiger_schritt_meldet_sich_in_der_taskleiste(app, tmp_path, monkeypatch):
+    """Ein langer Schritt endet, waehrend der Nutzer etwas anderes tut: das
+    Fenster blinkt in der Taskleiste (wie bei Kopierprogrammen ueblich)."""
+    from fotosort import steuerung
+    gemeldet = []
+    monkeypatch.setattr(desktop.QApplication, "alert", lambda fenster, ms=0: gemeldet.append(fenster))
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    st = steuerung.Steuerung(ab.status_datei, ab.steuer_datei, "pruefen")
+    st.beenden(steuerung.ZUSTAND_FERTIG, 0)
+    f.poll.start()
+    f.lauf_abfragen()
+    assert gemeldet == [f]
+    f.close()

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, pruefen, prozesse, steuerung, zielindex, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -638,17 +638,35 @@ def befehl_pruefen(args, konsole) -> int:
         else:
             konsole.print("")
             konsole.print(meldungen.pruefen_ergebnis(ergebnis))
+        nach = None
+        if getattr(args, "alles", False) and not ergebnis.abgebrochen:
+            # Das ganze Archiv erneut lesen (nachpruefen.py): Bitfaeule,
+            # veraenderte oder verschwundene Archivdateien.
+            try:
+                nach = nachpruefen.ausfuehren(archiv.ziel, archiv.konf, datenbank, lauf, konsole,
+                                              hash_worker=args.hash_worker, profil=args.profil)
+            except FotosortFehler:
+                _lauf_sauber_abbrechen(datenbank, lauf)
+                raise
+            konsole.print("")
+            konsole.print(meldungen.nachpruefen_ergebnis(nach) if nach.geplant else meldungen.nachpruefen_nichts_zu_tun())
         konsole.print("")
         konsole.print(meldungen.pruefen_zusammenfassung(datenbank.zaehler_je_status(), datenbank.zu_pruefen_summe()[0]))
-        if ergebnis.abgebrochen:
+        if ergebnis.abgebrochen or (nach is not None and nach.abgebrochen):
             konsole.print("")
             konsole.print(meldungen.pruefen_abgebrochen())
             _lauf_sauber_abbrechen(datenbank, lauf)
             return ABGEBROCHEN
-        _abschliessen(archiv, konsole, lauf, {
-            "dateien": ergebnis.bearbeitet, "bytes": ergebnis.bytes_gelesen, "sekunden": ergebnis.sekunden,
-        })
-        return FEHLER if ergebnis.fehler else OK
+        try:
+            liste, n = nachpruefen.pruefsummen_schreiben(archiv.ziel, datenbank)
+            konsole.print(meldungen.pruefsummen_geschrieben(liste, n))
+        except OSError as fehler:
+            konsole.print(meldungen.pruefsummen_fehler(fehler))
+        dateien = ergebnis.bearbeitet + (nach.bearbeitet if nach else 0)
+        gelesen = ergebnis.bytes_gelesen + (nach.bytes_gelesen if nach else 0)
+        sekunden = ergebnis.sekunden + (nach.sekunden if nach else 0.0)
+        _abschliessen(archiv, konsole, lauf, {"dateien": dateien, "bytes": gelesen, "sekunden": sekunden})
+        return FEHLER if ergebnis.fehler or (nach is not None and nach.befunde) else OK
     finally:
         datenbank.schliessen()
 
@@ -1142,6 +1160,9 @@ def befehl_arbeit(args, konsole) -> int:
         elif schritt == "pruefen":
             ns.profil = auftrag.get("profil")
             ns.hash_worker = None
+            ns.alles = bool(auftrag.get("alles"))
+            if ns.alles:
+                st.anzeige_schritt = "nachpruefen"
             rc = befehl_pruefen(ns, konsole)
         elif schritt == "ziel-index":
             ns.neu_aufbauen = True
@@ -1399,6 +1420,8 @@ def parser_bauen() -> argparse.ArgumentParser:
     _gemeinsam(p)
 
     p = unterbefehle.add_parser("pruefen", help="Zieldateien vollstaendig neu lesen und vergleichen")
+    p.add_argument("--alles", action="store_true",
+                   help="danach das ganze Archiv erneut lesen: findet veraenderte, kaputte oder fehlende Archivdateien")
     p.add_argument("--profil", choices=sorted(kopieren.PROFILE), help=HILFE_PROFIL_OHNE_WIRKUNG)
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)

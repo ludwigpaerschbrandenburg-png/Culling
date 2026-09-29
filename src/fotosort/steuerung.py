@@ -90,6 +90,7 @@ class Steuerung:
         self.gesamt_bytes = 0
         self.lauf: int | None = None
         self.hinweis = ""
+        self.anzeige_schritt = ""      # z. B. "nachpruefen" fuer pruefen --alles (nur fuer den Namen)
         self.restzeit = restzeit.Restzeit()
         self._zuletzt = 0.0
         self._sperre = threading.Lock()
@@ -111,6 +112,7 @@ class Steuerung:
             rest, rest_zustand = self.restzeit.melden(self.dateien, self.gesamt)
         return {
             "schritt": self.schritt,
+            "anzeige_schritt": self.anzeige_schritt,
             "zustand": self.zustand,
             "pid": os.getpid(),
             "prozess_start": _MEINE_STARTZEIT,   # gegen eine spaeter wiederverwendete Prozessnummer

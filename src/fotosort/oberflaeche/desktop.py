@@ -25,11 +25,11 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from .. import FotosortFehler, __version__, meldungen
@@ -789,6 +789,8 @@ class Hauptfenster(QMainWindow):
         tl.addWidget(self.titel_ziel, 1)
         self.titel_lauf = tag("Lauf –", "tag")
         tl.addWidget(self.titel_lauf)
+        tl.addWidget(knopf("Hilfe", "ghost", lambda: self.hilfe_zeigen()))
+        QShortcut(QKeySequence("F1"), self, activated=lambda: self.hilfe_zeigen())
         aussen.addWidget(self.titel)
 
         # Inhalt (scrollbar) + Aktionen
@@ -911,6 +913,28 @@ class Hauptfenster(QMainWindow):
                     k.setEnabled(an)
                 except RuntimeError:
                     pass   # inzwischen ersetzt
+
+    def hilfe_zeigen(self, modal: bool = True) -> QDialog | None:
+        """Die Anleitung (LIESMICH) lesbar in einem eigenen Fenster."""
+        pfad = ablauf_modul.anleitung_pfad()
+        if pfad is None:
+            self.meldung(meldungen.ob_anleitung_fehlt())
+            return None
+        fenster = QDialog(self)
+        fenster.setWindowTitle("fotosort – Anleitung")
+        lay = QVBoxLayout(fenster)
+        lay.setContentsMargins(0, 0, 0, 0)
+        text = QTextBrowser(fenster)
+        text.setOpenExternalLinks(True)
+        text.setMarkdown(pfad.read_text(encoding="utf-8"))
+        lay.addWidget(text)
+        b, h = self.width(), self.height()
+        fenster.resize(max(600, int(b * 0.9)), max(400, int(h * 0.9)))
+        if modal:
+            fenster.exec()
+            return None
+        fenster.show()
+        return fenster
 
     def aktionen_gesperrt(self) -> bool:
         return self._gesperrt
@@ -1082,6 +1106,22 @@ class Hauptfenster(QMainWindow):
         elif art == "neuaufbau":
             self.neuaufbau()
 
+    def nachpruefen(self) -> None:
+        """Das ganze Archiv erneut lesen (Bitfaeule, veraenderte oder
+        verschwundene Dateien) - nach Rueckfrage, als eigener Schritt."""
+        with self.beschaeftigt():
+            a = self._versuchen(self.ab.nachpruefen_starten, False)
+        if a is None or a.get("frage") != "nachpruefen":
+            return
+        ja, _ = frage(self, "Archiv nachprüfen?", a["text"], ja="Nachprüfen", nein="Nicht jetzt")
+        if not ja:
+            return
+        a = self._versuchen(self.ab.nachpruefen_starten, True)
+        if a is None or not a.get("gestartet"):
+            return
+        self.haupt_zeigen()
+        self.lauf_starten(a["gestartet"])
+
     def neuaufbau(self) -> None:
         """Das Ziel vollstaendig neu einlesen (Rettung ohne Sicherung, oder nach
         Umsortieren von Hand im Archiv) - nach Rueckfrage, als eigener Schritt."""
@@ -1159,6 +1199,10 @@ class Hauptfenster(QMainWindow):
         self.lauf_fuellen(l)
         self.rahmen()
         if l.get("zustand") in ENDE:
+            if self.poll.isActive():
+                # Der verfolgte Schritt ist eben zu Ende: in der Taskleiste
+                # blinken, falls der Nutzer gerade woanders ist.
+                QApplication.alert(self, 0)
             self.poll.stop()
             self.puls.stop()
             self.ruhe_zeigen(l)
@@ -1285,6 +1329,9 @@ class Hauptfenster(QMainWindow):
         if zf.get("duplikate"):
             eintraege.append((f'Duplikate {meldungen.anzahl(zf["duplikate"])}', "ghost", lambda: self.liste_zeigen("duplikate", 1), True))
         eintraege.append(("Ohne Datum", "ghost", lambda: self.liste_zeigen("ohne_datum", 1), True))
+        z = (self.zustand.get("archiv") or {}).get("zaehler") or {}
+        if any(z.get(s, 0) for s in ("geprueft", "duplikat_bestaetigt", "quelle_geloescht", "verschoben")):
+            eintraege.append(("Archiv nachprüfen…", "ghost", self.nachpruefen, True))
         eintraege.append(("Archiv neu einlesen…", "ghost", self.neuaufbau, True))
         eintraege.append(("Einstellungen", "secondary", self.einstellungen_oeffnen, True))
         eintraege.append(("Startseite", "secondary", lambda: self.laden("start"), True))

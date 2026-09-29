@@ -1363,6 +1363,45 @@ class Datenbank:
             (ab_ziel, ab_pfad, int(grenze)),
         ).fetchall()
 
+    # -- Nachpruefung des Archivs (pruefen --alles) -------------------------
+
+    def _nachpruefbar_sql(self, status: tuple[str, ...]) -> str:
+        platz = ", ".join("?" for _ in status)
+        return (f"FROM dateien WHERE status IN ({platz}) AND hash != '' AND zielpfad != ''")
+
+    def nachpruefbar_summe(self, status: tuple[str, ...]) -> tuple[int, int]:
+        """(Anzahl Archivdateien, Bytes) - jede Zieldatei einmal, auch wenn
+        mehrere Zeilen (Duplikate) auf sie zeigen."""
+        self.stapel_schreiben()
+        z = self.verbindung.execute(
+            f"SELECT COUNT(*) AS n, COALESCE(SUM(g), 0) AS b FROM (SELECT MAX(groesse) AS g "
+            f"{self._nachpruefbar_sql(status)} GROUP BY zielpfad)", status,
+        ).fetchone()
+        return int(z["n"]), int(z["b"])
+
+    def nachpruefbar(self, status: tuple[str, ...], ab: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
+        """Naechste Archivdateien (zielpfad, hash, groesse), nach Zielpfad."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            f"SELECT zielpfad, MAX(hash) AS hash, MAX(groesse) AS groesse {self._nachpruefbar_sql(status)}"
+            " AND zielpfad > ? GROUP BY zielpfad ORDER BY zielpfad LIMIT ?",
+            (*status, ab, int(grenze)),
+        ).fetchall()
+
+    def nachpruefbar_alle(self, status: tuple[str, ...]) -> sqlite3.Cursor:
+        """Wie nachpruefbar, aber alle als Cursor (Pruefsummen-Liste)."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            f"SELECT zielpfad, MAX(hash) AS hash {self._nachpruefbar_sql(status)}"
+            " GROUP BY zielpfad ORDER BY zielpfad", status,
+        )
+
+    def zeilen_mit_zielpfad(self, zielpfad) -> list[sqlite3.Row]:
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT * FROM dateien WHERE zielpfad = ? ORDER BY quellpfad", (pfad_text(zielpfad),)
+        ).fetchall()
+
     def geprueft_setzen(self, quellpfad) -> None:
         """Zieldatei frisch gelesen, Hash stimmt mit dem Quell-Hash ueberein."""
         self._beginnen()

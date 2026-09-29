@@ -1274,6 +1274,77 @@ GRUND_PRUEFUNG = "Zielpruefung fehlgeschlagen"
 GRUND_PRUEFUNG_FEHLT = f"{GRUND_PRUEFUNG}: Zieldatei fehlt"
 GRUND_PRUEFUNG_INHALT = f"{GRUND_PRUEFUNG}: Inhalt weicht ab (Hash ungleich)"
 GRUND_PRUEFUNG_LESEN = f"{GRUND_PRUEFUNG}: Zieldatei nicht lesbar"
+# Nachpruefung (pruefen --alles): beginnen mit GRUND_PRUEFUNG, damit das
+# naechste "kopieren" solche Zeilen aus der Quelle neu kopiert.
+GRUND_NACHPRUEFUNG_VERAENDERT = f"{GRUND_PRUEFUNG}: Archivdatei hat sich seit der Pruefung veraendert"
+GRUND_NACHPRUEFUNG_FEHLT = f"{GRUND_PRUEFUNG}: Archivdatei fehlt seit der Pruefung"
+
+
+def ereignis_nachpruefung(grund: str, quelle_da: bool) -> str:
+    if quelle_da:
+        return f"{grund}; Quelle noch da - wird beim naechsten Kopieren neu kopiert"
+    return f"{grund}; Quelle schon geloescht - bitte aus der eigenen Sicherung holen"
+
+
+def ereignis_nachgeprueft(e) -> str:
+    return (f"{anzahl(e.bearbeitet)} Archivdateien gelesen: {anzahl(len(e.veraendert))} veraendert,"
+            f" {anzahl(len(e.fehlt))} fehlen, {anzahl(len(e.nicht_lesbar))} nicht lesbar")
+
+
+def ob_frage_nachpruefen(n: int, bytes_: int) -> str:
+    return (
+        f"Alle {anzahl(n)} geprüften Dateien im Archiv ({groesse(bytes_)}) werden vollständig gelesen und mit "
+        "ihrer beim Kopieren festgehaltenen Prüfsumme verglichen. So fällt auf, wenn eine Datei auf der Platte "
+        "beschädigt, verändert oder verschwunden ist – auch Jahre später. Im Archiv wird dabei nichts verändert. "
+        "Empfehlung: etwa einmal im Jahr, und immer vor dem Weitergeben einer Platte."
+    )
+
+
+def nachpruefen_beginnt(dateien: int, bytes_: int, hash_worker: int) -> str:
+    return (
+        f"Archiv wird nachgeprueft: {anzahl(dateien)} Archivdateien, {groesse(bytes_)} werden vollstaendig"
+        f" gelesen und mit ihrer Pruefsumme verglichen, {anzahl(hash_worker)} gleichzeitig."
+    )
+
+
+def nachpruefen_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, rate: float) -> str:
+    return f"Nachpruefen: {anzahl(dateien)}/{anzahl(gesamt)} Dateien, {groesse(bytes_)}/{groesse(gesamt_bytes)}"
+
+
+def nachpruefen_ergebnis(e) -> str:
+    zeilen = [
+        "Archiv nachgeprueft (dieser Lauf)",
+        f"  gelesen:           {anzahl(e.bearbeitet)} Archivdateien, {groesse(e.bytes_gelesen)}",
+    ]
+    if not e.befunde:
+        zeilen.append("  Ergebnis:          alle unveraendert")
+    else:
+        zeilen.append(f"  unveraendert:      {anzahl(e.unveraendert)}")
+        for titel, liste in (("VERAENDERT", e.veraendert), ("FEHLT", e.fehlt), ("nicht lesbar", e.nicht_lesbar)):
+            if liste:
+                zeilen.append(f"  {titel}: {anzahl(len(liste))}")
+                zeilen.extend(f"    {p}" for p in liste[:20])
+                if len(liste) > 20:
+                    zeilen.append(f"    ... und {anzahl(len(liste) - 20)} weitere (siehe Bericht)")
+        if e.neu_zu_kopieren:
+            zeilen.append(f"  Aus der noch vorhandenen Quelle neu zu kopieren: {anzahl(e.neu_zu_kopieren)}"
+                          " (\"fotosort kopieren\" legt frische Kopien daneben)")
+        if e.ohne_quelle:
+            zeilen.append(f"  Quelle schon geloescht - bitte aus der eigenen Sicherung holen: {anzahl(len(e.ohne_quelle))}")
+    zeilen.append(f"  Dauer:             {dauer(e.sekunden)}")
+    return "\n".join(zeilen)
+
+
+def nachpruefen_nichts_zu_tun() -> str:
+    return "Nachpruefen: Im Archiv gibt es noch keine gepruefte Datei."
+
+
+def pruefsummen_fehler(fehler: OSError) -> str:
+    return f"Pruefsummen-Liste konnte nicht geschrieben werden: {fehler.strerror or fehler}"
+
+
+def pruefsummen_geschrieben(pfad, n: int) -> str:
+    return f"Pruefsummen-Liste geschrieben ({anzahl(n)} Dateien, Format von b3sum): {pfad}"
 EREIGNIS_NEU_NACH_PRUEFUNG = "nach fehlgeschlagener Pruefung neu zu kopieren"
 
 
@@ -1868,6 +1939,7 @@ SCHRITT_NAME: dict[str, str] = {
     "pruefen": "Prüfen: jede Zieldatei vollständig neu lesen",
     "aufraeumen": "Quelle aufräumen",
     "ziel-index": "Archiv neu einlesen: jede Datei im Ziel lesen und merken",
+    "nachpruefen": "Archiv nachprüfen",
 }
 
 SCHRITT_ERKLAERUNG: dict[str, str] = {
@@ -1878,6 +1950,7 @@ SCHRITT_ERKLAERUNG: dict[str, str] = {
     "pruefen": "Jede kopierte Datei wird im Archiv vollständig neu gelesen und mit der Quelle verglichen.",
     "aufraeumen": "Nur Dateien, deren Kopie im Archiv nachweislich stimmt, werden aus der Quelle entfernt. Vorher werden Quelle und Ziel noch einmal komplett gelesen.",
     "ziel-index": "Jede Datei im Zielordner wird vollständig gelesen und mit ihrer Prüfsumme gemerkt. Kopiert, verschoben oder gelöscht wird nichts. Danach auf der Startseite die Quellordner angeben und „Los geht's“ drücken.",
+    "nachpruefen": "Jede schon geprüfte Datei im Archiv wird vollständig gelesen und mit ihrer Prüfsumme verglichen. Im Archiv wird nichts verändert.",
 }
 
 OB_PROFILE: list[tuple[str, str]] = [
@@ -1934,6 +2007,10 @@ def ob_quelle_noetig() -> str:
 
 def ob_quelle_fehlt_pfad() -> str:
     return "Bitte zuerst einen Ordner eintragen oder auswählen."
+
+
+def ob_anleitung_fehlt() -> str:
+    return "Die Anleitung (LIESMICH.md) liegt nicht im Programmordner. Bitte das ZIP-Paket vollständig neu entpacken."
 
 
 def ob_frage_ziel_anlegen(ziel) -> str:
