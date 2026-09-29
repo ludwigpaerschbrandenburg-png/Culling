@@ -763,22 +763,25 @@ einem zweiten Reiter beginnen, ohne das Hauptprogramm zu ersetzen. Umsetzung: �
 ### Runde 2: Entscheidungen umsetzen (Version 0.8)
 
 - [x] 13: `CLAUDE.md` nennt `kopieren_laeuft` in der Liste der Statuswerte.
-- [ ] 11: Zielnamen ohne Groß-/Kleinschreibung eindeutig, auch auf Linux.
-- [ ] 14: `fotosort zuruecklegen` und „Zurücklegen…“ im Fenster.
-- [ ] 2 und 3: Gruppenmitglieder lesen, nach Aufnahmezeit trennen, kaputte Hauptdatei ersetzen.
-- [ ] 5 und 6: XMP `DateCreated`, PNG `CreationTime`, Datum aus dem `.xmp`-Sidecar; `Z` umrechnen.
-- [ ] 9: Berichtsliste „Datum auffällig“.
-- [ ] 7: Hersteller ohne Modell zählen.
-- [ ] 8: neue Endungen in der Standardliste.
-- [ ] 10: Berichte begrenzen (10 Läufe, ältere CSV gepackt, Listen gekürzt).
-- [ ] 1: Laufwerksart erkennen, Profil vorschlagen, `--profil auto`, Hash-Worker nach Profil.
-- [ ] 12: Mindestgröße in der SPEC gefasst.
-- [ ] 15: Reiter „Sichten“, erster Ausbau (ansehen, Sterne, Auswahl/Ausschuss, Filter).
+- [x] 11: Zielnamen ohne Groß-/Kleinschreibung eindeutig, auch auf Linux.
+- [x] 14: `fotosort zuruecklegen` und „Zurücklegen…“ im Fenster.
+- [x] 2 und 3: Gruppenmitglieder lesen, nach Aufnahmezeit trennen, kaputte Hauptdatei ersetzen.
+- [x] 5 und 6: XMP `DateCreated`, PNG `CreationTime`, Datum aus dem `.xmp`-Sidecar; `Z` umrechnen.
+- [x] 9: Berichtsliste „Datum auffällig“.
+- [x] 7: Hersteller ohne Modell zählen.
+- [x] 8: neue Endungen in der Standardliste.
+- [x] 10: Berichte begrenzen (10 Läufe, ältere CSV gepackt, Listen gekürzt).
+- [x] 1: Laufwerksart erkennen, Profil vorschlagen, `--profil auto`, Hash-Worker nach Profil.
+- [x] 12: Mindestgröße in der SPEC gefasst.
+- [x] 15: Reiter „Sichten“, erster Ausbau (ansehen, Sterne, Auswahl/Ausschuss, Filter).
 - [ ] Prüfung durch unabhängige Prüfer, volle Tests, CI, Release v0.8.
 
 **Später (15, nächste Ausbaustufen des Reiters „Sichten“):** Bewertungen als XMP-Sidecar
 zurückschreiben (für Lightroom & Co.), Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder
-finden, RAW-Vorschau über das eingebettete Vorschaubild.
+finden. Dazu aus dem ersten Ausbau: `bewertungen.db` mit der Datenbank-Sicherung ins Ziel
+legen; Vorschaubilder auf der Platte zwischenspeichern (große Ordner auf Festplatte oder NAS);
+Vorschaubild aus Videos; der Reiter in der Browser-Fassung (Server, Phase 8); Bilder
+nebeneinander vergleichen. Die RAW-Vorschau über das eingebettete Vorschaubild ist gebaut.
 
 ---
 

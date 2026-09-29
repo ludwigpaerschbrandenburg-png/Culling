@@ -31,7 +31,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ config.py              config.toml lesen und beim ersten Start erzeugen
 │  ├─ db.py                  SQLite: Schema, Statuswechsel, Sammelschreiben
 │  ├─ meldungen.py           alle deutschen Texte an einer Stelle
-│  ├─ pfade.py               Pfad-Hilfen: langes Präfix, Netz- und Laufwerkserkennung
+│  ├─ pfade.py               Pfad-Hilfen: langes Präfix, Netz- und Laufwerkserkennung, Laufwerksart (HDD/SSD/Netz, v0.8)
 │  │
 │  ├─ scan.py                Phase 1: Quelle durchlaufen, zählen
 │  ├─ analyse.py             Phase 2: Gruppen, Metadaten, Datum, Ziel je Datei
@@ -50,6 +50,9 @@ Culling/ (Repository-Wurzel)
 │  ├─ zielindex.py            fotosort ziel-index --neu-aufbauen: das Ziel vollstaendig lesen, Index neu (SPEC §6, §8), fortsetzbar
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
+│  ├─ zuruecklegen.py        fotosort zuruecklegen: Ordner _geloescht_ nicht überschreibend an die alten Orte (v0.8)
+│  ├─ sichten.py             Reiter „Sichten“: Ordner und Bilder des Archivs, Bewertungen in bewertungen.db (v0.8)
+│  ├─ vorschau.py            eingebettete Vorschau aus RAW/HEIC über einen ExifTool-Prozess, nur lesend (v0.8)
 │  ├─ fortschritt.py         laufende Anzeige (Analyse, Kopieren, Prüfen, Aufräumen, Neueinlesen)
 │  ├─ restzeit.py            Restzeit: erst nach 60 s und 3 %, gleitende Minute, 5-s-Takt, abgerundet (Fenster und Konsole)
 │  ├─ bericht.py             Text- und CSV-Bericht
@@ -57,7 +60,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ steuerung.py           Statusdatei und Steuerdatei je Schritt (Phase 7): Stand ≤ 2×/s, Pause, Abbruch
 │  └─ oberflaeche/           Phase 7: die Oberfläche
 │     ├─ ablauf.py           Zustand, Arbeitsprozess (fotosort arbeit), Zusammenfassungen und Listen
-│     ├─ desktop.py          das Desktop-Fenster (PySide6/Qt): Seiten, Ordnerdialoge, Selbsttest, Durchlauf
+│     ├─ desktop.py          das Desktop-Fenster (PySide6/Qt): Reiter „Archiv“ und „Sichten“, Seiten, Ordnerdialoge, Selbsttest, Durchlauf
+│     ├─ sichtfenster.py     Reiter „Sichten“: Ordnerbaum, Vorschaubilder im Hintergrund, große Ansicht, Tasten (v0.8)
 │     ├─ stil.py             Nocturne als Qt-Stylesheet, Inter-Schrift laden, Programmsymbol
 │     ├─ meldungsfenster.py  Startfehler als verständliches Meldungsfenster (ctypes), excepthook
 │     ├─ server.py           FastAPI-Schnittstelle der Browser-Fassung (nur 127.0.0.1, Origin-Prüfung)

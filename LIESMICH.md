@@ -119,7 +119,7 @@ Auf der Startseite tragen Sie ein:
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
 | **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
 | **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
-| **Quelle und Ziel liegen auf** | „hdd" lassen, sobald Quelle **oder** Ziel auf einer normalen Festplatte liegt; „ssd" nur, wenn beide auf SSDs liegen; „netzwerk" bei einem Netzlaufwerk. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
+| **Quelle und Ziel liegen auf** | Das Programm sieht selbst nach, worauf Ziel und Quellen liegen (Festplatte, SSD oder Netzlaufwerk), wählt den passenden Knopf vor und schreibt darunter, was es erkannt hat. Der langsamste Teil entscheidet: Liegt eines auf einer Festplatte, heißt es „hdd"; nur wenn alles auf SSDs liegt, „ssd"; bei einem Netzlaufwerk „netzwerk". Lässt sich nichts feststellen, bleibt es beim sicheren „hdd". Sie können den Vorschlag jederzeit ändern – dann bleibt Ihre Wahl. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert, gelesen und geprüft werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
 
 Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
 dessen Stand und die bekannten Quellen, und **„Weitermachen"** springt zum offenen Schritt, ohne
@@ -176,6 +176,20 @@ das Programm berechnet für jede Datei den Zielordner. Ausgabe:
   das Programm rechnet sie in Ihre Zeitzone um.
 - **Mögliche Duplikate (Schätzung)** – gleiche Größe und Aufnahmezeit; sicher weiß es
   das Programm erst beim Kopieren.
+- **Gleicher Name, andere Aufnahme** – zwei Dateien heißen gleich (etwa `IMG_0001.JPG` und
+  `IMG_0001.MOV`), sind aber zu verschiedenen Zeiten entstanden (die Kamera hat neu zu zählen
+  begonnen). Sie werden nicht mehr als eine Aufnahme behandelt, sondern jede nach ihrem
+  eigenen Datum abgelegt. Wie weit die Zeiten auseinander liegen dürfen, steht in den
+  Einstellungen (`gruppe_toleranz_sekunden`, Standard 5 Sekunden).
+- **Datum auffällig** – das Aufnahmedatum wirkt verdächtig: etwa der 1. Januar 2000 (die Uhr
+  der Kamera war nach einem leeren Akku zurückgesetzt) oder ein Datum, das weit vom Datum im
+  Dateinamen abweicht. Das Programm sortiert trotzdem nach dem Aufnahmedatum; die Liste im
+  Bericht hilft beim Nachsehen.
+- **Nur Hersteller, kein Modell** – manche Geräte schreiben nur ihren Hersteller in die Datei.
+  Solche Dateien landen im Ordner des Herstellers.
+
+Außer aus der Kamera-Angabe kommt das Datum auch aus Lightroom-Angaben (XMP), aus PNG-Dateien
+und aus einer `.xmp`-Datei neben dem Bild, wenn die Datei selbst keins hat.
 
 Die Übersicht im Fenster zeigt nach der Analyse die Kameras als Tabelle: links das Modell,
 wie es in den Dateien steht, rechts ein Feld mit dem Ordnernamen. **Tippen Sie dort einfach den
@@ -196,7 +210,9 @@ Inhalts), und erst am Ende bekommt sie ihren richtigen Namen. Ausgabe:
 - **Duplikate** – Dateien, deren Inhalt schon im Archiv lag. Sie werden nicht ein
   zweites Mal kopiert; das Programm merkt sich, zu welcher Archivdatei sie gehören.
 - **Namenskonflikte** – zwei verschiedene Bilder mit gleichem Namen; das zweite bekommt
-  den Anhang `_1`. Es wird nie etwas überschrieben.
+  den Anhang `_1`. Es wird nie etwas überschrieben. Als gleich gelten Namen auch dann, wenn
+  sie sich nur in Groß- und Kleinschreibung unterscheiden (`IMG_0001.JPG` und `img_0001.jpg`) –
+  so bleibt das Archiv auch über ein Netzlaufwerk unter Windows vollständig erreichbar.
 - **Fehler** – Dateien, die sich nicht lesen ließen. Sie bleiben in der Quelle und
   stehen im Bericht.
 
@@ -254,6 +270,35 @@ Am Ende sind alle fünf Phasen in der Leiste erledigt, der Hauptknopf heißt „
 und die Karte „Letzter Bericht" öffnet den Bericht oder die CSV-Tabelle (Abschnitt 5 erklärt
 die Statuswörter in den Zählern).
 
+**Zurücklegen:** War das Aufräumen voreilig, legt **„Zurücklegen…"** auf der Aufräumen-Karte
+(im schwarzen Fenster: `fotosort.bat zuruecklegen --ziel D:\Archiv`) jede Datei aus dem Ordner
+`_geloescht_<Datum>` wieder an ihren alten Platz in der Quelle. Es wird nichts überschrieben:
+Liegt am alten Platz inzwischen eine andere Datei, bleibt die Datei im Ordner `_geloescht_` und
+wird genannt. Dateien, die Sie selbst in den Ordner gelegt haben, bleiben, wo sie sind. Beim
+nächsten Durchgang erkennt das Programm die zurückgelegten Dateien wieder – ihre Kopie liegt ja
+schon im Archiv. Endgültig gelöschte Dateien kann es nicht zurückholen.
+
+### Bilder sichten (Reiter „Sichten")
+
+Oben rechts im Fenster stehen zwei Reiter: **„Archiv"** ist alles bisher Beschriebene,
+**„Sichten"** zeigt die Bilder, die schon im Archiv liegen, und lässt Sie sie bewerten. Der
+Reiter „Archiv" läuft dabei weiter – Sie können sichten, während kopiert wird.
+
+- **Links** stehen die Ordner des Archivs, das neueste Datum oben. Beim Öffnen ist der neueste
+  Tag gewählt. Ein Klick auf einen Ordner zeigt rechts seine Bilder. „Neu einlesen" holt
+  Ordner und Bilder frisch (etwa während des Kopierens).
+- **Rechts** stehen die Bilder als kleine Vorschau. Ein RAW und das JPG gleichen Namens sind
+  **ein** Bild. Von einem RAW ohne JPG zeigt das Programm das Vorschaubild, das die Kamera in
+  die RAW-Datei gelegt hat. Videos erscheinen als Platzhalter.
+- **Bewerten** mit der Tastatur, für alle gewählten Bilder (mehrere mit Strg oder Umschalt):
+  `0`–`5` Sterne, `P` Auswahl (grün), `X` Ausschuss (abgeblendet), `U` Markierung aufheben.
+  **Eingabe** öffnet die große Ansicht, dort blättern die Pfeiltasten, **Esc** geht zurück.
+- **Filter** oben rechts: alle, nur Auswahl, nur Ausschuss oder ab einer Zahl Sterne.
+
+**Das Sichten verändert keine Datei.** Nichts wird gelöscht, verschoben oder umbenannt;
+Ausschuss ist nur eine Markierung. Die Bewertungen merkt sich das Programm in einer eigenen
+kleinen Datei auf dem Rechner (Abschnitt 7), nicht in den Bildern.
+
 ### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
 
 Wer lieber Fragen im Textfenster beantwortet, ruft im Programmordner `fotosort.bat start`
@@ -295,6 +340,7 @@ fotosort.bat aufraeumen --ziel D:\Archiv --dry-run          (Liste zeigen, nicht
 fotosort.bat aufraeumen --ziel D:\Archiv                    (in den Ordner _geloescht_<Datum>)
 fotosort.bat aufraeumen --ziel D:\Archiv --endgueltig       (wirklich loeschen)
 fotosort.bat aufraeumen --ziel D:\Archiv --leere-ordner     (leere Ordner in der Quelle entfernen)
+fotosort.bat zuruecklegen --ziel D:\Archiv                  (Ordner _geloescht_ an die alten Orte zuruecklegen; --dry-run zeigt nur)
 fotosort.bat status     --ziel D:\Archiv                    (wo steht das Archiv?)
 fotosort.bat bericht    --ziel D:\Archiv                    (Bericht als Text und Tabellen)
 fotosort.bat config     --ziel D:\Archiv                    (Einstellungsdatei oeffnen)
@@ -318,11 +364,12 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
   Netzlaufwerk gilt nie als „gleiches Laufwerk".
 - `aufraeumen --quelle D:\Chaos` beschränkt das Aufräumen auf diese eine Quelle;
   ohne Angabe wird je Quelle einzeln gefragt.
-- `--profil hdd|ssd|netzwerk` bestimmt beim Kopieren, wie viele Dateien gleichzeitig kopiert
-  werden, und bei der Analyse die Zahl der ExifTool-Programme. Wie viele Dateien gleichzeitig
-  gelesen und geprüft werden (Prüfen, Aufräumen, Archiv neu einlesen), stellt `--hash-worker N`
-  ein (ohne Angabe: so viele wie der Prozessor Kerne hat). Was auf Ihrem Rechner am besten ist,
-  sagt `fotosort.bat messen`.
+- `--profil auto|hdd|ssd|netzwerk` bestimmt beim Kopieren, wie viele Dateien gleichzeitig kopiert
+  werden, bei der Analyse die Zahl der ExifTool-Programme und beim Prüfen, Aufräumen und Neueinlesen,
+  wie viele Dateien gleichzeitig gelesen werden (Festplatte 2, Netzlaufwerk 4, SSD so viele wie
+  der Prozessor Kerne hat, höchstens 16). `auto` (der Standard) sieht nach, worauf Ziel und
+  Quellen liegen, und sagt, was es erkannt hat. `--hash-worker N` legt die Zahl der Leser selbst
+  fest. Was auf Ihrem Rechner am besten ist, sagt `fotosort.bat messen`.
 - `pruefen --alles` liest nach dem normalen Prüfen das ganze Archiv erneut (siehe Schritt 4,
   „Archiv nachprüfen"). Rückgabewert 1, wenn eine Archivdatei verändert ist, fehlt oder sich
   nicht lesen ließ.
@@ -386,8 +433,11 @@ Nach jeder Phase schreibt das Programm
   `.csv`-Tabellen, die sich mit Excel öffnen lassen – Trennzeichen ist das Semikolon).
 
 Der Bericht enthält alle Zahlen und Listen: Fehler mit Grund, Duplikate mit ihrer
-Partnerdatei, Dateien ohne Datum, Namenskonflikte, übersprungene Dateien und alles,
-was beim Aufräumen verweigert wurde.
+Partnerdatei, Dateien ohne Datum, Dateien mit auffälligem Datum, Namenskonflikte,
+übersprungene Dateien und alles, was beim Aufräumen verweigert wurde. Lange Listen stehen im
+Text nur mit den ersten 1.000 Zeilen, vollständig in der CSV-Tabelle. Aufgehoben werden die
+letzten 10 Berichte; die Tabellen älterer Berichte werden gepackt (`.csv.gz`, öffnet sich
+etwa mit 7-Zip).
 
 ---
 
@@ -436,6 +486,9 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   4 Uhr morgens noch zum Vortag (Feiern, die über Mitternacht gehen). Standard `"00:00"`.
 - `unsicheres_datum` – was mit Dateien ohne Aufnahmedatum geschieht: `"ohne_datum"`
   (Standard, Ordner `_Ohne_Datum`) oder `"mtime"` (das Änderungsdatum der Datei nehmen).
+- `gruppe_toleranz_sekunden` – wie weit die Aufnahmezeiten gleichnamiger Dateien
+  (`IMG_0001.JPG`, `IMG_0001.MOV`) auseinander liegen dürfen, damit sie als eine Aufnahme
+  zusammenbleiben. Standard `5`.
 
 **[kamera]**
 - `unbekannt` – Ordnername, wenn kein Kameramodell gefunden wurde. Standard `Unbekannte_Kamera`.
@@ -472,11 +525,14 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   nicht: Ein Foto wird darüber nie gelöscht.
 
 **[leistung]**
-- `profil` – `"hdd"` (Festplatte, 2 gleichzeitige Kopien), `"ssd"` (8) oder `"netzwerk"` (4).
+- `profil` – `"auto"` (Standard: erkennen, worauf Ziel und Quellen liegen), `"hdd"` (Festplatte,
+  2 gleichzeitige Kopien), `"ssd"` (8) oder `"netzwerk"` (4). Eine `config.toml` aus einer
+  älteren Version behält ihren Wert.
 - `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = nach Profil:
   Festplatte und Netzlaufwerk 4, SSD Anzahl der Prozessorkerne (höchstens 16). Auf einer
   Festplatte bremsen viele gleichzeitige Leser, weil der Lesekopf springt.
-- `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = automatisch.
+- `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = nach Profil
+  (Lesen: Festplatte 2, Netzlaufwerk 4, SSD Anzahl der Kerne, höchstens 16).
   `fotosort.bat messen` schlägt passende Werte vor.
 - `exiftool_pfad` – Pfad zu `exiftool.exe`, falls ein anderes ExifTool benutzt werden soll.
   Liegt daneben der Ordner `exiftool_files`, startet das Programm dort `perl.exe` mit
@@ -498,6 +554,8 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 - **Archiv-Kennung**: `<Ziel>\.fotosortierer\archiv-id.txt`. Darüber findet das Programm
   die richtige Datenbank, auch wenn das Ziel unter einem anderen Laufwerksbuchstaben
   eingebunden ist.
+- **Bewertungen** aus dem Reiter „Sichten": `bewertungen.db` im selben Ordner wie die
+  Datenbank. „Archiv verwerfen" entfernt sie mit.
 - **Sicherungskopie und Berichte**: `<Ziel>\.fotosortierer\` (siehe Abschnitt 4).
 - **Ordner `_geloescht_<Datum>`**: in der Quelle, nur wenn Sie aufgeräumt haben.
 - **Oberfläche**: `C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\` – der Stand des
@@ -628,6 +686,11 @@ neben der alten den Anhang `_1`.
 ---
 
 ## 10. Was noch nicht gebaut ist
+
+- Der Reiter „Sichten" ist ein erster Ausbau. Noch nicht gebaut: Bewertungen in `.xmp`-Dateien
+  für Lightroom schreiben, Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder finden,
+  Vorschaubilder von Videos, eine Sicherungskopie der Bewertungen im Ziel und der Reiter in der
+  Browser-Fassung.
 
 - Der Betrieb auf dem TrueNAS-Server (im Browser, mit eigenem Ordner-Browser statt des
   Windows-Dialogs) ist eine spätere Phase. Die Browser-Fassung der Oberfläche läuft dort schon
