@@ -7,8 +7,8 @@ aus SPEC §11 — nie mit echten Fotos. So entstehen sie, ohne Bildschirm (Qt of
 QT_QPA_PLATFORM=offscreen fotosort fenster --durchlauf <Ziel> <Quelle> --fotos docs/oberflaeche
 ```
 
-Der Durchlauf bedient das Fenster selbst: Startseite → Scan → Analyse → Kopieren → Prüfen →
-Aufräumen. Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
+Der Durchlauf bedient das Fenster selbst: Startseite → Scan → Analyse → Kopieren (danach ein
+Blick in den Reiter „Sichten“) → Prüfen → Aufräumen. Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
 der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen. Dieselbe Prüfung läuft in
 der CI gegen das Windows-Paket.
 
@@ -26,5 +26,6 @@ der CI gegen das Windows-Paket.
 | [10](10-liste-duplikate.png) | Liste (Duplikate), seitenweise |
 | [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
 | [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
+| [13](13-sichten.png) | Reiter „Sichten“ (seit v0.8): Ordner des Archivs, Vorschaubilder, Sterne und Markierung (die Testbilder sind nur 1 × 1 Pixel groß) |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).

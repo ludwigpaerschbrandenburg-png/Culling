@@ -867,6 +867,26 @@ class Ablauf:
         assert lokal.name == archiv_id and im_ziel.name == db.ARCHIV_UNTERORDNER
         return ziel, lokal, im_ziel
 
+    def sichten_info(self) -> dict:
+        """Was der Reiter „Sichten“ braucht (SPEC §8 seit v0.8): Zielordner,
+        lokaler Archiv-Ordner (dort liegt bewertungen.db), Einstellungen
+        (Dateitypen) und ExifTool (Vorschau aus RAW). Liest nie die Datenbank -
+        geht also auch, waehrend ein Schritt laeuft. Ohne Archiv: {"text": ...}."""
+        with self.sperre:
+            try:
+                ziel, lokal, _im_ziel = self._archiv_orte()
+            except FotosortFehler:
+                return {"text": meldungen.SICHTEN_KEIN_ARCHIV}
+            if not lokal.is_dir():
+                return {"text": meldungen.SICHTEN_KEIN_ARCHIV}
+            konf_pfad = Path(self.config_pfad) if self.config_pfad else lokal / config.DATEINAME
+            try:
+                konf = config.laden(konf_pfad) if konf_pfad.is_file() else config.Konfiguration()
+            except FotosortFehler as fehler:
+                return {"text": str(fehler)}
+            exiftool, _wo = cli.exiftool_finden(konf)
+            return {"ziel": ziel, "archiv_ordner": lokal, "konf": konf, "exiftool": exiftool or ""}
+
     def archiv_verwerfen(self, wort: str = "") -> dict:
         """Die Merkliste zu diesem Ziel entfernen: den lokalen Archiv-Ordner
         (Datenbank, Einstellungen, Protokolle) und .fotosortierer im Ziel

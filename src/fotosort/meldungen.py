@@ -2243,7 +2243,8 @@ def ob_frage_ziel_nicht_leer(ziel, n: int) -> str:
 
 def ob_frage_verwerfen(ziel, lokal, im_ziel) -> str:
     return (
-        f"Das entfernt die Merkliste des Programms zu {ziel}: die Datenbank unter {lokal} und den Ordner "
+        f"Das entfernt die Merkliste des Programms zu {ziel}: die Datenbank und die Bewertungen aus dem Reiter "
+        f"„Sichten“ unter {lokal} und den Ordner "
         f"{im_ziel} mit Sicherung, Einstellungen und Berichten. Kopierte Fotos und Videos im Zielordner bleiben "
         "unangetastet, die Quellordner ebenso. Danach ist die Startseite leer, und der Ordner kann als neues "
         f"Archiv beginnen. Zum Bestätigen „{BESTAETIGUNGSWORT['verwerfen']}“ tippen:"
@@ -2492,3 +2493,49 @@ def ob_durchlauf(ok: bool, einzelheit: str) -> str:
     if ok:
         return f"Durchlauf bestanden: Startseite, Scan, Analyse, Kopieren, Prüfen, Aufräumen über das Fenster. {einzelheit}"
     return f"Durchlauf FEHLGESCHLAGEN: {einzelheit}"
+
+
+# ------------------------------------------------ Reiter „Sichten“ (v0.8) ----
+
+
+def sichten_ausserhalb(ordner, ziel) -> str:
+    return f"Der Ordner {ordner} liegt nicht im Archiv {ziel} – das Sichten bleibt im Zielordner."
+
+
+def sichten_filter_ungueltig(wert, erlaubt) -> str:
+    return f"Unbekannter Filter {wert!r}. Erlaubt sind: {', '.join(erlaubt)}."
+
+
+def sichten_wert_ungueltig(wert) -> str:
+    return f"Ungültige Bewertung {wert!r}: erlaubt sind 0 bis 5 Sterne und die Markierungen Auswahl, Ausschuss oder keine."
+
+
+def sichten_datei_fehler(datei, grund: str) -> str:
+    return f"Die Bewertungen lassen sich nicht speichern ({datei}): {grund}"
+
+
+SICHTEN_KEIN_ARCHIV = (
+    "Hier gibt es noch nichts zu sichten: Zuerst auf dem Reiter „Archiv“ einen Zielordner wählen, "
+    "in dem schon Fotos liegen, die das Programm übernommen hat."
+)
+SICHTEN_TASTEN = (
+    "Tasten: 0–5 Sterne · P Auswahl · X Ausschuss · U Markierung aufheben · "
+    "Eingabe große Ansicht · Esc zurück. Es wird nichts gelöscht oder verschoben – "
+    "Ausschuss ist nur eine Markierung."
+)
+SICHTEN_ORDNER_WAEHLEN = "Links einen Ordner wählen."
+SICHTEN_FILTER: list[tuple[str, str]] = [
+    ("alle", "Alle"), ("auswahl", "Nur Auswahl"), ("ausschuss", "Nur Ausschuss"),
+    ("ab1", "ab 1 ★"), ("ab2", "ab 2 ★"), ("ab3", "ab 3 ★"), ("ab4", "ab 4 ★"), ("ab5", "5 ★"),
+]
+SICHTEN_MARKIERUNG: dict[str, str] = {"": "", "auswahl": "Auswahl", "ausschuss": "Ausschuss"}
+SICHTEN_KEINE_VORSCHAU = "keine Vorschau"
+
+
+def sichten_ordner_zahlen(gezeigt: int, alle: int, bewertet: int, auswahl: int, ausschuss: int) -> str:
+    teile = [f"{anzahl(gezeigt)} von {anzahl(alle)} Bildern" if gezeigt != alle else f"{anzahl(alle)} Bilder"]
+    teile.append(f"{anzahl(bewertet)} mit Sternen")
+    teile.append(f"{anzahl(auswahl)} Auswahl")
+    teile.append(f"{anzahl(ausschuss)} Ausschuss")
+    return " · ".join(teile)
+

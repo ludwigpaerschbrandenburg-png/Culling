@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from .. import FotosortFehler, __version__, meldungen
 from . import ablauf as ablauf_modul
-from . import meldungsfenster, stil
+from . import meldungsfenster, sichtfenster, stil
 
 SCHRITTE = ["scan", "analyse", "kopieren", "pruefen", "aufraeumen"]
 #: Marke des kuenstlichen Testbaums (tests/testbaum.py legt sie neben "Quelle" ab):
@@ -797,6 +797,12 @@ class Hauptfenster(QMainWindow):
         tl.addWidget(self.titel_ziel, 1)
         self.titel_lauf = tag("Lauf –", "tag")
         tl.addWidget(self.titel_lauf)
+        # Zwei Reiter (SPEC §8 seit v0.8): „Archiv“ ist der bisherige Ablauf,
+        # „Sichten“ zeigt und bewertet die Bilder im Archiv - er ersetzt nichts.
+        self.reiter = Seg([("archiv", "Archiv"), ("sichten", "Sichten")])
+        self.reiter.setzen("archiv")
+        self.reiter.geaendert.connect(self.reiter_wechseln)
+        tl.addWidget(self.reiter)
         tl.addWidget(knopf("Hilfe", "ghost", lambda: self.hilfe_zeigen()))
         QShortcut(QKeySequence("F1"), self, activated=lambda: self.hilfe_zeigen())
         aussen.addWidget(self.titel)
@@ -821,12 +827,22 @@ class Hauptfenster(QMainWindow):
             self.stapel.addWidget(s)
         rl.addWidget(self.stapel, 1)
         self.scroll.setWidget(rolle)
-        aussen.addWidget(self.scroll, 1)
+        archiv_w = QWidget()
+        al = QVBoxLayout(archiv_w)
+        al.setContentsMargins(0, 0, 0, 0)
+        al.setSpacing(0)
+        al.addWidget(self.scroll, 1)
         aktionen_w = QWidget()
         self.aktionen = QHBoxLayout(aktionen_w)
         self.aktionen.setContentsMargins(40, 8, 40, 16)
         self.aktionen.setSpacing(8)
-        aussen.addWidget(aktionen_w)
+        al.addWidget(aktionen_w)
+        self.reiter_stapel = QStackedWidget()
+        self.archiv_reiter = archiv_w
+        self.sichten = sichtfenster.SichtenSeite(self)
+        self.reiter_stapel.addWidget(archiv_w)
+        self.reiter_stapel.addWidget(self.sichten)
+        aussen.addWidget(self.reiter_stapel, 1)
 
         # Statusleiste
         self.status = QFrame()
@@ -866,8 +882,19 @@ class Hauptfenster(QMainWindow):
             QTimer.singleShot(0, lambda: self.laden("start"))
 
     def closeEvent(self, ev) -> None:
+        self.sichten.schliessen()
         self._marker_schreiben(False)
         super().closeEvent(ev)
+
+    def reiter_wechseln(self, name: str) -> None:
+        """„Archiv“ oder „Sichten“. Der Ablauf im Reiter „Archiv“ laeuft dabei weiter."""
+        self.reiter.setzen(name)
+        if name == "sichten":
+            self.sichten.oeffnen(self.ab.sichten_info())
+            self.reiter_stapel.setCurrentWidget(self.sichten)
+            self.sichten.raster.setFocus()
+        else:
+            self.reiter_stapel.setCurrentWidget(self.archiv_reiter)
 
     def _marker_schreiben(self, sichtbar: bool) -> None:
         try:
@@ -1565,6 +1592,19 @@ class Durchlauf(QObject):
         self.f.grab().save(str(self.fotos / f"{name}.png"))
         self._sagen(f"Foto {name}")
 
+    def _sichten_zeigen(self) -> None:
+        """Reiter „Sichten“ (v0.8): oeffnen, das erste Bild mit 4 Sternen als
+        Auswahl markieren, fotografieren, zurueck zum Reiter „Archiv“."""
+        f = self.f
+        f.reiter.knoepfe["sichten"].click()
+        f.sichten.pool.waitForDone(20000)
+        QApplication.processEvents()
+        if f.sichten.raster.count():
+            f.sichten.raster.setCurrentRow(0)
+            f.sichten.bewerten(sterne=4, markierung="auswahl")
+        self._foto("13-sichten")
+        f.reiter.knoepfe["archiv"].click()
+
     def _abbruch(self, text: str) -> None:
         self.timer.stop()
         self.fehler = text
@@ -1625,6 +1665,7 @@ class Durchlauf(QObject):
             elif st == 6:
                 if f.in_ruhe():
                     self._foto("07-uebersicht-nach-kopieren")
+                    self._sichten_zeigen()
                     self._klick("Prüfen starten")
             elif st == 7:
                 if f.in_ruhe():

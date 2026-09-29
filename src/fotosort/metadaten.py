@@ -252,11 +252,14 @@ class _Prozess:
         self.abgewuergt = True
         prozesse.baum_beenden(self.prozess)
 
-    def lesen(self, pfade_typ: list[tuple[str, str]], limit: float | None = None) -> dict[str, dict]:
+    def lesen(self, pfade_typ: list[tuple[str, str]], limit: float | None = None,
+              argumente: list[str] | None = None) -> dict[str, dict]:
         """Einen Stapel gleichen Dateityps lesen. Pfad -> Felder.
 
         Mit limit (Sekunden) wird der Prozess beendet, wenn die Antwort nicht
         rechtzeitig kommt (ZeitlimitUeberschritten); er ist danach unbrauchbar.
+        argumente ersetzt die Felder der Datumsermittlung (Vorschau, v0.8) -
+        nur lesende Argumente, nie ein Schreibbefehl.
         """
         if not pfade_typ:
             return {}
@@ -266,7 +269,7 @@ class _Prozess:
             return {}
         self.zaehler += 1
         nummer = self.zaehler
-        zeilen = argumente_fuer(pfade_typ[0][0], typ) + [p for p, _ in pfade_typ]
+        zeilen = (argumente if argumente is not None else argumente_fuer(pfade_typ[0][0], typ)) + [p for p, _ in pfade_typ]
         eingabe = "\n".join(zeilen) + f"\n-execute{nummer}\n"
         assert self.prozess.stdin is not None and self.prozess.stdout is not None
         if self.prozess.poll() is not None:

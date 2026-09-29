@@ -201,4 +201,21 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 0; }}
 QScrollBar::handle:horizontal {{ background: {N800}; border-radius: 5px; min-width: 30px; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+
+/* Reiter „Sichten“ (v0.8): Ordnerbaum, Vorschaubilder, Filter, grosse Ansicht */
+QTreeWidget, QListWidget {{
+    background: {SURFACE}; color: {TEXT}; border: 1px solid {DIVIDER}; border-radius: 8px;
+    font-size: 13px; outline: 0;
+}}
+QTreeWidget::item {{ padding: 3px 4px; }}
+QTreeWidget::item:hover, QListWidget::item:hover {{ background: {TEXT_7}; }}
+QTreeWidget::item:selected, QListWidget::item:selected {{ background: {AKZENT_22}; color: {TEXT}; }}
+QListWidget::item {{ border-radius: 6px; padding: 4px; }}
+QComboBox {{
+    background: {SURFACE}; color: {TEXT}; border: 1px solid {DIVIDER}; border-radius: 8px;
+    padding: 5px 10px; font-size: 13px; min-width: 130px;
+}}
+QComboBox:hover {{ border-color: {N600}; }}
+QComboBox QAbstractItemView {{ background: {SURFACE}; color: {TEXT}; selection-background-color: {AKZENT_22}; border: 1px solid {DIVIDER}; }}
+QLabel[klasse="sicht-gross"] {{ background: {BG}; color: {N500}; border: 1px solid {DIVIDER}; border-radius: 8px; }}
 """

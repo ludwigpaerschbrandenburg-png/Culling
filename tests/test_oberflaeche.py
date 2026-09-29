@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import testbaum
-from fotosort import cli, db, steuerung
+from fotosort import cli, db, sichten, steuerung
 from fotosort.oberflaeche import ablauf as ablauf_modul
 from fotosort.oberflaeche import server as server_modul
 from test_kopieren import _zeilen
@@ -224,6 +224,11 @@ def test_archiv_verwerfen_verlangt_wort_und_laesst_bilder_in_ruhe(ob, quelle, zi
     archivbild = ziel / "2026" / "2026-01-01" / "DSC00001.JPG"
     archivbild.parent.mkdir(parents=True)
     archivbild.write_bytes(b"bild")
+    # Bewertungen aus dem Reiter „Sichten“ (v0.8) gehoeren zur Merkliste und gehen mit.
+    info = ab.sichten_info()
+    assert info["archiv_ordner"] == lokal and info["ziel"] == ziel
+    sichten.Bewertungen(lokal).setzen(["2026/2026-01-01/DSC00001.JPG"], sterne=5)
+    assert (lokal / sichten.DATEINAME).is_file() and "Sichten" in a["text"]
     vorher_quelle = len(list(quelle.rglob("*")))
     a = _post(client, "/api/verwerfen", {"wort": " Verwerfen "})
     assert a["verworfen"] is True and a["entfernt"] == 2
@@ -234,6 +239,7 @@ def test_archiv_verwerfen_verlangt_wort_und_laesst_bilder_in_ruhe(ob, quelle, zi
     assert z["ziel"] == "" and z["quellen_neu"] == [] and z["archiv"] == {"da": False}
     assert client.get("/api/lauf").json()["aktiv"] is False
     assert ablauf_modul.Ablauf(ordner=ab.ordner).ziel == ""
+    assert "text" in ab.sichten_info()                          # ohne Archiv nichts zu sichten
 
 
 def test_archiv_verwerfen_geht_bei_kaputter_datenbank_nie_bei_sperre_oder_verknuepfung(ob, quelle, ziel, archiv_basis):
