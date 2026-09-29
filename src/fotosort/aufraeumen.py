@@ -64,6 +64,7 @@ class Ergebnis:
     weise: str = loeschen.WEISE_PAPIERKORB
     quellen_uebersprungen: list[str] = field(default_factory=list)
     nicht_erreichbar: list[str] = field(default_factory=list)
+    quellen_weg: list[str] = field(default_factory=list)   # mitten im Lauf nicht mehr erreichbar
     dry_run_ordner: dict[str, list[Path]] = field(default_factory=dict)
 
 
@@ -208,12 +209,16 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
     gelesen = (L.quell_groesse if L.quell_groesse > 0 else 0) + (L.ziel_groesse if L.ziel_groesse > 0 else 0)
     e.bytes_gelesen += gelesen
     anzeige.weiter(1, gelesen)
+    if L.art != "ok" and _quelle_weg(z, dbank, lauf, e):
+        return
     if L.art == "quelle_fehlt":
         _quelle_fehlt(z, dbank, lauf, e)
         return
     try:
         neu = loeschen.quelldatei_entfernen(dbank, lauf, quellpfad, L, weise, byte_vergleich, papierkorb)
     except OSError as fehler:
+        if _quelle_weg(z, dbank, lauf, e):
+            return
         # Schreibschutz, fehlende Rechte, nur lesbar eingebundene Freigabe:
         # Diese eine Datei bekommt Status fehler, der Lauf geht weiter
         # (SPEC §5). Die Quelle ist noch da.
@@ -224,6 +229,8 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
         return
     except loeschen.Verweigert as v:
         grund = str(v)
+        if _quelle_weg(z, dbank, lauf, e):
+            return
         if grund == meldungen.GRUND_QUELLE_ABWEICHUNG:
             # Der wichtigste Fall: Die Quelle hat sich seit dem Kopieren
             # veraendert. Nicht loeschen, neu kopieren (SPEC Abschnitt 5).
@@ -240,6 +247,25 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
         e.geloescht += 1
     else:
         e.in_papierkorb += 1
+
+
+def _quelle_weg(z, dbank, lauf, e) -> bool:
+    """Ist die ganze Quelle gerade nicht erreichbar (Netz abgerissen, Platte
+    abgezogen)? Windows meldet das oft als "Datei nicht gefunden". Dann bleibt
+    die Zeile, wie sie ist - kein Fehler und vor allem kein "Loeschung
+    nachgetragen" -, der naechste Lauf versucht es wieder."""
+    wurzel = z["quellwurzel"]
+    if not wurzel or wurzel in e.quellen_weg:
+        return bool(wurzel)
+    try:
+        da = os.path.isdir(pfade.lang(Path(db.text_pfad(wurzel))))
+    except OSError:
+        da = False
+    if da:
+        return False
+    e.quellen_weg.append(wurzel)
+    dbank.ereignis(lauf, ART_QUELLE_NICHT_ERREICHBAR, wurzel, 1, meldungen.EREIGNIS_QUELLE_WEG_BEIM_AUFRAEUMEN)
+    return True
 
 
 def _quelle_fehlt(z, dbank, lauf, e) -> None:

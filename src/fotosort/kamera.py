@@ -13,6 +13,23 @@ import re
 _VERBOTEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _MEHRFACH_LEER = re.compile(r"\s+")
 
+#: Geraetenamen, die unter Windows kein Ordner- oder Dateiname sein duerfen -
+#: auch nicht mit Endung ("NUL.jpg"). Verglichen ohne Gross-/Kleinschreibung.
+_GERAETENAMEN = frozenset(
+    ["con", "prn", "aux", "nul"] + [f"com{i}" for i in range(1, 10)] + [f"lpt{i}" for i in range(1, 10)]
+)
+
+
+def windows_sicher(teil: str) -> str:
+    """Einen Ordnernamen so anpassen, dass Windows ihn ohne Sonderweg kennt:
+    kein Punkt und kein Leerzeichen am Ende (Windows schneidet sie still ab),
+    kein Geraetename (dann mit "_" dahinter). Gilt auf allen Systemen - das
+    Archiv soll auch ueber eine Freigabe unter Windows lesbar bleiben."""
+    teil = teil.rstrip(". ")
+    if teil.split(".", 1)[0].strip().lower() in _GERAETENAMEN:
+        teil += "_"
+    return teil
+
 
 def rohmodell(felder: dict | None) -> str:
     """Der Modellname, wie er in den Metadaten steht; leer, wenn keiner da ist.
@@ -30,7 +47,7 @@ def _bereinigen(text: str) -> str:
     text = _MEHRFACH_LEER.sub(" ", text).strip().strip("._ ")
     if not any(z.isalnum() for z in text):
         return ""
-    return text
+    return windows_sicher(text)
 
 
 def ordnername(felder: dict | None, konf) -> tuple[str, str]:
@@ -41,7 +58,7 @@ def ordnername(felder: dict | None, konf) -> tuple[str, str]:
     """
     felder = felder or {}
     roh = rohmodell(felder)
-    unbekannt = str(konf.wert("kamera.unbekannt") or "Unbekannte_Kamera")
+    unbekannt = _bereinigen(str(konf.wert("kamera.unbekannt") or "")) or "Unbekannte_Kamera"
     if not roh:
         return unbekannt, ""
 

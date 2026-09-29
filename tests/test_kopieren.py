@@ -385,6 +385,23 @@ def test_dry_run_fasst_nichts_an(baum, quelle, ziel, nachschauen, capsys):
         assert d.verbindung.execute("SELECT COUNT(*) FROM dateien WHERE status = 'analysiert'").fetchone()[0] > 0
 
 
+def test_nicht_beschreibbares_ziel_bricht_vorher_ab(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
+    """Nur lesend verbundene Freigabe oder fehlende Rechte: frueher bekam jede
+    Datei einzeln den Status fehler. Jetzt eine Probe vorab und eine Meldung."""
+    from fotosort import pfade
+    _vorbereiten(ziel, quelle)
+
+    def schreibgeschuetzt(p):
+        raise PermissionError(13, "Schreibgeschuetzt", str(p))
+
+    monkeypatch.setattr(pfade, "_probe_schreiben", schreibgeschuetzt)
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.FEHLER
+    assert "nicht beschreibbar" in capsys.readouterr().out
+    zeilen = _echte(_zeilen(nachschauen, ziel))
+    assert all(z["status"] == "analysiert" for z in zeilen.values())
+
+
 def test_zu_wenig_platz_bricht_vorher_ab(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
     _vorbereiten(ziel, quelle)
     monkeypatch.setattr(kopieren.pfade, "freier_platz", lambda pfad: 10)

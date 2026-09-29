@@ -243,6 +243,9 @@ def test_bericht_inhalt(baum, quelle, ziel, konf, nachschauen, capsys):
     assert "Ohne sicheres Datum" in aus and str(baum["ohne_datum"]) in aus
     assert "Datum aus dem Dateinamen ohne Uhrzeit (Tagesgrenze nicht angewendet): 1" in aus
     assert "Pruefung fehlgeschlagen" in aus
+    # Uebersprungene nach Endung: faellt auf, wenn echte Originale einer
+    # Kamera (etwa .insv, .3gp) nicht in der Typliste stehen.
+    assert "nach Endung:" in aus and ".txt" in aus
     # CSV: eine Zeile je Datei, Semikolon, Spaltenkopf
     ordner = bericht.berichte_ordner(ziel)
     neueste = sorted(ordner.glob("*_dateien.csv"))[-1]

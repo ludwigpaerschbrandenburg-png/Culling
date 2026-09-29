@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import db, meldungen
+from . import db, meldungen, pfade
 from .analyse import ART_ZIELORDNER_MEHRDEUTIG, GRUND_SIDECAR_OHNE_HAUPT
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
@@ -55,19 +55,19 @@ def schreiben(ziel: Path, dbank: db.Datenbank, lauf: int | None = None,
     """Alle drei Dateien schreiben; liefert (txt, dateien.csv, ereignisse.csv)."""
     jetzt = jetzt or datetime.now()
     ordner = berichte_ordner(ziel)
-    ordner.mkdir(parents=True, exist_ok=True)
+    pfade.lang(ordner).mkdir(parents=True, exist_ok=True)
     stamm = f"bericht_{jetzt.strftime('%Y-%m-%d_%H%M%S')}" + (f"_lauf{lauf}" if lauf else "")
     txt = ordner / f"{stamm}.txt"
     csv_dateien = ordner / f"{stamm}_dateien.csv"
     csv_ereignisse = ordner / f"{stamm}_ereignisse.csv"
 
-    txt.write_text(text(ziel, dbank, jetzt), encoding="utf-8")
-    with open(csv_dateien, "w", encoding=CSV_KODIERUNG, newline="") as f:
+    pfade.lang(txt).write_text(text(ziel, dbank, jetzt), encoding="utf-8")
+    with open(pfade.lang(csv_dateien), "w", encoding=CSV_KODIERUNG, newline="") as f:
         w = csv.writer(f, delimiter=CSV_TRENNER)
         w.writerow(DATEI_SPALTEN)
         for z in dbank.dateien_liste():
             w.writerow([_csv_wert(z[s]) for s in DATEI_SPALTEN])
-    with open(csv_ereignisse, "w", encoding=CSV_KODIERUNG, newline="") as f:
+    with open(pfade.lang(csv_ereignisse), "w", encoding=CSV_KODIERUNG, newline="") as f:
         w = csv.writer(f, delimiter=CSV_TRENNER)
         w.writerow(EREIGNIS_SPALTEN)
         for z in dbank.ereignisse_zeiger():
@@ -137,6 +137,13 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
         )
     sonstiges = zahlen["gesamt"]["sonstiges"]
     z.append(f"  Uebersprungen nach Dateityp (sonstiges, SPEC Abschnitt 3): {meldungen.anzahl(sonstiges)}")
+    if sonstiges:
+        endungen = dbank.endungen_uebersprungen()
+        teile = [f"{e} {meldungen.anzahl(n)}" for e, n in endungen[:15]]
+        if len(endungen) > 15:
+            teile.append(f"und {meldungen.anzahl(len(endungen) - 15)} weitere Endungen")
+        z.append(f"    nach Endung: {', '.join(teile)}")
+        z.append("    (Weitere Endungen lassen sich in der Konfiguration unter [dateitypen] ergaenzen.)")
     z.append("")
 
     # Laeufe: Dauer und Durchsatz je Phase

@@ -1192,6 +1192,10 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
                profil: str | None = None, verschieben: bool = False) -> Ergebnis:
     begonnen = time.monotonic()
     kw, hw, prof = worker_zahlen(konf, profil, kopier_worker, hash_worker)
+    try:
+        pfade.schreibprobe(ziel)
+    except OSError as fehler:
+        raise FotosortFehler(meldungen.ziel_nicht_beschreibbar(ziel, fehler.strerror or str(fehler))) from fehler
     direkt = not pfade.kann_ohne_ueberschreiben(ziel)
     lauf_zustand = _Lauf(ziel, konf, dbank, lauf, konsole, kw, hw, direkt, verschieben)
     e = lauf_zustand.ergebnis

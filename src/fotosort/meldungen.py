@@ -36,7 +36,7 @@ def groesse(bytes_: int) -> str:
 def dauer(sekunden: float) -> str:
     sekunden = max(0.0, float(sekunden))
     if sekunden < 60:
-        return f"{sekunden:.1f}".replace(".", ",") + " s"
+        return dezimal(sekunden) + " s"
     minuten, rest = divmod(int(sekunden), 60)
     stunden, minuten = divmod(minuten, 60)
     if stunden:
@@ -49,9 +49,7 @@ def durchsatz(dateien: int, bytes_: int, sekunden: float) -> str:
         sekunden = 0.001
     pro_sekunde = dateien / sekunden
     mb_pro_sekunde = (bytes_ / 1024 / 1024) / sekunden
-    d = f"{pro_sekunde:.1f}".replace(".", ",")
-    m = f"{mb_pro_sekunde:.1f}".replace(".", ",")
-    return f"{d} Dateien/s, {m} MB/s"
+    return f"{dezimal(pro_sekunde)} Dateien/s, {dezimal(mb_pro_sekunde)} MB/s"
 
 
 # ------------------------------------------------------------- ExifTool ----
@@ -355,7 +353,7 @@ def ziel_index_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str,
 
 
 def ziel_index_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
-    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    mb = dezimal(bytes_pro_s / 1024 / 1024)
     return (
         f"Ziel-Index: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
         f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
@@ -996,7 +994,7 @@ def analyse_ergebnis(e) -> str:
         zeilen.append(f"  erneut versucht (Fehler beim letzten Mal): {anzahl(e.erneut_versucht)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
-        pro_sekunde = f"{e.bearbeitet / e.sekunden:.1f}".replace(".", ",")
+        pro_sekunde = dezimal(e.bearbeitet / e.sekunden)
         zeilen.append(f"  Durchsatz:       {pro_sekunde} Dateien/s")
     zeilen.append(f"  ExifTool-Prozesse: {anzahl(e.prozesse)}")
     return "\n".join(zeilen)
@@ -1066,6 +1064,7 @@ EREIGNIS_NACHTRAEGLICH = "Kopie aus abgebrochenem Lauf war vollstaendig"
 EREIGNIS_RUECKFALL_ORDNER = "Dateisystem kann kein nicht ueberschreibendes Umbenennen"
 EREIGNIS_RUECKFALL_ZIEL = "Ziel kann kein nicht ueberschreibendes Umbenennen: ohne .part, exklusiv angelegt"
 EREIGNIS_QUELLE_UEBERSPRUNGEN = "nicht erreichbar, uebersprungen"
+EREIGNIS_QUELLE_WEG_BEIM_AUFRAEUMEN = "waehrend des Aufraeumens nicht mehr erreichbar, ihre Dateien bleiben unveraendert"
 EREIGNIS_QUELLE_ABGEZOGEN = "waehrend des Kopierens nicht mehr erreichbar, restliche Dateien bleiben offen"
 
 
@@ -1073,6 +1072,16 @@ def profil_ungueltig(profil, erlaubt: list) -> str:
     return (
         f"Unbekanntes Profil {profil!r}. Erlaubt sind: {', '.join(erlaubt)}"
         " (Befehlszeile --profil oder config.toml unter [leistung])."
+    )
+
+
+def ziel_nicht_beschreibbar(ziel, grund: str) -> str:
+    return (
+        "Abbruch: Im Zielordner laesst sich nichts anlegen - er ist nicht beschreibbar.\n"
+        f"  {ziel}\n"
+        f"  Grund: {grund}\n"
+        "Haeufige Ursachen: ein Netzlaufwerk, das nur lesend verbunden ist, fehlende\n"
+        "Rechte oder ein Schreibschutz-Schalter an der Karte. Es wurde nichts kopiert."
     )
 
 
@@ -1098,7 +1107,7 @@ def kopieren_beginnt(dateien: int, bytes_: int, kopier_worker: int, hash_worker:
 
 
 def kopieren_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
-    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    mb = dezimal(bytes_pro_s / 1024 / 1024)
     return (
         f"Kopieren: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
         f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
@@ -1251,7 +1260,7 @@ def pruefen_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str) ->
 
 
 def pruefen_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
-    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    mb = dezimal(bytes_pro_s / 1024 / 1024)
     return (
         f"Pruefen: {anzahl(dateien)} von {anzahl(gesamt)} Dateien,"
         f" {groesse(bytes_)} von {groesse(gesamt_bytes)}, {mb} MB/s"
@@ -1459,7 +1468,7 @@ def aufraeumen_dry_run_liste(wurzel, pfade_liste: list, weitere: int) -> str:
 
 
 def aufraeumen_laeuft(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int, bytes_pro_s: float) -> str:
-    mb = f"{bytes_pro_s / 1024 / 1024:.1f}".replace(".", ",")
+    mb = dezimal(bytes_pro_s / 1024 / 1024)
     return (
         f"Aufraeumen: {anzahl(dateien)} von {anzahl(gesamt)} Dateien geprueft,"
         f" {groesse(bytes_)} von {groesse(gesamt_bytes)} gelesen, {mb} MB/s"
@@ -1477,6 +1486,8 @@ def aufraeumen_ergebnis(e) -> str:
         f"  Loeschung verweigert (Ziel fehlt oder weicht ab, Lesefehler): {anzahl(e.verweigert)}",
         f"  freigegebener Platz:               {groesse(e.bytes_frei)}",
     ]
+    for wurzel in getattr(e, "quellen_weg", []):
+        zeilen.append(f"  Quelle waehrend des Laufs nicht mehr erreichbar - ihre Dateien bleiben, wie sie sind: {wurzel}")
     if e.leere_ordner_entfernt or e.reste_entfernt or e.reste_verweigert:
         zeilen.append(f"  leere Ordner entfernt:             {anzahl(e.leere_ordner_entfernt)}")
         zeilen.append(f"  Reste-Dateien entfernt:            {anzahl(e.reste_entfernt)}")

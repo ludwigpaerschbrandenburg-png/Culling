@@ -218,7 +218,7 @@ def archiv_id_datei(ziel: Path) -> Path:
 
 
 def archiv_id_vorhanden(ziel: Path) -> bool:
-    return archiv_id_datei(ziel).is_file()
+    return pfade.lang(archiv_id_datei(ziel)).is_file()
 
 
 def archiv_id_lesen(ziel: Path) -> str | None:
@@ -229,12 +229,12 @@ def archiv_id_lesen(ziel: Path) -> str | None:
     (SPEC Abschnitt 6).
     """
     datei = archiv_id_datei(ziel)
-    if not datei.is_file():
+    if not pfade.lang(datei).is_file():
         return None
     try:
-        roh = datei.read_text(encoding="utf-8")
+        roh = pfade.lang(datei).read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        roh = datei.read_bytes().decode("utf-8", errors="replace")
+        roh = pfade.lang(datei).read_bytes().decode("utf-8", errors="replace")
         raise FotosortFehler(meldungen.archiv_id_kaputt(datei, roh))
     kennung = roh.strip().lstrip("\ufeff")
     if not _ID_MUSTER.match(kennung):
@@ -251,8 +251,8 @@ def archiv_id_schreiben(ziel: Path, kennung: str) -> Path:
     und Datenbank stehen: Eine Kennung ohne Datenbank machte das Ziel
     unbenutzbar ("Datenbank fehlt")."""
     datei = archiv_id_datei(ziel)
-    datei.parent.mkdir(parents=True, exist_ok=True)
-    datei.write_text(kennung + "\n", encoding="utf-8")
+    pfade.lang(datei.parent).mkdir(parents=True, exist_ok=True)
+    pfade.lang(datei).write_text(kennung + "\n", encoding="utf-8")
     return datei
 
 
@@ -1563,6 +1563,17 @@ class Datenbank:
             werte.append(lauf)
         return self.verbindung.execute(sql + " ORDER BY lauf_nummer, rowid", werte)
 
+    def endungen_uebersprungen(self) -> list[tuple[str, int]]:
+        """(Endung, Anzahl) der als "sonstiges" uebersprungenen Dateien, die
+        haeufigsten zuerst - fuer den Bericht."""
+        self.stapel_schreiben()
+        zaehler: dict[str, int] = {}
+        for z in self.verbindung.execute("SELECT quellpfad FROM dateien WHERE dateityp = 'sonstiges'"):
+            name = z["quellpfad"].replace("\\", "/").rsplit("/", 1)[-1]
+            endung = ("." + name.rsplit(".", 1)[1].lower()) if "." in name.lstrip(".") else "(ohne Endung)"
+            zaehler[endung] = zaehler.get(endung, 0) + 1
+        return sorted(zaehler.items(), key=lambda e: (-e[1], e[0]))
+
     def dateien_zaehlen(self, bedingung: str = "1", werte: tuple = ()) -> int:
         self.stapel_schreiben()
         return int(self.verbindung.execute(f"SELECT COUNT(*) FROM dateien WHERE {bedingung}", werte).fetchone()[0])
@@ -1634,13 +1645,13 @@ class Datenbank:
         """
         self.stapel_schreiben()
         ordner = Path(ziel) / ARCHIV_UNTERORDNER
-        ordner.mkdir(parents=True, exist_ok=True)
+        Path(pfade.lang(ordner)).mkdir(parents=True, exist_ok=True)
         neu = ordner / SICHERUNG_NEU
         fertig = ordner / SICHERUNG
         vorher = ordner / SICHERUNG_VORHER
 
-        if neu.exists():
-            neu.unlink()
+        if Path(pfade.lang(neu)).exists():
+            Path(pfade.lang(neu)).unlink()
         # Erst lokal sichern (SQLite-Backup, schnell und in sich stimmig),
         # dann die fertige Datei am Stueck ins Ziel kopieren: Auf einem
         # Netzlaufwerk entsteht so nie eine SQLite-Datei in Arbeit (SPEC §6),
@@ -1664,15 +1675,15 @@ class Datenbank:
 
         # Die einzige Stelle, an der ein Umbenennen ersetzen darf: eigene
         # Sicherungsstaende, keine Bild- oder Videodateien.
-        if fertig.exists():
-            os.replace(fertig, vorher)
-        os.replace(neu, fertig)
+        if Path(pfade.lang(fertig)).exists():
+            pfade.geduldig(os.replace, pfade.lang(fertig), pfade.lang(vorher))
+        pfade.geduldig(os.replace, pfade.lang(neu), pfade.lang(fertig))
 
         if config_pfad is not None and Path(config_pfad).is_file():
             ziel_conf = ordner / "config.toml"
             zwischen = ordner / "config.toml.neu"
-            zwischen.write_bytes(Path(config_pfad).read_bytes())
-            os.replace(zwischen, ziel_conf)
+            Path(pfade.lang(zwischen)).write_bytes(Path(config_pfad).read_bytes())
+            pfade.geduldig(os.replace, pfade.lang(zwischen), pfade.lang(ziel_conf))
 
 
 #: Toleranz beim Vergleich des Aenderungsdatums, in Sekunden.

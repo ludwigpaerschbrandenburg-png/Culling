@@ -256,3 +256,22 @@ def test_ungueltige_zeitzone_wirft(konf):
     konf.alle()["datum"]["heimat_zeitzone"] = "Europa/Berlin"
     with pytest.raises(datum.ZeitzoneUngueltig):
         bestimmen({"CreateDate": "2026:01:01 23:30:00"}, typ=VIDEO, konf=konf)
+
+
+@pytest.mark.parametrize("name, erwartet", [
+    ("signal-2026-01-01-23-45-10-123.jpg", datetime(2026, 1, 1, 23, 45, 10)),
+    ("Screenshot 2026-01-01 at 00.30.12.png", datetime(2026, 1, 1, 0, 30, 12)),
+    ("Bildschirmfoto 2026-01-01 um 00.30.12.png", datetime(2026, 1, 1, 0, 30, 12)),
+    ("IMG_20260101_013000.jpg", datetime(2026, 1, 1, 1, 30, 0)),
+])
+def test_dateiname_mit_uhrzeit_aus_signal_und_macos(name, erwartet):
+    """Signal ("signal-2026-01-01-23-45-10") und macOS-Bildschirmfotos ("... at
+    00.30.12", deutsch "... um 00.30.12") verloren frueher die Uhrzeit - dann
+    griff die Tagesgrenze nicht (Screenshot 00:30 gehoert zum Vortag)."""
+    zeit, mit_uhrzeit = datum.aus_dateiname(name)
+    assert zeit == erwartet and mit_uhrzeit
+
+
+def test_kein_falsches_uhrzeit_muster_aus_bildgroessen():
+    zeit, mit_uhrzeit = datum.aus_dateiname("2026-01-01-1200x800.jpg")
+    assert zeit == datetime(2026, 1, 1) and not mit_uhrzeit

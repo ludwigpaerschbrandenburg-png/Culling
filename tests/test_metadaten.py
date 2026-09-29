@@ -53,8 +53,8 @@ def test_fast2_wuerde_das_eingebettete_xml_verlieren(pool, baum, monkeypatch):
     pfad = str(baum["video_sony_eingebettet"])
     original = metadaten._argumente
 
-    def mit_fast2(typ):
-        args = original(typ)
+    def mit_fast2(typ, schnell_erlaubt=True):
+        args = original(typ, schnell_erlaubt)
         return args if "-fast2" in args else [*args, "-fast2"]
 
     monkeypatch.setattr(metadaten, "_argumente", mit_fast2)
@@ -326,3 +326,49 @@ def test_argumente_enthalten_large_file_support():
     for typ in (FOTO, RAW, VIDEO, SIDECAR):
         args = metadaten._argumente(typ)
         assert "-api" in args and "LargeFileSupport=1" in args
+
+
+def _png_mit_exif_hinter_den_bilddaten(pfad: Path, tmp_path: Path) -> None:
+    """PNG, dessen eXIf-Block hinter IDAT liegt - erlaubt und bei Exporten ueblich."""
+    import struct
+    import subprocess
+    import zlib
+
+    hilf = tmp_path / "hilf.jpg"
+    hilf.write_bytes(testbaum._JPEG)
+    testbaum._exiftool([["-overwrite_original", "-DateTimeOriginal=2026:01:01 12:00:00", "-Model=PNG-Test", str(hilf)]])
+    exif = subprocess.run(metadaten.exiftool_befehl(testbaum.exiftool_pfad()) + ["-b", "-EXIF", str(hilf)],
+                          capture_output=True, check=True).stdout
+    assert exif[:2] in (b"II", b"MM")
+
+    def block(art: bytes, inhalt: bytes) -> bytes:
+        return struct.pack(">I", len(inhalt)) + art + inhalt + struct.pack(">I", zlib.crc32(art + inhalt) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0)
+    idat = zlib.compress(b"\x00\x00")
+    pfad.write_bytes(b"\x89PNG\r\n\x1a\n" + block(b"IHDR", ihdr) + block(b"IDAT", idat)
+                     + block(b"eXIf", exif) + block(b"IEND", b""))
+
+
+def test_png_mit_exif_hinter_den_bilddaten_bekommt_sein_datum(pool, tmp_path):
+    """Mit -fast2 hoert ExifTool bei PNG am Bildblock auf, bei HEIC/CR3/AVIF an
+    den Bilddaten - ein Datum dahinter ging verloren (Aufnahme unter _Ohne_Datum)."""
+    png = tmp_path / "Export.png"
+    _png_mit_exif_hinter_den_bilddaten(png, tmp_path)
+    felder = pool.lesen([(str(png), FOTO)])[metadaten.schluessel(png)]
+    assert felder.get("DateTimeOriginal") == "2026:01:01 12:00:00"
+
+
+def test_heic_png_cr3_avif_ohne_fast2_und_in_eigenen_stapeln():
+    for name in ("a.heic", "b.HEIF", "c.hif", "d.cr3", "e.avif", "f.png"):
+        assert "-fast2" not in metadaten.argumente_fuer(name, FOTO), name
+    assert "-fast2" in metadaten.argumente_fuer("g.jpg", FOTO)
+    assert "-fast2" in metadaten.argumente_fuer("h.arw", RAW)
+    stapel = metadaten.stapel_bilden([("a.jpg", FOTO), ("b.heic", FOTO), ("c.jpg", FOTO)])
+    assert sorted(len(s) for s in stapel) == [1, 2]
+
+
+def test_modellname_der_wie_eine_zahl_aussieht_bleibt_text():
+    """ExifTool gibt "1.10" als JSON-Zahl aus; daraus wurde der Ordner "1.1"."""
+    felder = metadaten.antwort_lesen('[{"SourceFile": "a.jpg", "Model": 1.10, "Make": 7}]')
+    assert felder["a.jpg"]["Model"] == "1.10" and felder["a.jpg"]["Make"] == "7"

@@ -54,6 +54,13 @@ FELDER_SIDECAR_XML: tuple[str, ...] = (
 
 STAPELGROESSE = 200
 
+#: Formate, deren Metadaten hinter den Bilddaten liegen duerfen: PNG (eXIf,
+#: tEXt nach IDAT) und alles im QuickTime-Aufbau (HEIC/HEIF von iPhones,
+#: Canon CR3, AVIF - Metadaten nach mdat). Mit -fast2 hoert ExifTool an den
+#: Bilddaten auf; das Datum ginge verloren. Sie werden deshalb vollstaendig
+#: gelesen, in eigenen Stapeln.
+OHNE_FAST2 = frozenset({".png", ".heic", ".heif", ".hif", ".cr3", ".avif"})
+
 # ExifTool-Prozesse je Profil, wenn leistung.metadaten_prozesse = 0 ist.
 # Eine Festplatte liest mit 32 Lesern auf einmal nur noch mit springendem
 # Kopf (im ersten echten Testlauf: 8 Dateien/s); 0 heisst Anzahl Kerne.
@@ -162,7 +169,21 @@ def prozesse_bestimmen(konf, profil: str | None = None) -> int:
     return max(1, min(os.cpu_count() or 1, PROZESSE_HOECHSTENS))
 
 
-def _argumente(dateityp: str) -> list[str]:
+def argumente_fuer(pfad, dateityp: str) -> list[str]:
+    """Argumente fuer einen Stapel, dessen erste Datei "pfad" ist (alle
+    Dateien eines Stapels haben dieselbe Art, stapel_bilden)."""
+    return _argumente(dateityp, schnell_erlaubt=Path(str(pfad)).suffix.lower() not in OHNE_FAST2)
+
+
+def _art(pfad, typ: str) -> str:
+    if typ == dateitypen.VIDEO:
+        return "video"
+    if typ == dateitypen.SIDECAR:
+        return "sidecar"
+    return "foto_voll" if Path(str(pfad)).suffix.lower() in OHNE_FAST2 else "foto"
+
+
+def _argumente(dateityp: str, schnell_erlaubt: bool = True) -> list[str]:
     if dateityp == dateitypen.VIDEO:
         felder, schnell = FELDER_VIDEO, False
     elif dateityp == dateitypen.SIDECAR:
@@ -173,10 +194,27 @@ def _argumente(dateityp: str) -> list[str]:
     # ab, deren Kopfdaten (moov) hinter den Bilddaten liegen - dann gaebe es
     # kein Datum, und die Aufnahme landete still unter _Ohne_Datum.
     args = ["-j", "-charset", "filename=utf8", "-charset", "utf8", "-m", "-api", "LargeFileSupport=1"]
-    if schnell:
+    if schnell and schnell_erlaubt:
         args.append("-fast2")
     args.extend(f"-{feld}" for feld in felder)
     return args
+
+
+def antwort_lesen(text: str) -> dict[str, dict]:
+    """Die JSON-Antwort von ExifTool: Pfad -> Felder. Zahlen bleiben Text
+    (parse_int/parse_float): Ein Kameramodell "1.10" waere sonst die Zahl 1.1
+    und der Kameraordner hiesse "1.1"."""
+    ergebnis: dict[str, dict] = {}
+    if not text:
+        return ergebnis
+    try:
+        for eintrag in json.loads(text, parse_int=str, parse_float=str):
+            quelle = eintrag.pop("SourceFile", None)
+            if quelle is not None:
+                ergebnis[schluessel(quelle)] = eintrag
+    except json.JSONDecodeError as fehler:
+        raise MetadatenFehler(f"ExifTool-Antwort nicht lesbar: {fehler}") from fehler
+    return ergebnis
 
 
 class _Prozess:
@@ -218,7 +256,7 @@ class _Prozess:
             return {}
         self.zaehler += 1
         nummer = self.zaehler
-        zeilen = _argumente(typ) + [p for p, _ in pfade_typ]
+        zeilen = argumente_fuer(pfade_typ[0][0], typ) + [p for p, _ in pfade_typ]
         eingabe = "\n".join(zeilen) + f"\n-execute{nummer}\n"
         assert self.prozess.stdin is not None and self.prozess.stdout is not None
         if self.prozess.poll() is not None:
@@ -249,17 +287,7 @@ class _Prozess:
             if waechter is not None:
                 waechter.cancel()
 
-        text = puffer.decode("utf-8", "surrogateescape").strip()
-        ergebnis: dict[str, dict] = {}
-        if text:
-            try:
-                for eintrag in json.loads(text):
-                    quelle = eintrag.pop("SourceFile", None)
-                    if quelle is not None:
-                        ergebnis[schluessel(quelle)] = eintrag
-            except json.JSONDecodeError as fehler:
-                raise MetadatenFehler(f"ExifTool-Antwort nicht lesbar: {fehler}") from fehler
-        return ergebnis
+        return antwort_lesen(puffer.decode("utf-8", "surrogateescape").strip())
 
     def beenden(self) -> None:
         if self.prozess.poll() is not None:
@@ -399,19 +427,14 @@ def stapel_bilden(
     Die Reihenfolge nach Quellordner bleibt erhalten, damit die Platte
     moeglichst sequentiell liest (SPEC Abschnitt 7).
     """
-    def art(typ: str) -> str:
-        if typ == dateitypen.VIDEO:
-            return "video"
-        return "sidecar" if typ == dateitypen.SIDECAR else "foto"
-
     # Erst nach Art sammeln (stabil, also innerhalb der Art weiter nach
     # Ordner), sonst ergaebe ein Handy-Ordner mit IMG_0001.JPG/IMG_0002.MOV
     # im Wechsel lauter Stapel mit einer einzigen Datei.
     stapel: list[list[tuple[str, str]]] = []
     aktuell: list[tuple[str, str]] = []
     aktueller_typ = None
-    for pfad, typ in sorted(eintraege, key=lambda e: art(e[1])):
-        kennung = art(typ)
+    for pfad, typ in sorted(eintraege, key=lambda e: _art(e[0], e[1])):
+        kennung = _art(pfad, typ)
         if aktuell and (kennung != aktueller_typ or len(aktuell) >= groesse):
             stapel.append(aktuell)
             aktuell = []

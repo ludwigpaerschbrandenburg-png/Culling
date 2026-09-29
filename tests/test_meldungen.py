@@ -150,7 +150,7 @@ def test_durchsatz_und_dauer():
 @pytest.mark.parametrize("bearbeitet, sekunden, erwartet", [
     (21, 0.7, "30,0 Dateien/s"),
     (299, 10.0, "29,9 Dateien/s"),
-    (123456, 100.0, "1234,6 Dateien/s"),  # wie bei den anderen Phasen, ohne Tausenderpunkt
+    (123456, 100.0, "1.234,6 Dateien/s"),  # mit Tausenderpunkt wie alle Zahlen
 ])
 def test_durchsatz_der_analyse_mit_deutschem_komma(bearbeitet, sekunden, erwartet):
     # Im Paketlauf von v0.6 stand "29.9 Dateien/s" - mit Punkt statt Komma.

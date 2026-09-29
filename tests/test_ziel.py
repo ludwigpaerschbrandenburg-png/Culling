@@ -179,3 +179,24 @@ def test_ohne_datum_ordner_wird_nicht_mit_zusatz_verwechselt(tmp_path, konf):
     s = ziel.Zielstruktur(tmp_path)
     pfad, _ = ziel.zielpfad(s, datum.Datum(None, 0, False), "A7C", "a.jpg", konf)
     assert pfad.parent.parent.name == "_Ohne_Datum"
+
+
+def test_vorlagenteile_werden_fuer_windows_bereinigt():
+    """Ein Punkt am Ende ("{monatsname}.") schneidet Windows still ab, ein
+    Geraetename (NUL) ist dort kein Ordner."""
+    teile = ziel.teile_aus_vorlage("{jahr}/{monatsname}./NUL/{kamera}", date(2026, 3, 1), "X")
+    assert teile == ["2026", "März", "NUL_", "X"]
+
+
+def test_vorhandener_ordner_in_anderer_unicode_form_wird_wiederverwendet(tmp_path):
+    """macOS-Freigaben liefern "März" zerlegt (NFD). Frueher entstand daneben
+    ein zweiter, gleich aussehender Ordner in der ueblichen Form (NFC)."""
+    import unicodedata
+    nfd = unicodedata.normalize("NFD", "2026-03 März")
+    (tmp_path / "2026" / nfd).mkdir(parents=True)
+    (tmp_path / "2026" / unicodedata.normalize("NFD", "2026-04 April Ägypten")).mkdir()
+    s = ziel.Zielstruktur(tmp_path)
+    ort = s.finden(["2026", unicodedata.normalize("NFC", "2026-03 März")])
+    assert ort.ordner == tmp_path / "2026" / nfd
+    ort = s.finden(["2026", "2026-04 April"])
+    assert ort.ordner.name == unicodedata.normalize("NFD", "2026-04 April Ägypten") and ort.wiederverwendet

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path, PureWindowsPath
 
 # SPEC Abschnitt 6: als Netz geltende Dateisystemtypen unter Linux.
@@ -306,6 +307,26 @@ class KeinNoReplace(OSError):
     """Das Dateisystem kann kein nicht ueberschreibendes Umbenennen (exFAT, FAT32)."""
 
 
+#: Unter Windows halten Virenscanner und Suchindex eine frisch geschriebene
+#: Datei kurz offen (Fehler 32 "Sharing Violation", 33 "Lock Violation").
+#: So oft wird dann gewartet und erneut versucht (zusammen gut 15 s).
+GEDULD_VERSUCHE = 10
+GEDULD_PAUSE = 0.3
+_GESPERRT = (32, 33)
+
+
+def geduldig(fn, *args, fehlernummern=_GESPERRT):
+    """fn(*args); bei einer voruebergehenden Sperre (nur Windows kennt
+    winerror) mit wachsender Pause erneut. Jeder andere Fehler sofort."""
+    for versuch in range(GEDULD_VERSUCHE):
+        try:
+            return fn(*args)
+        except OSError as fehler:
+            if getattr(fehler, "winerror", None) not in fehlernummern or versuch == GEDULD_VERSUCHE - 1:
+                raise
+            time.sleep(GEDULD_PAUSE * (versuch + 1) / 3)
+
+
 def _schreibgeschuetzt(pfad: Path) -> bool:
     """Traegt die Datei das Windows-Attribut "Schreibgeschuetzt"? Ausserhalb
     von Windows gibt es dieses Attribut nicht (dort entscheiden die Rechte
@@ -334,14 +355,14 @@ def datei_entfernen(pfad: Path) -> None:
     umgangen: Der Fehler geht dann unveraendert an den Aufrufer.
     """
     try:
-        os.unlink(lang(pfad))
+        geduldig(os.unlink, lang(pfad))
         return
     except PermissionError:
         if not _schreibgeschuetzt(pfad):
             raise
     _schreibschutz_setzen(pfad, False)
     try:
-        os.unlink(lang(pfad))
+        geduldig(os.unlink, lang(pfad))
     except OSError:
         try:
             _schreibschutz_setzen(pfad, True)
@@ -374,9 +395,15 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
         bewegen.restype = wintypes.BOOL
         # MOVEFILE_WRITE_THROUGH (8): erst zurueckkehren, wenn der Umzug auf
         # der Platte steht. Ohne MOVEFILE_REPLACE_EXISTING: nie ueberschreiben.
-        if bewegen(str(lang(von)), str(lang(nach)), 8):
-            return
-        fehler = ctypes.get_last_error()
+        # Haelt ein Virenscanner die Datei gerade (32, 33, bei manchen 5),
+        # wird kurz gewartet und erneut versucht.
+        for versuch in range(GEDULD_VERSUCHE):
+            if bewegen(str(lang(von)), str(lang(nach)), 8):
+                return
+            fehler = ctypes.get_last_error()
+            if fehler not in (5, 32, 33) or versuch == GEDULD_VERSUCHE - 1:
+                break
+            time.sleep(GEDULD_PAUSE * (versuch + 1) / 3)
         if fehler in (80, 183):  # ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS
             raise FileExistsError(str(nach))
         if fehler in (2, 3):  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
@@ -469,6 +496,26 @@ def ordner_sichern(ordner: Path) -> None:
         os.close(fd)
 
 
+def _probe_schreiben(p: Path) -> None:
+    lang(p).write_bytes(b"probe")
+
+
+def schreibprobe(ordner: Path) -> None:
+    """Laesst sich im Ordner eine Datei anlegen und wieder entfernen? Sonst
+    kommt der OSError (Schreibschutz, nur lesend eingebundene Freigabe,
+    fehlende Rechte) zum Aufrufer - vor der ersten echten Datei."""
+    import uuid
+
+    a = Path(ordner) / f".fotosort_probe_{uuid.uuid4().hex}"
+    try:
+        _probe_schreiben(a)
+    finally:
+        try:
+            os.unlink(lang(a))
+        except OSError:
+            pass
+
+
 def kann_ohne_ueberschreiben(ordner: Path) -> bool:
     """Einmalige Probe je Ziel-Dateisystem mit einer Wegwerfdatei (SPEC §5)."""
     if _IST_WINDOWS:  # pragma: no cover - MoveFileEx geht ueberall
@@ -478,7 +525,7 @@ def kann_ohne_ueberschreiben(ordner: Path) -> bool:
     a = Path(ordner) / f".fotosort_probe_{uuid.uuid4().hex}"
     b = Path(str(a) + ".b")
     try:
-        lang(a).write_bytes(b"probe")
+        _probe_schreiben(a)
         umbenennen_ohne_ueberschreiben(a, b)
         return True
     except KeinNoReplace:

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 from . import datum as datum_modul
+from . import kamera as kamera_modul
 from . import pfade
 
 MONATSNAMEN = (
@@ -49,9 +51,12 @@ def teile_aus_vorlage(vorlage: str, tag: date | None, kamera: str) -> list[str]:
         if not stueck:
             continue
         try:
-            teile.append(stueck.format(**werte))
+            teil = stueck.format(**werte)
         except (KeyError, IndexError, ValueError):
-            teile.append(stueck)
+            teil = stueck
+        teil = kamera_modul.windows_sicher(teil)
+        if teil:
+            teile.append(teil)
     return teile
 
 
@@ -143,11 +148,16 @@ class Zielstruktur:
         wiederverwendet = False
         for i, gewuenscht in enumerate(teile):
             vorhanden = self._ordner_in(aktuell)
-            if gewuenscht in vorhanden:
-                aktuell = aktuell / gewuenscht
+            # Verglichen in einer Unicode-Form (NFC): macOS-Freigaben liefern
+            # "März" zerlegt (NFD) - sonst entstuende ein zweiter, gleich
+            # aussehender Ordner. Benutzt wird der vorhandene Name, wie er ist.
+            gleich = _nfc(gewuenscht)
+            vorhanden_gleich = next((n for n in vorhanden if n == gewuenscht or _nfc(n) == gleich), None)
+            if vorhanden_gleich is not None:
+                aktuell = aktuell / vorhanden_gleich
                 continue
             erlaubt = True if zusatz_erlaubt is None or i >= len(zusatz_erlaubt) else zusatz_erlaubt[i]
-            kandidaten = [n for n in vorhanden if self.passt(n, gewuenscht)] if erlaubt else []
+            kandidaten = [n for n in vorhanden if self.passt(_nfc(n), gleich)] if erlaubt else []
             if not kandidaten:
                 aktuell = aktuell / gewuenscht
                 continue
@@ -157,6 +167,10 @@ class Zielstruktur:
             wiederverwendet = True
             aktuell = aktuell / gewaehlt
         return Zielort(aktuell, mehrdeutig=mehrdeutig, wiederverwendet=wiederverwendet)
+
+
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
 
 
 def zielpfad(struktur: Zielstruktur, d: datum_modul.Datum, kamera: str, name: str, konf) -> tuple[Path, Zielort]:

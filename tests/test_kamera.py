@@ -49,3 +49,23 @@ def test_alias_wird_selbst_bereinigt():
     k = config.Konfiguration()
     k.alle()["kamera"]["aliase"]["X"] = "A/B"
     assert kamera.ordnername({"Model": "X"}, k)[0] == "A_B"
+
+
+@pytest.mark.parametrize("modell, ordner", [
+    ("CON", "CON_"), ("nul", "nul_"), ("COM1", "COM1_"), ("LPT9.x", "LPT9.x_"), ("AUX ", "AUX_"),
+    ("Kamera.", "Kamera"), ("CONTAX T2", "CONTAX T2"), ("COM10", "COM10"),
+])
+def test_windows_geraetenamen_werden_nie_ordnernamen(modell, ordner):
+    """CON, NUL, COM1 ... sind unter Windows keine gueltigen Ordnernamen; ueber
+    das lange Pfad-Praefix liessen sie sich trotzdem anlegen - und danach mit
+    dem Explorer weder oeffnen noch loeschen."""
+    konf = config.Konfiguration()
+    assert kamera.ordnername({"Model": modell}, konf)[0] == ordner
+
+
+def test_auch_alias_und_name_fuer_unbekannt_werden_bereinigt():
+    konf = config.Konfiguration()
+    konf.alle()["kamera"]["aliase"] = {"X100": "PRN"}
+    konf.alle()["kamera"]["unbekannt"] = "Ohne Kamera."
+    assert kamera.ordnername({"Model": "X100"}, konf)[0] == "PRN_"
+    assert kamera.ordnername({}, konf)[0] == "Ohne Kamera"

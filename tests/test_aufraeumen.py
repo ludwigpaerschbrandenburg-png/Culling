@@ -302,6 +302,39 @@ def test_quelle_fehlt_ohne_frischlesung_wird_nicht_nachgetragen(baum, quelle, zi
     assert z["status"] == "fehler" and "nicht mehr vorhanden" in z["fehlergrund"]
 
 
+def test_quelle_mitten_im_aufraeumen_nicht_erreichbar_wird_nicht_als_geloescht_nachgetragen(
+        baum, quelle, ziel, nachschauen, antwort, monkeypatch, tmp_path, capsys):
+    """Unter Windows meldet ein abgerissenes Netzlaufwerk "Datei nicht gefunden".
+    Mit einer Bestaetigung aus einem frueheren Lauf haette das Programm dann
+    "Loeschung nachgetragen" - obwohl die Datei nur gerade nicht erreichbar war
+    und danach fuer immer in der Quelle liegen geblieben waere."""
+    from fotosort import aufraeumen
+    _bis_geprueft(ziel, quelle)
+    with nachschauen(ziel) as d:   # wie nach einem frueheren, abgebrochenen Aufraeumen
+        d.verbindung.execute("UPDATE dateien SET bestaetigt_in_lauf = 1 WHERE status = 'geprueft'")
+        d.verbindung.commit()
+    vorher = {k: v["status"] for k, v in _zeilen(nachschauen, ziel).items()}
+    beiseite = tmp_path / "Netz_weg"
+    echt = aufraeumen._quelle_aufraeumen
+
+    def netz_weg(*a, **k):
+        shutil.move(quelle, beiseite)
+        try:
+            return echt(*a, **k)
+        finally:
+            shutil.move(beiseite, quelle)
+
+    monkeypatch.setattr(aufraeumen, "_quelle_aufraeumen", netz_weg)
+    antwort.append("loeschen")
+    capsys.readouterr()
+    _cli("aufraeumen", "--ziel", ziel, "--endgueltig")
+    assert "nicht mehr erreichbar" in capsys.readouterr().out
+    nachher = {k: v["status"] for k, v in _zeilen(nachschauen, ziel).items()}
+    assert nachher == vorher                              # nichts nachgetragen, nichts auf fehler
+    assert not _ereignisse(nachschauen, ziel, loeschen.ART_LOESCHUNG_NACHGETRAGEN)
+    assert baum["jpg"].exists()
+
+
 # ------------------------------------------------------ Leere Ordner -----
 
 

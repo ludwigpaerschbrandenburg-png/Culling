@@ -155,8 +155,11 @@ def _utc_nach_heimat(text, zeitzone: ZoneInfo, jetzt=None) -> tuple[Zeitwert | N
 _NAME_MIT_UHRZEIT = re.compile(
     r"(?<!\d)(\d{4})(\d{2})(\d{2})[_\-\. T]?(\d{2})(\d{2})(\d{2})\d*(?!\d)"
 )
+# Zwischen Datum und Uhrzeit: Leerzeichen, "_", "T", "-" (Signal:
+# "signal-2026-01-01-23-45-10") oder " at " / " um " (macOS-Bildschirmfotos:
+# "Screenshot 2026-01-01 at 00.30.12", "Bildschirmfoto 2026-01-01 um 00.30.12").
 _NAME_MIT_UHRZEIT_STRICHE = re.compile(
-    r"(?<!\d)(\d{4})-(\d{2})-(\d{2})[ _T](\d{2})[.:\-](\d{2})(?:[.:\-](\d{2}))?(?!\d)"
+    r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?:[ _T\-]| at | um )(\d{2})[.:\-](\d{2})(?:[.:\-](\d{2}))?(?!\d)"
 )
 _NAME_NUR_DATUM_STRICHE = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
 _NAME_NUR_DATUM_KOMPAKT = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")

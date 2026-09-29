@@ -348,3 +348,51 @@ def test_schreibschutz_kommt_zurueck_wenn_das_entfernen_trotzdem_scheitert(tmp_p
     with pytest.raises(PermissionError):
         pfade.datei_entfernen(p)
     assert p.exists() and aufgehoben == [False, True]
+
+
+class _Gesperrt(PermissionError):
+    """Wie Windows' Sharing Violation (Fehler 32): ein Virenscanner prueft die Datei gerade."""
+    winerror = 32
+
+
+def test_kurz_gesperrte_datei_wird_nach_kurzer_wartezeit_entfernt(tmp_path, monkeypatch):
+    """Virenscanner und Suchindex halten frisch geschriebene Dateien unter
+    Windows kurz offen. Frueher endete das Entfernen dann sofort als Fehler."""
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x")
+    import os as _os
+    echt = _os.unlink
+    versuche = []
+
+    def unlink(pfad, *a, **k):
+        versuche.append(1)
+        if len(versuche) <= 2:
+            raise _Gesperrt(13, "Der Prozess kann nicht auf die Datei zugreifen")
+        echt(pfad, *a, **k)
+
+    monkeypatch.setattr(pfade.os, "unlink", unlink)
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.001)
+    pfade.datei_entfernen(p)
+    assert not p.exists() and len(versuche) == 3
+
+
+def test_geduld_hat_ein_ende_und_gilt_nur_fuer_sperren(monkeypatch):
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.001)
+    aufrufe = []
+
+    def immer_gesperrt():
+        aufrufe.append(1)
+        raise _Gesperrt(13, "gesperrt")
+
+    with pytest.raises(PermissionError):
+        pfade.geduldig(immer_gesperrt)
+    assert len(aufrufe) == pfade.GEDULD_VERSUCHE
+    aufrufe.clear()
+
+    def keine_rechte():
+        aufrufe.append(1)
+        raise PermissionError(13, "keine Rechte")
+
+    with pytest.raises(PermissionError):
+        pfade.geduldig(keine_rechte)
+    assert len(aufrufe) == 1
