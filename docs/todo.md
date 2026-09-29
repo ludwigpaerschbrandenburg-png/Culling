@@ -705,6 +705,12 @@ je Befund zuerst ein Test)
 
 Jeder Punkt hat eine Empfehlung; gebaut wird erst nach Zustimmung.
 
+**Entschieden am 29.09.2026** (Antwort des Nutzers, sinngemäß): 1 – je nach Lage bestimmen: die
+Laufwerksart feststellen, das Profil vorschlagen (auf der Startseite änderbar) und danach die
+Zahl der gleichzeitig gelesenen Dateien wählen. 2, 3, 5, 6, 7, 8, 9, 10, 11, 12 und 14 – wie
+empfohlen bauen. 4 – entfällt (keine GoPro). 13 – ergänzen (in `CLAUDE.md` erledigt). 15 – in
+einem zweiten Reiter beginnen, ohne das Hauptprogramm zu ersetzen. Umsetzung: „Runde 2“ unten.
+
 1. **Hash-Worker nach Profil?** Die SPEC ist widersprüchlich: §4/§8 sagen „mit den Hash-Workern
    des Profils", §9 sagt „0 = Anzahl Kerne". Heute liest `pruefen` auf einer Festplatte mit so
    vielen Strängen, wie der Prozessor Kerne hat – auf einer Festplatte meist langsamer.
@@ -753,6 +759,26 @@ Jeder Punkt hat eine Empfehlung; gebaut wird erst nach Zustimmung.
     *Empfehlung:* erst bauen, wenn es gebraucht wird.
 15. **Außerhalb des Auftrags (Art des Programms):** Bilder bewerten/aussortieren (Culling im
     engeren Sinn), Dateien umbenennen, mehrere Ziele zugleich, Ähnlichkeitssuche. Nicht gebaut.
+
+### Runde 2: Entscheidungen umsetzen (Version 0.8)
+
+- [x] 13: `CLAUDE.md` nennt `kopieren_laeuft` in der Liste der Statuswerte.
+- [ ] 11: Zielnamen ohne Groß-/Kleinschreibung eindeutig, auch auf Linux.
+- [ ] 14: `fotosort zuruecklegen` und „Zurücklegen…“ im Fenster.
+- [ ] 2 und 3: Gruppenmitglieder lesen, nach Aufnahmezeit trennen, kaputte Hauptdatei ersetzen.
+- [ ] 5 und 6: XMP `DateCreated`, PNG `CreationTime`, Datum aus dem `.xmp`-Sidecar; `Z` umrechnen.
+- [ ] 9: Berichtsliste „Datum auffällig“.
+- [ ] 7: Hersteller ohne Modell zählen.
+- [ ] 8: neue Endungen in der Standardliste.
+- [ ] 10: Berichte begrenzen (10 Läufe, ältere CSV gepackt, Listen gekürzt).
+- [ ] 1: Laufwerksart erkennen, Profil vorschlagen, `--profil auto`, Hash-Worker nach Profil.
+- [ ] 12: Mindestgröße in der SPEC gefasst.
+- [ ] 15: Reiter „Sichten“, erster Ausbau (ansehen, Sterne, Auswahl/Ausschuss, Filter).
+- [ ] Prüfung durch unabhängige Prüfer, volle Tests, CI, Release v0.8.
+
+**Später (15, nächste Ausbaustufen des Reiters „Sichten“):** Bewertungen als XMP-Sidecar
+zurückschreiben (für Lightroom & Co.), Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder
+finden, RAW-Vorschau über das eingebettete Vorschaubild.
 
 ---
 

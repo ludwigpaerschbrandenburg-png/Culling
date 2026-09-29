@@ -40,10 +40,11 @@ Konkret heißt das:
   Inhalt nie im Ziel ankam. Weicht der frisch gelesene Quell-Hash vom gespeicherten ab, wird
   **nicht** gelöscht: Die Datei fällt auf Status `analysiert` zurück und muss neu kopiert
   werden.
-- Die Statuswerte werden **umlautfrei** gespeichert: `gefunden`, `analysiert`, `kopiert`,
-  `geprueft`, `verschoben`, `duplikat`, `duplikat_bestaetigt`, `quelle_geloescht`,
-  `uebersprungen`, `fehler`. Wer eine Statusprüfung schreibt, vergleicht gegen genau diese
-  Zeichenketten. Andere Schreibweisen gibt es nicht.
+- Die Statuswerte werden **umlautfrei** gespeichert: `gefunden`, `analysiert`,
+  `kopieren_laeuft`, `kopiert`, `geprueft`, `verschoben`, `duplikat`, `duplikat_bestaetigt`,
+  `quelle_geloescht`, `uebersprungen`, `fehler`. Wer eine Statusprüfung schreibt, vergleicht
+  gegen genau diese Zeichenketten. Andere Schreibweisen gibt es nicht. `kopieren_laeuft` heißt:
+  Die Zieldatei wird gerade geschrieben; der Status berechtigt nie zum Löschen einer Quelldatei.
 - Der Ziel-Index rechtfertigt **nie allein** eine Löschung. Er dient nur dazu, Kandidaten für
   Duplikate schnell zu finden.
 - Vor jeder Löschung werden **Quelle UND Ziel** im aktuellen Lauf frisch gelesen. Nur das Ziel
