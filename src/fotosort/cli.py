@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, zuruecklegen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -780,6 +780,34 @@ def befehl_aufraeumen(args, konsole) -> int:
         datenbank.schliessen()
 
 
+def befehl_zuruecklegen(args, konsole) -> int:
+    """Ordner _geloescht_ an die alten Orte zuruecklegen (SPEC §4 Phase 5, v0.8).
+    Nichts wird ueberschrieben oder geloescht; darum ohne Bestaetigungswort."""
+    probelauf = bool(args.dry_run)
+    archiv = archiv_oeffnen(args, konsole, anlegen=False, sperren=not probelauf)
+    datenbank = archiv.datenbank
+    try:
+        wurzeln = None
+        if args.quelle:
+            plan = aufraeumen.planen(datenbank, args.quelle)
+            if plan.unbekannt:
+                for q in plan.unbekannt:
+                    konsole.print(meldungen.quelle_unbekannt(q))
+                return FEHLENDE_ANGABE
+            wurzeln = [w for w, _ in plan.quellen]
+        if probelauf:
+            e = zuruecklegen.ausfuehren(datenbank, 0, konsole, quellwurzeln=wurzeln, dry_run=True)
+            konsole.print(meldungen.zuruecklegen_probelauf(e) if e.geplant else meldungen.zuruecklegen_nichts_zu_tun())
+            return OK
+        lauf = datenbank.lauf_beginnen(_befehlszeile())
+        e = zuruecklegen.ausfuehren(datenbank, lauf, konsole, quellwurzeln=wurzeln)
+        konsole.print(meldungen.zuruecklegen_ergebnis(e) if e.geplant else meldungen.zuruecklegen_nichts_zu_tun())
+        _abschliessen(archiv, konsole, lauf, {"dateien": e.zurueckgelegt, "bytes": 0, "sekunden": e.sekunden})
+        return FEHLER if e.nicht_zurueck else OK
+    finally:
+        datenbank.schliessen()
+
+
 def befehl_bericht(args, konsole) -> int:
     """Bericht als Text und CSV (SPEC Abschnitt 10). Legt keinen Lauf an."""
     archiv = archiv_oeffnen(args, konsole, anlegen=False)
@@ -1191,6 +1219,10 @@ def befehl_arbeit(args, konsole) -> int:
             ns.profil = auftrag.get("profil")
             ns.hash_worker = None
             rc = befehl_ziel_index(ns, konsole)
+        elif schritt == "zuruecklegen":
+            ns.quelle = None
+            ns.dry_run = False
+            rc = befehl_zuruecklegen(ns, konsole)
         elif schritt == "aufraeumen":
             ns.quelle = list(auftrag.get("quellen") or []) or None
             ns.leere_ordner = bool(auftrag.get("leere_ordner"))
@@ -1458,6 +1490,11 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--hash-worker", type=int, metavar="N", help="gleichzeitige Hash-Berechnungen")
     _gemeinsam(p)
 
+    p = unterbefehle.add_parser("zuruecklegen", help="Ordner _geloescht_ an die alten Orte zuruecklegen")
+    p.add_argument("--quelle", metavar="PFAD", action="append", help="nur diese Quelle; mehrfach angebbar")
+    p.add_argument("--dry-run", action="store_true", help="nur zeigen, nichts tun")
+    _gemeinsam(p)
+
     p = unterbefehle.add_parser("status", help="Zaehler je Status und aktuelle Phase")
     _gemeinsam(p)
 
@@ -1611,6 +1648,8 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_ziel_index(args, konsole)
         if args.befehl == "wiederherstellen":
             return befehl_wiederherstellen(args, konsole)
+        if args.befehl == "zuruecklegen":
+            return befehl_zuruecklegen(args, konsole)
         raise AssertionError(f"unbekannter Befehl: {args.befehl}")   # argparse laesst das nicht durch
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

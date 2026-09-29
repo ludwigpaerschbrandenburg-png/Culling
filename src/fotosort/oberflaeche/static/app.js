@@ -269,6 +269,16 @@
     }).catch(fehlerZeigen);
   }
 
+  function zuruecklegen() {
+    api("/api/zuruecklegen", {}).then(function (a) {
+      if (!a || a.frage !== "zuruecklegen") return;
+      return dialog("Zurücklegen?", a.text, { ja: "Zurücklegen", nein: "Nicht jetzt" }).then(function (r) {
+        if (!r.ja) return;
+        return api("/api/zuruecklegen", { ja: true }).then(function (b) { if (b && b.gestartet) { hauptZeigen(); laufStarten(b.gestartet); } });
+      });
+    }).catch(fehlerZeigen);
+  }
+
   function neuaufbau() {
     api("/api/neuaufbau", {}).then(function (a) {
       if (!a || a.frage !== "neuaufbau") return;
@@ -561,6 +571,9 @@
     $("auf-wort").disabled = !darf;
     $("auf-wort").value = "";
     aufWortPruefen();
+    var zurueck = n.zuruecklegbar || 0;
+    $("zurueck-los").classList.toggle("versteckt", zurueck === 0);
+    $("zurueck-los").textContent = "Aus _geloescht_ zurücklegen… (" + (n.zuruecklegbar_text || zurueck) + ")";
     var archivDa = !!(z.archiv && z.archiv.da);
     $("karte-ordner").classList.toggle("inaktiv", !archivDa);
     $("ordner-wort").disabled = !archivDa;
@@ -658,6 +671,7 @@
     alle("input[name=weise]").forEach(function (r) { r.addEventListener("change", aufWortPruefen); });
     $("auf-wort").addEventListener("input", aufWortPruefen);
     $("auf-wort").addEventListener("keydown", function (e) { if (e.key === "Enter" && !$("auf-los").disabled) $("auf-los").click(); });
+    $("zurueck-los").onclick = zuruecklegen;
     $("auf-los").onclick = function () { schrittStarten("aufraeumen", { weise: radio("weise"), wort: $("auf-wort").value }); };
     $("ordner-wort").addEventListener("input", ordnerWortPruefen);
     $("ordner-los").onclick = function () { schrittStarten("aufraeumen", { leere_ordner: true, wort_ordner: $("ordner-wort").value, wort: "" }); };

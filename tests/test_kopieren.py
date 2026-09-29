@@ -12,6 +12,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -243,6 +244,39 @@ def test_gleicher_name_gleicher_inhalt_ist_duplikat_und_rest_der_gruppe_ohne_anh
     raw = zeilen[str(baum["raw"])]
     assert raw["status"] == "kopiert" and Path(raw["zielpfad"]) == vor["zusatz_ordner"] / "DSC01234.ARW"
     assert [e["pfad"] for e in _ereignisse(nachschauen, ziel, kopieren.ART_DUPLIKAT) if e["pfad"] == str(baum["jpg"])]
+
+
+@pytest.mark.parametrize("direkt", [False, True], ids=["mit_part", "rueckfall_ohne_part"])
+def test_name_in_anderer_schreibweise_gilt_als_belegt(baum, quelle, ziel, konf, nachschauen, monkeypatch, direkt):
+    """Auf einem Linux-Ziel duerfen DSC01234.JPG und dsc01234.jpg nebeneinander
+    liegen - ueber eine Freigabe unter Windows waere dann eine davon nicht
+    erreichbar. Ein Name, den es in anderer Schreibweise schon gibt, ist belegt."""
+    if direkt:
+        monkeypatch.setattr(kopieren.pfade, "kann_ohne_ueberschreiben", lambda ordner: False)
+    vor = testbaum.ziel_vorbelegen(ziel, konf)
+    ordner = vor["zusatz_ordner"]
+    vor["belegt"].unlink()
+    klein = ordner / "dsc01234.jpg"
+    klein.write_bytes(b"fremd, klein geschrieben")
+    _vorbereiten(ziel, quelle)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert klein.read_bytes() == b"fremd, klein geschrieben"
+    jpg = Path(_zeilen(nachschauen, ziel)[str(baum["jpg"])]["zielpfad"])
+    assert jpg.name.casefold() != "dsc01234.jpg" and jpg.read_bytes() == baum["jpg"].read_bytes()
+    for o in [p for p in Path(ziel).rglob("*") if p.is_dir()] + [Path(ziel)]:
+        namen = [unicodedata.normalize("NFC", k.name).casefold() for k in o.iterdir()]
+        assert len(namen) == len(set(namen)), o
+
+
+def test_gleicher_inhalt_in_anderer_schreibweise_ist_duplikat(baum, quelle, ziel, konf, nachschauen):
+    vor = testbaum.ziel_vorbelegen(ziel, konf)
+    vor["belegt"].unlink()
+    klein = vor["zusatz_ordner"] / "dsc01234.jpg"
+    klein.write_bytes(baum["jpg"].read_bytes())
+    _vorbereiten(ziel, quelle)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    jpg = _zeilen(nachschauen, ziel)[str(baum["jpg"])]
+    assert jpg["status"] == "duplikat" and Path(jpg["zielpfad"]) == klein
 
 
 def test_quelle_seit_analyse_veraendert_wird_nicht_kopiert(baum, quelle, ziel, nachschauen, capsys):

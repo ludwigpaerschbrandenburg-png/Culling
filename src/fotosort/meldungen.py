@@ -1299,6 +1299,15 @@ def ereignis_nachgeprueft(e) -> str:
             f" {anzahl(len(e.fehlt))} fehlen, {anzahl(len(e.nicht_lesbar))} nicht lesbar")
 
 
+def ob_frage_zuruecklegen(n: int) -> str:
+    return (
+        f"{anzahl(n)} Dateien, die beim Aufräumen in einen Ordner _geloescht_ gelegt wurden, kommen an ihren "
+        "alten Ort in der Quelle zurück. Nichts wird überschrieben: Ist ein alter Name inzwischen belegt, bleibt "
+        "die Datei im Ordner _geloescht_. Im Archiv ändert sich nichts. Beim nächsten Durchgang werden die "
+        "Dateien wieder erkannt – ihr Inhalt liegt ja schon im Archiv."
+    )
+
+
 def ob_frage_nachpruefen(n: int, bytes_: int) -> str:
     return (
         f"Alle {anzahl(n)} geprüften Dateien im Archiv ({groesse(bytes_)}) werden vollständig gelesen und mit "
@@ -1680,6 +1689,54 @@ def quelle_unbekannt(pfad) -> str:
     return f"Quelle {pfad} ist in diesem Archiv nicht bekannt (fotosort status zeigt die bekannten Quellen)."
 
 
+# ------------------------------------------------------- Zuruecklegen -----
+
+GRUND_ZURUECKLEGEN_KOPIE = "Zuruecklegen: Die Kopie am alten Ort stimmte nicht - sie wurde wieder entfernt, das Original liegt weiter im Ordner _geloescht_"
+EREIGNIS_ZURUECKLEGEN_BELEGT = "alter Ort inzwischen belegt - bleibt im Ordner _geloescht_"
+
+
+def zuruecklegen_nichts_zu_tun() -> str:
+    return "Nichts zurueckzulegen: Das Programm hat keine Datei in einen Ordner _geloescht_ gelegt."
+
+
+def zuruecklegen_probelauf(e) -> str:
+    zeilen = [f"Probelauf (--dry-run): {anzahl(e.zurueckgelegt)} Dateien wuerden an ihren alten Ort zurueckgelegt."]
+    if e.belegt:
+        zeilen.append(f"  alter Ort belegt, bleiben im Ordner _geloescht_: {anzahl(len(e.belegt))}")
+        zeilen.extend(f"    {p}" for p in e.belegt[:20])
+    if e.fehlt:
+        zeilen.append(f"  nicht mehr im Ordner _geloescht_: {anzahl(len(e.fehlt))}")
+    zeilen.append("Es wurde nichts bewegt und kein Lauf angelegt.")
+    return "\n".join(zeilen)
+
+
+def zuruecklegen_ergebnis(e) -> str:
+    zeilen = [
+        "Ordner _geloescht_ zurueckgelegt (dieser Lauf)",
+        f"  zurueckgelegt:     {anzahl(e.zurueckgelegt)} Dateien an ihren alten Ort",
+    ]
+    if e.kopiert:
+        zeilen.append(f"    davon kopiert:   {anzahl(e.kopiert)} (das Dateisystem kann nicht umbenennen, ohne zu"
+                      " ueberschreiben) - die Originale liegen weiter im Ordner _geloescht_; bitte selbst loeschen,"
+                      " wenn alles da ist")
+    if e.belegt:
+        zeilen.append(f"  alter Ort belegt, bleiben im Ordner _geloescht_: {anzahl(len(e.belegt))}")
+        zeilen.extend(f"    {p}" for p in e.belegt[:20])
+        if len(e.belegt) > 20:
+            zeilen.append(f"    ... und {anzahl(len(e.belegt) - 20)} weitere (siehe Bericht)")
+    if e.fehler:
+        zeilen.append(f"  nicht zurueckgelegt (Fehler): {anzahl(len(e.fehler))}")
+        zeilen.extend(f"    {p}: {g}" for p, g in e.fehler[:20])
+    if e.fehlt:
+        zeilen.append(f"  nicht mehr im Ordner _geloescht_ (von Hand geloescht?): {anzahl(len(e.fehlt))}")
+    if e.ordner_uebrig:
+        zeilen.append("  Ordner _geloescht_, die bleiben (es liegt noch etwas darin):")
+        zeilen.extend(f"    {p}" for p in e.ordner_uebrig)
+    zeilen.append("  Beim naechsten Durchgang werden die Dateien wieder erkannt; ihr Inhalt liegt schon im Archiv.")
+    zeilen.append(f"  Dauer:             {dauer(e.sekunden)}")
+    return "\n".join(zeilen)
+
+
 def aufraeumen_dry_run_schluss() -> str:
     return "Probelauf (--dry-run): Es wurde nichts geloescht und kein Lauf angelegt."
 
@@ -1976,6 +2033,7 @@ SCHRITT_NAME: dict[str, str] = {
     "aufraeumen": "Quelle aufräumen",
     "ziel-index": "Archiv neu einlesen: jede Datei im Ziel lesen und merken",
     "nachpruefen": "Archiv nachprüfen",
+    "zuruecklegen": "Ordner _geloescht_ zurücklegen",
 }
 
 SCHRITT_ERKLAERUNG: dict[str, str] = {
@@ -1987,6 +2045,7 @@ SCHRITT_ERKLAERUNG: dict[str, str] = {
     "aufraeumen": "Nur Dateien, deren Kopie im Archiv nachweislich stimmt, werden aus der Quelle entfernt. Vorher werden Quelle und Ziel noch einmal komplett gelesen.",
     "ziel-index": "Jede Datei im Zielordner wird vollständig gelesen und mit ihrer Prüfsumme gemerkt. Kopiert, verschoben oder gelöscht wird nichts. Danach auf der Startseite die Quellordner angeben und „Los geht's“ drücken.",
     "nachpruefen": "Jede schon geprüfte Datei im Archiv wird vollständig gelesen und mit ihrer Prüfsumme verglichen. Im Archiv wird nichts verändert.",
+    "zuruecklegen": "Dateien aus dem Ordner _geloescht_ kommen an ihren alten Ort zurück. Nichts wird überschrieben, im Archiv ändert sich nichts.",
 }
 
 OB_PROFILE: list[tuple[str, str]] = [

@@ -499,3 +499,29 @@ def test_wartezeiger_laesst_keine_zeitgeber_dazwischen(app, tmp_path, monkeypatc
         assert not gefeuert
     t.stop()
     f.close()
+
+
+def test_knopf_zuruecklegen_nur_mit_inhalt_im_ordner(app, tmp_path, quelle, ziel, monkeypatch):
+    """Die Aufraeumen-Karte bietet "Zuruecklegen..." nur an, wenn das Programm
+    etwas in einen Ordner _geloescht_ gelegt hat; die Rueckfrage nennt die Zahl."""
+    fragen = []
+    monkeypatch.setattr(desktop, "frage", lambda _e, titel, text, **k: fragen.append((titel, text)) or (False, ""))
+    for befehl in ("scan", "analyse", "kopieren", "pruefen"):
+        args = [befehl, "--ziel", str(ziel)] + (["--quelle", str(quelle)] if befehl == "scan" else [])
+        assert cli.main(args) == cli.OK
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.start.ziel_setzen(str(ziel))
+    f.weitermachen()
+    assert f.haupt.zurueck_los.isHidden()
+    monkeypatch.setenv("FOTOSORT_EINGABE_ERZWINGEN", "1")
+    monkeypatch.setattr("builtins.input", lambda: "verschieben")
+    assert cli.main(["aufraeumen", "--ziel", str(ziel)]) == cli.OK
+    f.weitermachen()
+    assert not f.haupt.zurueck_los.isHidden() and f.haupt.zurueck_los.isEnabled()
+    text = f.haupt.zurueck_los.text()
+    assert "zurücklegen" in text and text.endswith(")") and text[text.rindex("(") + 1] != "0"
+    f.zuruecklegen()
+    assert fragen and fragen[-1][0] == "Zurücklegen?" and "überschrieben" in fragen[-1][1]
+    assert ab.lauf is None                     # "Nicht jetzt": nichts gestartet
+    f.close()

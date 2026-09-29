@@ -104,6 +104,10 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     def nachpruefen(daten: dict = Body(default={})):
         return ab.nachpruefen_starten(bool(daten.get("ja", False)))
 
+    @app.post("/api/zuruecklegen")
+    def zuruecklegen(daten: dict = Body(default={})):
+        return ab.zuruecklegen_starten(bool(daten.get("ja", False)))
+
     @app.post("/api/neuaufbau")
     def neuaufbau(daten: dict = Body(default={})):
         return ab.neuaufbau_starten(bool(daten.get("ja", False)))

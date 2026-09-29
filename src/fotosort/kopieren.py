@@ -322,6 +322,51 @@ class _InArbeit:
         return bool(namen - eigene_namen)
 
 
+class _Namen:
+    """Die Namen je Zielordner, verglichen ohne Gross-/Kleinschreibung und in
+    einer Unicode-Form (NFC) - SPEC §5, seit v0.8. Auf einem Linux-Ziel duerfen
+    IMG.JPG und img.jpg nebeneinander liegen; ueber eine Freigabe unter Windows
+    waere dann eine davon nicht erreichbar. Ein Name, den es in anderer
+    Schreibweise schon gibt, gilt deshalb als belegt.
+
+    Jeder Ordner wird einmal je Lauf gelesen; was der Lauf selbst anlegt, wird
+    nachgetragen (merken). Jeder Treffer wird vor der Antwort mit stat
+    bestaetigt - ein inzwischen verschwundener Name zaehlt nicht mehr."""
+
+    def __init__(self) -> None:
+        self._ordner: dict[str, dict[str, list[str]]] = {}
+
+    def _liste(self, ordner: Path) -> dict[str, list[str]]:
+        t = db.pfad_text(ordner)
+        namen = self._ordner.get(t)
+        if namen is None:
+            namen = {}
+            try:
+                with os.scandir(_L(ordner)) as eintraege:
+                    for e in eintraege:
+                        namen.setdefault(_InArbeit.schluessel(e.name), []).append(e.name)
+            except OSError:
+                pass   # Ordner gibt es (noch) nicht
+            self._ordner[t] = namen
+        return namen
+
+    def vorhanden(self, p: Path) -> Path | None:
+        """Die Datei, die unter diesem Namen - in irgendeiner Schreibweise -
+        im Ziel liegt, sonst None."""
+        if _stat(p) is not None:
+            return p
+        for name in self._liste(p.parent).get(_InArbeit.schluessel(p.name), ()):
+            kandidat = p.parent / name
+            if _stat(kandidat) is not None:
+                return kandidat
+        return None
+
+    def merken(self, p: Path) -> None:
+        namen = self._ordner.get(db.pfad_text(p.parent))
+        if namen is not None:
+            namen.setdefault(_InArbeit.schluessel(p.name), []).append(p.name)
+
+
 @dataclass
 class _Auftrag:
     zeile: object                    # sqlite3.Row der Quelldatei
@@ -334,6 +379,7 @@ class _Auftrag:
     zukunft: Future | None = None
     ziel_hash: Future | None = None  # Hash einer schon vorhandenen Datei am Zielnamen
     ziel_da: bool | None = None      # beim Einreichen: lag schon eine Datei am Zielnamen?
+    ziel_vorhanden: Path | None = None   # diese Datei (vielleicht in anderer Schreibweise)
     ergebnis: object = None
 
 
@@ -423,6 +469,7 @@ class _Lauf:
         self.hasher = ThreadPoolExecutor(max_workers=hash_worker, thread_name_prefix="hash")
         self.max_offen = max(4, kopier_worker * 4)
         self.in_arbeit = _InArbeit()           # Zielnamen, die gerade entstehen
+        self.namen = _Namen()                  # Namen im Ziel ohne Gross-/Kleinschreibung
         self.offen: list[list[_Auftrag]] = []  # eingereichte Gruppen
         self.bereit: list[list[_Auftrag]] = [] # beansprucht, Anspruch noch nicht festgeschrieben
         # Hash -> (Endname, Bytes) der Dateien, deren Umbenennen in dieser
@@ -456,7 +503,7 @@ class _Lauf:
             return True
         if t in bekannt_frei:
             return False
-        return _stat(p) is not None
+        return self.namen.vorhanden(p) is not None
 
     def hash_von_vorhandener(self, p: Path) -> Future:
         """Hash einer Datei im Ziel: aus dem Ziel-Index, wenn Groesse und
@@ -564,9 +611,10 @@ class _Lauf:
             self.in_arbeit.add(a.ziel)
             self.in_arbeit.add(a.schreibziel)
             if db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
-                a.ziel_da = _stat(a.ziel) is not None
+                a.ziel_vorhanden = self.namen.vorhanden(a.ziel)
+                a.ziel_da = a.ziel_vorhanden is not None
                 if a.ziel_da:
-                    a.ziel_hash = self.hash_von_vorhandener(a.ziel)   # parallel zur Kopie
+                    a.ziel_hash = self.hash_von_vorhandener(a.ziel_vorhanden)   # parallel zur Kopie
         # Der Anspruch muss VOR dem ersten Schreiben festgeschrieben sein
         # (SPEC §5): Nur dann erkennt der naechste Start nach einem Absturz,
         # wem eine liegengebliebene Datei gehoert. Festgeschrieben und
@@ -618,18 +666,19 @@ class _Lauf:
             if st.st_size != int(a.zeile["groesse"]) or not db._gleiche_zeit(st.st_mtime, a.zeile["mtime"]):
                 self._quelle_veraendert(a, st.st_size, st.st_mtime_ns)
                 continue
-            if _stat(a.ziel) is not None:
+            vorhanden = self.namen.vorhanden(a.ziel)
+            if vorhanden is not None:
                 # Zielname belegt: gleicher Inhalt? Dafuer muss die Quelle einmal gelesen werden.
                 try:
                     hq = hashes.blake3_datei(_L(a.quelle))
-                    hz = self.hash_von_vorhandener(a.ziel).result()
+                    hz = self.hash_von_vorhandener(vorhanden).result()
                 except OSError as fehler:
                     self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
                     continue
-                self.index_nachtragen(a.ziel, hz)
+                self.index_nachtragen(vorhanden, hz)
                 if hq == hz:
-                    self.dbank.duplikat_setzen(a.zeile["quellpfad"], a.ziel, hq, self.lauf)
-                    self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(a.ziel))
+                    self.dbank.duplikat_setzen(a.zeile["quellpfad"], vorhanden, hq, self.lauf)
+                    self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(vorhanden))
                     e.duplikate += 1
                     e.bearbeitet += 1
                     if self.anzeige:
@@ -644,6 +693,9 @@ class _Lauf:
             k = anhang
             while True:
                 endname = mit_anhang(a.ziel, k, a.stamm)
+                if self.namen.vorhanden(endname) is not None:
+                    k += 1   # in anderer Schreibweise belegt (das Umbenennen saehe es auf Linux nicht)
+                    continue
                 # Anspruch VOR dem Umbenennen festschreiben (SPEC §5).
                 self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, endname, self.lauf, umbenannt=True)
                 self.dbank.stapel_schreiben()
@@ -666,6 +718,7 @@ class _Lauf:
                     if self.anzeige:
                         self.anzeige.weiter(1, 0)
                     break
+                self.namen.merken(endname)
                 # Danach: Existenz und Groesse pruefen (SPEC §4 Phase 3).
                 st2 = _stat(endname)
                 groesse = int(a.zeile["groesse"])
@@ -803,6 +856,7 @@ class _Lauf:
                     a.schreibziel = name
                     a.anhang = k
                     angelegt.append(a)
+                    self.namen.merken(name)
                 return True
             except FileExistsError:
                 # Jemand war schneller: Eigenes zuruecknehmen, naechster Anhang.
@@ -956,18 +1010,21 @@ class _Lauf:
     def _duplikat_partner(self, a: _Auftrag) -> Path | None:
         h = a.ergebnis.hash
         # a) Der berechnete Zielname ist belegt: gleicher Inhalt?
-        if a.ziel_hash is None and a.ziel_da is not False and _stat(a.ziel) is not None \
+        if a.ziel_hash is None and a.ziel_da is not False \
                 and db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
-            a.ziel_hash = self.hash_von_vorhandener(a.ziel)
+            a.ziel_vorhanden = self.namen.vorhanden(a.ziel)
+            if a.ziel_vorhanden is not None:
+                a.ziel_hash = self.hash_von_vorhandener(a.ziel_vorhanden)
         if a.ziel_hash is not None:
+            partner = a.ziel_vorhanden or a.ziel
             try:
                 vorhanden = a.ziel_hash.result()
             except OSError:
                 vorhanden = ""
             if vorhanden:
-                self.index_nachtragen(a.ziel, vorhanden)
+                self.index_nachtragen(partner, vorhanden)
                 if vorhanden == h:
-                    return a.ziel
+                    return partner
         # b) Gleicher Inhalt unter anderem Namen (Ziel-Index, auch aus diesem
         #    Lauf). Sidecars nicht: Leere XMP-Dateien gleichen sich oft, und
         #    jede gehoert zu ihrer Hauptdatei.
@@ -996,6 +1053,9 @@ class _Lauf:
             k = anhang
             while True:
                 endname = mit_anhang(a.ziel, k, a.stamm)
+                if self.namen.vorhanden(endname) is not None:
+                    k += 1   # in anderer Schreibweise belegt (das Umbenennen saehe es auf Linux nicht)
+                    continue
                 # Vor dem Umbenennen festhalten, wo die Datei gleich liegt:
                 # Nach einem Absturz zwischen Umbenennen und "kopiert" findet
                 # der naechste Start sie so wieder (SPEC §5). Fuer den
@@ -1005,6 +1065,7 @@ class _Lauf:
                     self.dbank.stapel_schreiben()
                 try:
                     pfade.umbenennen_ohne_ueberschreiben(a.schreibziel, endname)
+                    self.namen.merken(endname)
                     break
                 except FileExistsError:
                     k += 1      # jemand war schneller: naechster freier Name
@@ -1019,6 +1080,7 @@ class _Lauf:
                     if stand != "ok":
                         self._fehler(a, stand)
                         return
+                    self.namen.merken(endname)
                     break
                 except OSError as fehler:
                     self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")

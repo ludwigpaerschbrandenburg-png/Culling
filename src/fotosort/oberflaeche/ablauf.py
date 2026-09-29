@@ -25,12 +25,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, nachpruefen, pfade, prozesse, steuerung
+from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, nachpruefen, pfade, prozesse, steuerung, zuruecklegen
 from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
 # Schritte ausserhalb der Phasenleiste, die trotzdem als Arbeitsprozess laufen.
-WEITERE_SCHRITTE = ("ziel-index",)
+WEITERE_SCHRITTE = ("ziel-index", "zuruecklegen")
 ZUSTAND_STARTET = "startet"
 ZUSTAND_ABGESTUERZT = "abgestuerzt"
 ENDZUSTAENDE = (steuerung.ZUSTAND_FERTIG, steuerung.ZUSTAND_ABGEBROCHEN, steuerung.ZUSTAND_FEHLER, ZUSTAND_ABGESTUERZT)
@@ -539,6 +539,7 @@ class Ablauf:
                     "pruefen": d.zu_pruefen_summe(),
                     "aufraeumen": (sum(n for n, _ in loeschbar.values()), sum(b for _, b in loeschbar.values())),
                     "loeschbar_je_quelle": {str(w): (n, b) for w, (n, b) in loeschbar.items()},
+                    "zuruecklegbar": d.zuruecklegbar_anzahl(),
                     "modelle": [(m, o, n) for m, o, n in d.modelle_liste() if m],
                     "konf_pfad": archiv.konf_pfad,
                     "phase": meldungen.ob_phase_kurz(niedrigster, sum(zaehler.values()) > 0),
@@ -645,6 +646,19 @@ class Ablauf:
                     archiv.datenbank.schliessen()
             return {"frage": "nachpruefen", "n": n, "text": meldungen.ob_frage_nachpruefen(n, b)}
         return self.schritt_starten("pruefen", profil=self.profil, alles=True)
+
+    def zuruecklegen_starten(self, ja: bool = False) -> dict:
+        """Den Ordner _geloescht_ an die alten Orte zuruecklegen ("fotosort
+        zuruecklegen") als eigener Arbeitsprozess. Ohne "ja" nur die Rueckfrage."""
+        if not self.ziel or not self._archiv_da():
+            raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+        with self.sperre:
+            n = int(self.archiv_lesen().get("zuruecklegbar", 0))
+        if n == 0:
+            raise FotosortFehler(meldungen.zuruecklegen_nichts_zu_tun())
+        if not ja:
+            return {"frage": "zuruecklegen", "n": n, "text": meldungen.ob_frage_zuruecklegen(n)}
+        return self.schritt_starten("zuruecklegen")
 
     def neuaufbau_starten(self, ja: bool = False) -> dict:
         """Das Ziel vollstaendig neu einlesen ("fotosort ziel-index --neu-aufbauen")
@@ -919,7 +933,9 @@ class Ablauf:
             if schritt == "fertig" and sum(stand["zaehler"].values()) == 0:
                 # Nichts erfasst (etwa nach dem Neueinlesen des Ziels): zuerst die Quellen.
                 schritt = "scan"
-            d: dict = {"schritt": schritt, "phase": stand["phase"], "zaehler": stand["zaehler"]}
+            d: dict = {"schritt": schritt, "phase": stand["phase"], "zaehler": stand["zaehler"],
+                       "zuruecklegbar": int(stand.get("zuruecklegbar", 0)),
+                       "zuruecklegbar_text": meldungen.anzahl(int(stand.get("zuruecklegbar", 0)))}
             if schritt == "fertig":
                 d["text"] = meldungen.ob_fertig_text()
                 d["name"] = ""
@@ -1124,6 +1140,18 @@ class Ablauf:
                         zeilen.append(["Quelle seit Kopieren geändert", meldungen.anzahl(n)])
                     if zaehler.get("geprueft", 0):
                         zeilen.append(["noch in der Quelle (geprueft)", meldungen.anzahl(zaehler.get("geprueft", 0))])
+                elif schritt == "zuruecklegen":
+                    zeilen.append(["zurückgelegt", meldungen.anzahl(ereignis(zuruecklegen.ART_ZURUECKGELEGT) + ereignis(zuruecklegen.ART_KOPIERT))])
+                    n = ereignis(zuruecklegen.ART_KOPIERT)
+                    if n:
+                        zeilen.append(["davon kopiert, Original bleibt im Ordner _geloescht_", meldungen.anzahl(n)])
+                    n = ereignis(zuruecklegen.ART_BELEGT)
+                    if n:
+                        zeilen.append(["alter Ort belegt, bleiben im Ordner _geloescht_", meldungen.anzahl(n)])
+                    n = ereignis(zuruecklegen.ART_FEHLER)
+                    if n:
+                        zeilen.append(["nicht zurückgelegt (Fehler)", meldungen.anzahl(n)])
+                    zeilen.append(["überschrieben oder gelöscht", "nichts"])
                 elif schritt == "ziel-index":
                     stand_index = d.ziel_index_zusammenfassung()
                     zeilen.append(["gelesen in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])

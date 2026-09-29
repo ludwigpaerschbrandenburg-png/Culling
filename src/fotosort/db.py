@@ -1480,6 +1480,25 @@ class Datenbank:
         " AND instr(quellpfad, '/_geloescht_') = 0 AND instr(quellpfad, '\\_geloescht_') = 0"
     )
 
+    def zuruecklegbar(self, quellwurzeln: list[str] | None, ab: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
+        """Zeilen, deren Quelldatei im Ordner _geloescht_ liegt (zuruecklegen,
+        SPEC §4 Phase 5): Status quelle_geloescht mit schreibpfad, nach Quellpfad."""
+        self.stapel_schreiben()
+        if quellwurzeln is not None and not quellwurzeln:
+            return []
+        sql = "SELECT * FROM dateien WHERE status = 'quelle_geloescht' AND schreibpfad != '' AND quellpfad > ?"
+        werte: list = [ab]
+        if quellwurzeln is not None:
+            sql += f" AND quellwurzel IN ({', '.join('?' for _ in quellwurzeln)})"
+            werte += [pfad_text(w) for w in quellwurzeln]
+        return self.verbindung.execute(sql + " ORDER BY quellpfad LIMIT ?", (*werte, int(grenze))).fetchall()
+
+    def zuruecklegbar_anzahl(self) -> int:
+        self.stapel_schreiben()
+        return int(self.verbindung.execute(
+            "SELECT COUNT(*) FROM dateien WHERE status = 'quelle_geloescht' AND schreibpfad != ''"
+        ).fetchone()[0])
+
     def zu_loeschen_summe(self, quellwurzeln=None) -> dict[str, tuple[int, int]]:
         """Je Quellwurzel (Anzahl, Bytes) der loeschberechtigten Zeilen."""
         self.stapel_schreiben()

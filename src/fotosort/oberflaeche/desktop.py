@@ -554,6 +554,10 @@ class HauptSeite(QWidget):
         self.k_auf.lay.addWidget(self.auf_wort)
         self.auf_los = knopf("Nach _geloescht_ verschieben", "primary", self.f.aufraeumen_starten)
         self.k_auf.lay.addWidget(self.auf_los)
+        # Nur sichtbar, wenn das Programm etwas in einen Ordner _geloescht_ gelegt hat.
+        self.zurueck_los = knopf("Zurücklegen…", "ghost", self.f.zuruecklegen)
+        self.zurueck_los.hide()
+        self.k_auf.lay.addWidget(self.zurueck_los)
         rechts.addWidget(self.k_auf)
 
         self.k_ordner = Karte("Leere Ordner")
@@ -1123,6 +1127,22 @@ class Hauptfenster(QMainWindow):
         self.haupt_zeigen()
         self.lauf_starten(a["gestartet"])
 
+    def zuruecklegen(self) -> None:
+        """Den Ordner _geloescht_ an die alten Orte zuruecklegen - nach
+        Rueckfrage, als eigener Schritt. Nichts wird ueberschrieben."""
+        with self.beschaeftigt():
+            a = self._versuchen(self.ab.zuruecklegen_starten, False)
+        if a is None or a.get("frage") != "zuruecklegen":
+            return
+        ja, _ = frage(self, "Zurücklegen?", a["text"], ja="Zurücklegen", nein="Nicht jetzt")
+        if not ja:
+            return
+        a = self._versuchen(self.ab.zuruecklegen_starten, True)
+        if a is None or not a.get("gestartet"):
+            return
+        self.haupt_zeigen()
+        self.lauf_starten(a["gestartet"])
+
     def neuaufbau(self) -> None:
         """Das Ziel vollstaendig neu einlesen (Rettung ohne Sicherung, oder nach
         Umsortieren von Hand im Archiv) - nach Rueckfrage, als eigener Schritt."""
@@ -1431,6 +1451,10 @@ class Hauptfenster(QMainWindow):
         h.auf_wort.setEnabled(darf)
         h.auf_wort.setText("")
         h.auf_wort_pruefen()
+        zurueck = int(n.get("zuruecklegbar", 0) or 0)
+        h.zurueck_los.setVisible(zurueck > 0)
+        h.zurueck_los.setEnabled(zurueck > 0)
+        h.zurueck_los.setText(f"Aus _geloescht_ zurücklegen… ({meldungen.anzahl(zurueck)})")
         archiv_da = bool((z.get("archiv") or {}).get("da"))
         h.k_ordner.inaktiv(not archiv_da)
         h.ordner_wort.setEnabled(archiv_da)

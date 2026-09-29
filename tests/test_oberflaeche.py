@@ -843,3 +843,35 @@ def test_archiv_nachpruefen_aus_der_oberflaeche(ob, quelle, ziel, nachschauen):
     zeilen = dict((x[0], x[1]) for x in zf["zeilen"])
     assert zeilen["Archivdateien verändert"] == "1"
     assert _zeilen(nachschauen, ziel)[z["quellpfad"]]["status"] == "fehler"
+
+
+def test_zuruecklegen_aus_der_oberflaeche(ob, quelle, ziel, nachschauen, monkeypatch):
+    """Knopf "Zuruecklegen...": nur da, wenn etwas im Ordner _geloescht_ liegt;
+    Rueckfrage mit Anzahl, dann laeuft "fotosort zuruecklegen" als Schritt."""
+    ab, client = ob
+    for befehl in (["scan", "--quelle", str(quelle)], ["analyse"], ["kopieren"], ["pruefen"]):
+        assert cli.main([befehl[0], "--ziel", str(ziel), *befehl[1:]]) == cli.OK
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    assert client.get("/api/naechster").json()["zuruecklegbar"] == 0
+    assert "nichts" in _fehler(client, "/api/zuruecklegen").lower()
+    monkeypatch.setenv("FOTOSORT_EINGABE_ERZWINGEN", "1")
+    monkeypatch.setattr("builtins.input", lambda: "verschieben")
+    assert cli.main(["aufraeumen", "--ziel", str(ziel)]) == cli.OK
+    n = client.get("/api/naechster").json()["zuruecklegbar"]
+    assert n > 0
+    a = _post(client, "/api/zuruecklegen")
+    assert a["frage"] == "zuruecklegen" and meldungen_anzahl(n) in a["text"] and ab.lauf is None
+    a = _post(client, "/api/zuruecklegen", {"ja": True})
+    assert a["gestartet"] == "zuruecklegen"
+    l = _warten(client)
+    assert l["zustand"] == "fertig", l
+    zf = client.get("/api/zusammenfassung?schritt=zuruecklegen").json()
+    zeilen = dict((x[0], x[1]) for x in zf["zeilen"])
+    assert zeilen["zurückgelegt"] == meldungen_anzahl(n)
+    assert client.get("/api/naechster").json()["zuruecklegbar"] == 0
+    assert {z["status"] for z in _zeilen(nachschauen, ziel).values() if z["dateityp"] != "sonstiges"} <= {"gefunden", "uebersprungen"}
+
+
+def meldungen_anzahl(n: int) -> str:
+    from fotosort import meldungen
+    return meldungen.anzahl(n)
