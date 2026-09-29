@@ -67,3 +67,39 @@ def test_gleich_byteweise(tmp_path):
     c.write_bytes(b"abc" * 999 + b"abd")
     assert hashes.gleich_byteweise(a, b)
     assert not hashes.gleich_byteweise(a, c)
+
+
+def test_kopie_wird_auf_die_platte_gezwungen(tmp_path, monkeypatch):
+    """Ohne fsync laege die Kopie womoeglich nur im Zwischenspeicher, und ein
+    Stromausfall nach dem Loeschen der Quelle nahm das Bild mit."""
+    import os
+
+    gesichert: list[int] = []
+    echt = os.fsync
+    monkeypatch.setattr(hashes.os, "fsync", lambda fd: gesichert.append(fd) or echt(fd))
+    q = tmp_path / "q.bin"
+    q.write_bytes(b"x" * 3000)
+    hashes.kopieren_mit_hash(q, tmp_path / "z.bin")
+    assert gesichert
+
+
+def test_kurze_schreibvorgaenge_werden_fortgesetzt():
+    class Zaeh:
+        def __init__(self):
+            self.daten = bytearray()
+
+        def write(self, mv):
+            teil = bytes(mv[:3])       # schreibt hoechstens 3 Bytes je Aufruf
+            self.daten += teil
+            return len(teil)
+
+    z = Zaeh()
+    hashes._ganz_schreiben(z, b"0123456789")
+    assert bytes(z.daten) == b"0123456789"
+
+    class Stockt:
+        def write(self, mv):
+            return 0
+
+    with pytest.raises(OSError):
+        hashes._ganz_schreiben(Stockt(), b"abc")

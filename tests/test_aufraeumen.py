@@ -523,3 +523,32 @@ def test_zieldatei_nach_der_frischlesung_veraendert_wird_nicht_geloescht(baum, q
             loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], gut, loeschen.WEISE_ENDGUELTIG, False)
         assert baum["analog"].exists() and zp.read_bytes() != inhalt
         assert d.zeile(baum["analog"])["status"] != "quelle_geloescht"
+
+
+def test_papierkorb_rueckfall_entfernt_keine_waehrenddessen_geaenderte_quelle(baum, quelle, ziel, nachschauen, monkeypatch):
+    """exFAT-Quelle: Der Papierkorb bekommt eine Kopie. Wird die Quelle
+    waehrend dieser Kopie beschrieben, darf sie nicht entfernt werden."""
+    from fotosort import pfade
+
+    _bis_geprueft(ziel, quelle)
+    with nachschauen(ziel) as d:
+        lauf = d.lauf_beginnen("test")
+        z = d.zeile(baum["analog"])
+        lesung = loeschen.frisch_lesen(baum["analog"], Path(z["zielpfad"]), False, lauf=lauf)
+
+        def kein_noreplace(von, nach):
+            raise pfade.KeinNoReplace("exFAT")
+
+        monkeypatch.setattr(loeschen.pfade, "umbenennen_ohne_ueberschreiben", kein_noreplace)
+        echt = loeschen.shutil.copystat
+
+        def schreibt_dazwischen(q, k):
+            Path(q).write_bytes(Path(q).read_bytes() + b"neu")   # ein Sync-Client schreibt
+            return echt(q, k)
+
+        monkeypatch.setattr(loeschen.shutil, "copystat", schreibt_dazwischen)
+        korb = loeschen.papierkorb_ordner(quelle)
+        with pytest.raises(loeschen.Verweigert):
+            loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], lesung, loeschen.WEISE_PAPIERKORB, False, korb)
+        assert baum["analog"].read_bytes().endswith(b"neu")
+        assert not any(p.is_file() for p in korb.rglob("*")) if korb.exists() else True

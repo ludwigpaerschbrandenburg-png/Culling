@@ -202,6 +202,16 @@ def config_erzeugt(pfad) -> str:
     return f"Neue Konfiguration mit Standardwerten angelegt: {pfad}"
 
 
+def archiv_nicht_sperrbar(pfad, grund: str) -> str:
+    return (
+        "Abbruch: Das Archiv laesst sich fuer diesen Lauf nicht sperren.\n"
+        f"  Sperrdatei: {pfad}\n"
+        f"  Grund: {grund}\n"
+        "Ohne Sperre koennten zwei Laeufe gleichzeitig am selben Archiv arbeiten. Bitte die Rechte\n"
+        "des Ordners pruefen (Schreibschutz, Besitzer) und es erneut versuchen."
+    )
+
+
 def config_datei_fehlt(pfad) -> str:
     return (
         "Abbruch: Die mit --config angegebene Konfigurationsdatei gibt es nicht:\n"
@@ -493,6 +503,10 @@ def scan_besonderheiten(
     zeilen.append(f"  nicht lesbar (Fehler):        {anzahl(fehler)}")
     zeilen.append(f"  Ordner nicht lesbar:          {anzahl(ordner_nicht_lesbar)}")
     return "\n".join(zeilen)
+
+
+def scan_strang_fehler(grund: str) -> str:
+    return f"Durchlauf dieser Quelle unerwartet abgebrochen ({grund}) - nicht alles gesehen"
 
 
 def scan_ordner_nicht_lesbar(anzahl_ordner: int, beispiele: list) -> str:

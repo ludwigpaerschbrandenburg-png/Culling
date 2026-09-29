@@ -227,11 +227,30 @@ def _liegt_in_nach_kennung(kind: Path, eltern: Path) -> bool:
         p = p.parent
 
 
+#: Wo ein Archiv seine Kennung ablegt (wie db.ARCHIV_UNTERORDNER / db.ARCHIV_ID_DATEI;
+#: hier noch einmal, weil db dieses Modul benutzt und nicht umgekehrt).
+ARCHIV_MARKE = (".fotosortierer", "archiv-id.txt")
+
+
+def archiv_kennung_in(ordner: Path) -> str:
+    """Die Archiv-Kennung, die in diesem Ordner liegt ('' ohne). Daran wird das
+    Ziel auch ueber einen zweiten Weg erkannt - zwei Einhaengungen derselben
+    Netzfreigabe, zwei Laufwerksbuchstaben -, den weder resolve() noch
+    Geraete- und Inode-Nummern zusammenfuehren."""
+    try:
+        text = lang(Path(ordner) / ARCHIV_MARKE[0] / ARCHIV_MARKE[1]).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    return text.strip().lstrip("\ufeff")
+
+
 def lage_pruefen(quelle: Path, ziel: Path) -> str:
     """"gleich" | "ziel_in_quelle" | "quelle_in_ziel" | "getrennt".
 
     Erst ueber die aufgeloesten Pfade, dann ueber Geraete- und
-    Inode-Nummern (SPEC §4 Phase 1: derselbe Ort ueber zwei Pfade).
+    Inode-Nummern (SPEC §4 Phase 1: derselbe Ort ueber zwei Pfade), zuletzt
+    ueber die Archiv-Kennung: Traegt die Quelle oder einer ihrer
+    uebergeordneten Ordner die Kennung des Ziels, ist es das Ziel selbst.
     """
     q = aufloesen(quelle)
     z = aufloesen(ziel)
@@ -244,6 +263,15 @@ def lage_pruefen(quelle: Path, ziel: Path) -> str:
         return "ziel_in_quelle"
     if liegt_in(q, z) or _liegt_in_nach_kennung(q, z):
         return "quelle_in_ziel"
+    kennung = archiv_kennung_in(z)
+    if kennung:
+        if archiv_kennung_in(q) == kennung:
+            return "gleich"
+        p = q
+        while p.parent != p:
+            p = p.parent
+            if archiv_kennung_in(p) == kennung:
+                return "quelle_in_ziel"
     return "getrennt"
 
 
@@ -300,7 +328,9 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
         bewegen = kernel32.MoveFileExW
         bewegen.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
         bewegen.restype = wintypes.BOOL
-        if bewegen(str(lang(von)), str(lang(nach)), 0):
+        # MOVEFILE_WRITE_THROUGH (8): erst zurueckkehren, wenn der Umzug auf
+        # der Platte steht. Ohne MOVEFILE_REPLACE_EXISTING: nie ueberschreiben.
+        if bewegen(str(lang(von)), str(lang(nach)), 8):
             return
         fehler = ctypes.get_last_error()
         if fehler in (80, 183):  # ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS
@@ -310,6 +340,15 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
         raise OSError(fehler, f"MoveFileEx fehlgeschlagen (Fehler {fehler})", str(von))
     import errno
 
+    if _renameat2_noreplace(von, nach):
+        ordner_sichern(nach.parent)
+        return
+    # Rueckfall: link + unlink. Dazwischen traegt die Datei zwei Namen; kann
+    # der zweite Schritt nicht gelingen (Quellordner nicht beschreibbar),
+    # wird es gar nicht erst versucht - und scheitert er doch, wird der eben
+    # angelegte eigene Name wieder entfernt: Die Quelle bleibt, wie sie war.
+    if not os.access(lang(von.parent), os.W_OK):
+        raise KeinNoReplace(f"Quellordner nicht beschreibbar: {von.parent}")
     try:
         os.link(lang(von), lang(nach))
     except FileExistsError:
@@ -318,7 +357,72 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
         if fehler.errno in (errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EMLINK, errno.EXDEV):
             raise KeinNoReplace(str(fehler)) from fehler
         raise
-    os.unlink(lang(von))
+    try:
+        os.unlink(lang(von))
+    except OSError:
+        try:
+            os.unlink(lang(nach))
+        except OSError:
+            pass
+        raise
+    ordner_sichern(nach.parent)
+
+
+_RENAME_NOREPLACE = 1
+_renameat2 = None       # None = noch nicht gesucht, False = gibt es nicht
+
+
+def _renameat2_noreplace(von: Path, nach: Path) -> bool:
+    """Linux: renameat2(..., RENAME_NOREPLACE) - atomar und nie ueberschreibend
+    (SPEC §5). True bei Erfolg; False, wenn Kernel oder Dateisystem es nicht
+    koennen (dann link + unlink). FileExistsError bei belegtem Namen."""
+    global _renameat2
+    if not sys.platform.startswith("linux"):
+        return False
+    import ctypes
+    import errno
+
+    if _renameat2 is None:
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            funktion = libc.renameat2
+            funktion.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+            funktion.restype = ctypes.c_int
+            _renameat2 = funktion
+        except (OSError, AttributeError):
+            _renameat2 = False
+    if not _renameat2:
+        return False
+    at_fdcwd = -100
+    if _renameat2(at_fdcwd, os.fsencode(lang(von)), at_fdcwd, os.fsencode(lang(nach)), _RENAME_NOREPLACE) == 0:
+        return True
+    nummer = ctypes.get_errno()
+    if nummer == errno.EEXIST:
+        raise FileExistsError(nummer, os.strerror(nummer), str(nach))
+    if nummer in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EPERM):
+        return False                     # nicht unterstuetzt: Rueckfall
+    if nummer == errno.EXDEV:
+        raise KeinNoReplace(os.strerror(nummer))
+    raise OSError(nummer, os.strerror(nummer), str(von))
+
+
+def ordner_sichern(ordner: Path) -> None:
+    """Den Verzeichniseintrag eines Ordners auf die Platte zwingen (fsync auf
+    den Ordner). Unter Windows gibt es das nicht - NTFS schreibt Metadaten
+    ueber sein Journal; dort und auf Dateisystemen ohne Ordner-fsync (einige
+    Netzlaufwerke) ist das ein Nichts."""
+    if _IST_WINDOWS:  # pragma: no cover - nur Windows
+        return
+    try:
+        fd = os.open(lang(ordner), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def kann_ohne_ueberschreiben(ordner: Path) -> bool:

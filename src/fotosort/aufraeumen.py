@@ -281,6 +281,10 @@ def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], konf,
     ziel_auf = pfade.aufloesen(ziel)
     if pfad != wurzel and (loeschen.ist_papierkorb(pfad.name) or pfade.liegt_in(pfad, ziel_auf) or pfad == ziel_auf):
         return False
+    if pfade.archiv_kennung_in(pfad):
+        # Ein fotosort-Archiv (auch das Ziel ueber einen zweiten Weg): nie
+        # betreten, nie leeren.
+        return False
     if pfade.liegt_in(ziel_auf, pfad):
         # Das Ziel liegt unterhalb: Dieser Ordner ist nie leer.
         leer_unten = False

@@ -98,6 +98,13 @@ def dieselbe_datei(quelle: Path, zielpfad: Path, st_q: os.stat_result, st_z: os.
     """Sind Quelle und Ziel dieselbe Datei (SPEC §4 Phase 1)?"""
     if st_q.st_ino and (st_q.st_dev, st_q.st_ino) == (st_z.st_dev, st_z.st_ino):
         return True
+    # Dieselbe Freigabe zweimal eingehaengt (zwei NFS-/SMB-Mounts): verschiedene
+    # Geraetenummer, aber dieselbe Datei. Eine echte Kopie hat eine andere
+    # Inode-Nummer und eine andere Statuszeit; stimmt alles ueberein, gilt es
+    # als dieselbe Datei - im Zweifel wird nicht geloescht.
+    if (st_q.st_ino and st_q.st_ino == st_z.st_ino and st_q.st_size == st_z.st_size
+            and st_q.st_mtime_ns == st_z.st_mtime_ns and st_q.st_ctime_ns == st_z.st_ctime_ns):
+        return True
     try:
         return pfade.aufloesen(quelle) == pfade.aufloesen(zielpfad)
     except OSError:
@@ -247,7 +254,7 @@ def quelldatei_entfernen(dbank: db.Datenbank, lauf: int, quellpfad, lesung: Lesu
         dbank.quelle_geloescht_setzen(quellpfad, lauf, None)
         dbank.ereignis(lauf, ART_QUELLE_GELOESCHT, quelle, 1, meldungen.EREIGNIS_GELOESCHT)
         return None
-    neuer_pfad = _in_papierkorb(quelle, neuer_pfad, zeile["hash"])
+    neuer_pfad = _in_papierkorb(quelle, neuer_pfad, zeile["hash"], lesung.quell_kennung)
     dbank.quelle_geloescht_setzen(quellpfad, lauf, neuer_pfad)
     dbank.ereignis(lauf, ART_QUELLE_IN_PAPIERKORB, quelle, 1, db.pfad_text(neuer_pfad))
     return neuer_pfad
@@ -261,7 +268,7 @@ def _papierkorb_pfad(wurzel: Path, quelle: Path, papierkorb: Path) -> Path:
     return papierkorb / relativ
 
 
-def _in_papierkorb(quelle: Path, ziel: Path, erwarteter_hash: str) -> Path:
+def _in_papierkorb(quelle: Path, ziel: Path, erwarteter_hash: str, quell_kennung: tuple = ()) -> Path:
     """Quelle nicht ueberschreibend in den Papierkorb bringen; bei belegtem
     Namen Anhang _1, _2 ...; kann das Dateisystem kein nicht
     ueberschreibendes Umbenennen, wird kopiert, die Kopie noch einmal
@@ -295,6 +302,15 @@ def _in_papierkorb(quelle: Path, ziel: Path, erwarteter_hash: str) -> Path:
                 shutil.copystat(pfade.lang(quelle), pfade.lang(kandidat))
             except OSError:
                 pass
+            # Die Kopie ist ein Schnappschuss: Wurde die Quelle waehrenddessen
+            # beschrieben, ist ihr neuer Inhalt nirgends sonst - nicht entfernen.
+            try:
+                jetzt = kennung(os.stat(pfade.lang(quelle)))
+            except OSError:
+                jetzt = ()
+            if quell_kennung and jetzt != quell_kennung:
+                os.unlink(pfade.lang(kandidat))
+                raise Verweigert(meldungen.GRUND_QUELLE_ABWEICHUNG)
             try:
                 os.unlink(pfade.lang(quelle))
             except OSError:

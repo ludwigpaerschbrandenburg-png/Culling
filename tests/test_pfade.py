@@ -220,3 +220,73 @@ def test_kann_ohne_ueberschreiben_laesst_keine_probe_liegen(tmp_path):
 def test_freier_platz_ist_positiv(tmp_path):
     assert pfade.freier_platz(tmp_path) > 0
     assert pfade.freier_platz(tmp_path / "gibt" / "es" / "nicht") > 0
+
+
+def test_umbenennen_ist_atomar_ohne_zweiten_namen(tmp_path):
+    """Linux: renameat2 mit RENAME_NOREPLACE - kein Zwischenzustand mit zwei Namen."""
+    a = tmp_path / "a.jpg"
+    a.write_bytes(b"bild")
+    b = tmp_path / "b.jpg"
+    pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert not a.exists() and b.read_bytes() == b"bild"
+    assert b.stat().st_nlink == 1
+
+
+def test_rueckfall_nimmt_den_zweiten_namen_zurueck(tmp_path, monkeypatch):
+    """Scheitert im Rueckfall link+unlink das Entfernen des alten Namens,
+    wird der neue wieder entfernt: Quelle und Archiv teilen sich nie eine Datei."""
+    import os as _os
+
+    if sys.platform.startswith("win"):
+        pytest.skip("Windows nutzt MoveFileEx")
+    monkeypatch.setattr(pfade, "_renameat2_noreplace", lambda von, nach: False)
+    a = tmp_path / "a.jpg"
+    a.write_bytes(b"bild")
+    b = tmp_path / "b.jpg"
+    echt = _os.unlink
+
+    def unlink(pfad, *args, **kw):
+        if str(pfad) == str(pfade.lang(a)):
+            raise PermissionError(13, "verweigert", str(pfad))
+        return echt(pfad, *args, **kw)
+
+    monkeypatch.setattr(pfade.os, "unlink", unlink)
+    with pytest.raises(PermissionError):
+        pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert a.read_bytes() == b"bild" and not b.exists()
+    assert a.stat().st_nlink == 1
+
+
+def test_rueckfall_ohne_schreibrecht_im_quellordner_faellt_aufs_kopieren(tmp_path, monkeypatch):
+    if sys.platform.startswith("win"):
+        pytest.skip("Windows nutzt MoveFileEx")
+    monkeypatch.setattr(pfade, "_renameat2_noreplace", lambda von, nach: False)
+    monkeypatch.setattr(pfade.os, "access", lambda pfad, modus: False)
+    a = tmp_path / "a.jpg"
+    a.write_bytes(b"bild")
+    with pytest.raises(pfade.KeinNoReplace):
+        pfade.umbenennen_ohne_ueberschreiben(a, tmp_path / "b.jpg")
+    assert a.exists() and not (tmp_path / "b.jpg").exists()
+
+
+def _archiv_marke(ordner: Path, kennung: str) -> None:
+    (ordner / ".fotosortierer").mkdir(parents=True, exist_ok=True)
+    (ordner / ".fotosortierer" / "archiv-id.txt").write_text(kennung + "\n", encoding="utf-8")
+
+
+def test_lage_erkennt_das_ziel_an_seiner_kennung(tmp_path):
+    """Dieselbe Netzfreigabe zweimal eingehaengt: Pfade und Geraetenummern
+    unterscheiden sich, die Archiv-Kennung nicht."""
+    kennung = "a" * 32
+    ziel = tmp_path / "mnt_ziel"
+    zweiter_weg = tmp_path / "mnt_quelle" / "Archiv"      # steht fuer dieselbe Freigabe
+    for o in (ziel, zweiter_weg):
+        o.mkdir(parents=True)
+        _archiv_marke(o, kennung)
+    (zweiter_weg / "2024").mkdir()
+    assert pfade.lage_pruefen(zweiter_weg, ziel) == "gleich"
+    assert pfade.lage_pruefen(zweiter_weg / "2024", ziel) == "quelle_in_ziel"
+    anderes = tmp_path / "Altes Archiv"
+    anderes.mkdir()
+    _archiv_marke(anderes, "b" * 32)                     # ein anderes Archiv als Quelle ist erlaubt
+    assert pfade.lage_pruefen(anderes, ziel) == "getrennt"

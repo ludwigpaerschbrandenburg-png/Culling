@@ -71,9 +71,17 @@ def kopieren_mit_hash(
                 block = ein.read(BLOCK)
                 if not block:
                     break
-                aus.write(block)
+                _ganz_schreiben(aus, block)
                 h.update(block)
                 bytes_gesamt += len(block)
+            # Auf die Platte zwingen, bevor irgendjemand der Kopie vertraut:
+            # Ohne fsync laege sie nach dem Schreiben womoeglich nur im
+            # Zwischenspeicher des Systems, und ein Stromausfall nach dem
+            # Loeschen der Quelle nahm das Bild mit.
+            os.fsync(aus.fileno())
+            if os.fstat(aus.fileno()).st_size != bytes_gesamt:
+                raise OSError(f"Kopie unvollstaendig: {bytes_gesamt} Bytes gelesen, "
+                              f"{os.fstat(aus.fileno()).st_size} geschrieben")
     except BaseException:
         # Halbfertiges nie liegen lassen - es traegt unseren Anspruch, also
         # duerfen wir es entfernen (SPEC §5).
@@ -83,6 +91,17 @@ def kopieren_mit_hash(
             pass
         raise
     return h.hexdigest(), bytes_gesamt
+
+
+def _ganz_schreiben(aus, block: bytes) -> None:
+    """Einen Block vollstaendig schreiben. Ein ungepuffertes write() darf
+    weniger schreiben als uebergeben (Signal, Netzlaufwerk, volle Platte)."""
+    rest = memoryview(block)
+    while rest:
+        n = aus.write(rest)
+        if not n:
+            raise OSError("Schreiben in die Zieldatei kam nicht voran")
+        rest = rest[n:]
 
 
 def gleich_byteweise(a: Path, b: Path) -> bool:

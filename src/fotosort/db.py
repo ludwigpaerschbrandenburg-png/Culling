@@ -436,10 +436,9 @@ class Archivsperre:
         self.pfad.parent.mkdir(parents=True, exist_ok=True)
         try:
             griff = open(self.pfad, "a+b")
-        except OSError:
-            # Laesst sich die Sperrdatei nicht anlegen (etwa auf einem nur
-            # lesbaren Ordner), wird der Lauf davon nicht aufgehalten.
-            return True
+        except OSError as fehler:
+            # Ohne Sperre koennten zwei Laeufe einander die Arbeit wegnehmen.
+            raise FotosortFehler(meldungen.archiv_nicht_sperrbar(self.pfad, fehler.strerror or str(fehler))) from fehler
         if not _sperren(griff):
             griff.close()
             return False
@@ -617,7 +616,10 @@ class Datenbank:
             verbindung.row_factory = sqlite3.Row
             verbindung.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             verbindung.execute("PRAGMA journal_mode=WAL")
-            verbindung.execute("PRAGMA synchronous=NORMAL")
+            # FULL: Ein Anspruch, der "vor dem Umbenennen" oder "vor dem
+            # Loeschen" festgeschrieben wird, muss auch einen Stromausfall
+            # ueberstehen. Commits sind gebuendelt; der Preis ist klein.
+            verbindung.execute("PRAGMA synchronous=FULL")
             verbindung.execute("PRAGMA foreign_keys=ON")
             angehoben_von = _schema_pruefen(verbindung, pfad)
             verbindung.executescript(SCHEMA)

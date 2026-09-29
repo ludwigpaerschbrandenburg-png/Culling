@@ -617,3 +617,56 @@ def test_nur_symlink_und_junction_sind_verknuepfungen():
     # OneDrive "Dateien bei Bedarf" (IO_REPARSE_TAG_CLOUD): ein normaler Ordner
     assert scan._ist_verknuepfung(_Eintrag(reparse_tag=0x9000001A)) is False
     assert scan._ist_verknuepfung(_Eintrag()) is False
+
+
+# ------------------------------------------ Ziel ueber einen zweiten Weg --
+
+
+def test_ordner_mit_der_kennung_des_ziels_wird_nie_erfasst(quelle, tmp_path, datenbank, konf):
+    """Zwei Einhaengungen derselben Freigabe: Ein Ordner in der Quelle ist in
+    Wahrheit das Ziel. Er traegt dessen Kennung und wird uebersprungen."""
+    kennung = "c" * 32
+    ziel = tmp_path / "Ziel"
+    for o in (ziel, quelle / "Archiv ueber zweiten Weg"):
+        (o / ".fotosortierer").mkdir(parents=True)
+        (o / ".fotosortierer" / "archiv-id.txt").write_text(kennung, encoding="utf-8")
+    archivbild = quelle / "Archiv ueber zweiten Weg" / "2024" / "DSC00001.JPG"
+    archivbild.parent.mkdir(parents=True)
+    archivbild.write_bytes(b"\xff\xd8\xffarchiv")
+    ergebnis, lauf = _scannen(quelle, ziel, datenbank, konf)
+    assert datenbank.zeile(archivbild) is None
+    ereignisse = datenbank.ereignisse_liste(scan.ART_INS_ZIEL)
+    assert [e["pfad"] for e in ereignisse] == [str(quelle / "Archiv ueber zweiten Weg")]
+    assert ergebnis.dateien == testbaum.ERWARTET_GESAMT
+
+
+def test_ausnahme_im_scan_strang_gilt_nicht_als_vollstaendig(quelle, ziel, datenbank, konf, monkeypatch):
+    """Stirbt der Durchlauf einer Quelle, darf der Scan nicht so tun, als habe
+    er alles gesehen - sonst gaelten ihre Dateien als verschwunden."""
+    lauf = datenbank.lauf_beginnen("scan")
+    scan.ausfuehren_mehrere([quelle], ziel, konf, datenbank, lauf)
+    datenbank.lauf_beenden(lauf)
+    echt = scan._ablaufen
+
+    def stirbt(*a, **kw):
+        for i, fund in enumerate(echt(*a, **kw)):
+            if i == 3:
+                raise RuntimeError("Symlink loop")
+            yield fund
+
+    monkeypatch.setattr(scan, "_ablaufen", stirbt)
+    lauf = datenbank.lauf_beginnen("scan")
+    gesamt = scan.ausfuehren_mehrere([quelle], ziel, konf, datenbank, lauf)
+    e = gesamt.gesamt
+    assert e.ordner_nicht_lesbar == 1 and e.verschwunden == 0 and not e.verschwunden_ausgewertet
+    assert any("unerwartet abgebrochen" in t for t in e.nicht_lesbare_ordner) or e.nicht_lesbare_ordner
+
+
+def test_verknuepfungsschleife_bringt_den_scan_nicht_zu_fall(quelle, ziel, datenbank, konf):
+    schleife = quelle / "0schleife"
+    try:
+        os.symlink(schleife, schleife)
+    except (OSError, NotImplementedError):
+        pytest.skip("keine Verknuepfungen")
+    ergebnis, _ = _scannen(quelle, ziel, datenbank, konf)
+    assert ergebnis.dateien >= testbaum.ERWARTET_GESAMT

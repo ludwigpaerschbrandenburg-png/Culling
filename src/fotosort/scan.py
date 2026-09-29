@@ -224,6 +224,7 @@ def _ablaufen(
     # (Pfad wie in der Quelle, aufgeloester Pfad, Pfad relativ zur Wurzel)
     stapel: list[tuple[Path, Path, str]] = [(quelle_auf, quelle_auf, "")]
     ziel_kennung = pfade.ordner_kennung(ziel_auf)
+    archiv_kennung = pfade.archiv_kennung_in(ziel_auf)
 
     while stapel:
         if stop is not None and stop.is_set():
@@ -236,6 +237,13 @@ def _ablaufen(
             # Ein Ordner, der sich nicht oeffnen laesst, wird gezaehlt und
             # gemeldet. Still zu ueberspringen waere der schlimmste Fall.
             yield Fund("ordner_fehler", ordner, fehler.strerror or str(fehler))
+            continue
+        if (archiv_kennung and ordner != quelle_auf
+                and any(e.name == pfade.ARCHIV_MARKE[0] for e in gesammelt)
+                and pfade.archiv_kennung_in(ordner) == archiv_kennung):
+            # Das Ziel selbst, erreicht ueber einen zweiten Weg (zweite
+            # Einhaengung derselben Freigabe): nie als Quelle erfassen.
+            yield Fund("ins_ziel", ordner)
             continue
 
         for eintrag in gesammelt:
@@ -263,7 +271,11 @@ def _ablaufen(
                 if ist_ausgeschlossen(relativ, muster, ordner=True):
                     yield Fund("ausgeschlossen", pfad, "Ordner")
                     continue
-                kind_auf = pfade.aufloesen(pfad) if verknuepft else ordner_auf / name
+                try:
+                    kind_auf = pfade.aufloesen(pfad) if verknuepft else ordner_auf / name
+                except (OSError, RuntimeError) as fehler:     # Verknuepfungsschleife
+                    yield Fund("ordner_fehler", pfad, str(fehler))
+                    continue
                 if _liegt_in_aufgeloest(kind_auf, ziel_auf) or (
                     ziel_kennung is not None and pfade.ordner_kennung(pfad) == ziel_kennung
                 ):
@@ -281,7 +293,12 @@ def _ablaufen(
             # Nur eine Verknuepfung kann woandershin zeigen (SPEC §4 Phase 1).
             zeigt_ins_ziel = False
             if _ist_verknuepfung(eintrag):
-                zeigt_ins_ziel = _liegt_in_aufgeloest(pfade.aufloesen(pfad), ziel_auf)
+                try:
+                    zeigt_ins_ziel = _liegt_in_aufgeloest(pfade.aufloesen(pfad), ziel_auf)
+                except (OSError, RuntimeError):
+                    # Verknuepfungsschleife: nicht aufloesbar. Als "zeigt ins
+                    # Ziel" behandeln - dann wird die Datei nie geloescht.
+                    zeigt_ins_ziel = True
             fund = Fund(
                 "datei",
                 pfad,
@@ -534,12 +551,20 @@ def ausfuehren_mehrere(
     warteschlange: "queue.Queue[tuple[Path, Fund | None]]" = queue.Queue(maxsize=_WARTESCHLANGE)
 
     def strang(liste: list[Path]) -> None:
+        aktuell = liste[0]
         try:
             for q in liste:
+                aktuell = q
                 for fund in _ablaufen(q, ziel_auf, muster, folgen, konf, stop):
                     warteschlange.put((q, fund))
                     if stop.is_set():
                         return
+        except Exception as fehler:  # noqa: BLE001 - nie still: sonst gaelte die Quelle als vollstaendig
+            # Als nicht lesbarer Ordner melden: Die Quelle ist dann nicht
+            # vollstaendig gesehen, "nicht mehr vorhanden" wird nicht
+            # ausgewertet, und der Scan endet mit einem Fehler-Rueckgabewert.
+            warteschlange.put((aktuell, Fund("ordner_fehler", aktuell,
+                                             meldungen.scan_strang_fehler(f"{type(fehler).__name__}: {fehler}"))))
         finally:
             warteschlange.put((liste[0], None))  # Ende dieses Strangs
 

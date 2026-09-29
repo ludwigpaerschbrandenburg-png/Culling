@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -605,3 +606,30 @@ def test_fehlgeschlagener_schritt_laesst_die_version_stehen(tmp_path, monkeypatc
     finally:
         alt.close()
     assert db.vor_schema_pfad(db.datenbank_pfad(ordner), db.SCHEMA_VERSION - 1).is_file()
+
+
+def test_festschreiben_uebersteht_einen_stromausfall(datenbank):
+    """synchronous=FULL: Was vor dem Umbenennen oder Loeschen festgeschrieben
+    wird, ist auch nach einem Stromausfall da."""
+    assert datenbank.verbindung.execute("PRAGMA synchronous").fetchone()[0] == 2
+
+
+def test_nicht_sperrbares_archiv_bricht_ab(tmp_path):
+    ordner = tmp_path / "archiv"
+    ordner.mkdir()
+    (ordner / db.SPERRDATEI).mkdir()          # die Sperrdatei laesst sich nicht oeffnen
+    with pytest.raises(FotosortFehler) as fehler:
+        db.Datenbank.oeffnen(ordner, sperren=True)
+    assert "nicht sperren" in str(fehler.value)
+
+
+def test_dieselbe_datei_ueber_zwei_einhaengungen():
+    from types import SimpleNamespace as S
+
+    from fotosort import loeschen
+
+    a = S(st_dev=1, st_ino=4711, st_size=10, st_mtime_ns=5, st_ctime_ns=6)
+    b = S(st_dev=2, st_ino=4711, st_size=10, st_mtime_ns=5, st_ctime_ns=6)   # andere Einhaengung
+    kopie = S(st_dev=2, st_ino=999, st_size=10, st_mtime_ns=5, st_ctime_ns=7)
+    assert loeschen.dieselbe_datei(Path("/mnt/a/x"), Path("/mnt/b/x"), a, b) is True
+    assert loeschen.dieselbe_datei(Path("/mnt/a/x"), Path("/mnt/b/x"), a, kopie) is False
