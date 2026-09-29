@@ -366,7 +366,7 @@ class StartSeite(QWidget):
         zeile.addLayout(block)
         block = QVBoxLayout()
         block.setSpacing(6)
-        block.addWidget(label("Zielordner liegt auf", "feldname"))
+        block.addWidget(label("Quelle und Ziel liegen auf", "feldname"))
         self.profil = Seg([("hdd", "hdd"), ("ssd", "ssd"), ("netzwerk", "netzwerk")])
         self.profil.geaendert.connect(lambda _w: self.f.profil_gewaehlt())
         block.addWidget(self.profil)
@@ -901,8 +901,9 @@ class Hauptfenster(QMainWindow):
         for k, _ in knoepfe:
             k.setEnabled(False)
         self._gesperrt = True
+        # Kein processEvents hier: Sonst liefe ein Zeitgeber (Statusabfrage,
+        # Durchlauf) mitten in diesen Klick hinein. Der Zeiger wechselt auch so.
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QApplication.processEvents()
         try:
             yield
         finally:
@@ -1498,6 +1499,12 @@ class Durchlauf(QObject):
         self.timer.timeout.connect(self._weiter)
         self.beginn = time.monotonic()
         self.fehler = ""
+        self._in_arbeit = False
+        if fotos is not None:
+            # Bildschirmfotos immer in der Vorgabegroesse - der virtuelle
+            # Bildschirm ohne Anzeige (offscreen) ist nur 800x800 gross.
+            self.f.setMinimumSize(1040, 700)
+            self.f.resize(1180, 800)
 
     def starten(self) -> None:
         # Der Durchlauf faehrt bis zum Aufraeumen, ohne eine einzige Rueckfrage.
@@ -1527,6 +1534,17 @@ class Durchlauf(QObject):
         QApplication.exit(1)
 
     def _weiter(self) -> None:
+        # Nie doppelt: Oeffnet ein Schritt einen Dialog oder laesst die
+        # Ereignisschleife laufen, darf der Zeitgeber nicht erneut hinein.
+        if self._in_arbeit:
+            return
+        self._in_arbeit = True
+        try:
+            self._schritt()
+        finally:
+            self._in_arbeit = False
+
+    def _schritt(self) -> None:
         f = self.f
         if time.monotonic() - self.warte_seit > 300:
             self._abbruch(f"Stufe {self.stufe}: nichts passiert seit 5 Minuten")

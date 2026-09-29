@@ -370,10 +370,10 @@ def test_gesperrte_thumbs_db_haelt_nur_ihren_ordner_auf(baum, quelle, ziel, nach
     (quelle / "Videos" / "Thumbs.db").write_bytes(b"vorschau")
     echt = pfade.datei_entfernen
 
-    def gesperrt(pfad):
+    def gesperrt(pfad, *args):
         if Path(pfad).name == "Thumbs.db":
             raise PermissionError(13, "Der Prozess kann nicht auf die Datei zugreifen")
-        echt(pfad)
+        echt(pfad, *args)
 
     monkeypatch.setattr(pfade, "datei_entfernen", gesperrt)
     antwort.extend(["loeschen", "entfernen"])

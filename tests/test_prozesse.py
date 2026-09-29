@@ -97,11 +97,11 @@ def test_startzeit_erkennt_wiederverwendete_prozessnummer():
     if eigene is None:
         import pytest
         pytest.skip("Startzeit auf diesem System nicht feststellbar")
-    assert time.time() - 86400 < eigene <= time.time() + 2
+    time.sleep(0.05)
     kind = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         start = prozesse.startzeit(kind.pid)
-        assert start is not None and abs(start - time.time()) < 10
+        assert start is not None and start >= eigene
         assert ablauf_modul.pid_lebt(kind.pid, start) is True
         # Dieselbe Nummer, aber ein anderer (frueherer) Prozess: nicht unserer.
         assert ablauf_modul.pid_lebt(kind.pid, start - 600) is False
@@ -160,3 +160,75 @@ def test_sofort_beenden_trifft_nie_die_eigene_gruppe():
         p.wait(timeout=15)
     finally:
         p.kill()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc gibt es nur unter Linux")
+def test_startzeit_haengt_nicht_an_der_uhr(monkeypatch):
+    """Unter Linux rechnete die Startzeit mit der Bootzeit aus /proc/stat, und
+    die verschiebt sich bei jedem Stellen der Uhr (Zeitabgleich nach dem
+    Aufwachen): Danach hielt ein neu geoeffnetes Fenster den eigenen, lebenden
+    Arbeitsprozess fuer abgestuerzt, und "Sofort beenden" griff nicht mehr."""
+    import builtins
+    import io
+    import os
+
+    vorher = prozesse.startzeit(os.getpid())
+    echt = builtins.open
+
+    def uhr_gestellt(pfad, *a, **k):
+        if str(pfad) == "/proc/stat":
+            with echt(pfad, "rb") as f:
+                zeilen = f.read().split(b"\n")
+            return io.BytesIO(b"\n".join(
+                b"btime %d" % (int(z.split()[1]) + 5) if z.startswith(b"btime ") else z for z in zeilen))
+        return echt(pfad, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", uhr_gestellt)
+    assert prozesse.startzeit(os.getpid()) == vorher
+    assert ablauf.pid_lebt(os.getpid(), vorher)
+
+
+def test_baum_nimmt_nur_echte_nachkommen():
+    """Windows merkt sich den Elternprozess nur als Nummer und vergibt Nummern
+    neu. Das Fenster, dessen laengst beendeter Starter (start.bat) zufaellig
+    dieselbe Nummer hatte wie jetzt der Arbeitsprozess, ist nicht dessen Kind:
+    Es entstand VOR ihm. taskkill /T haette es mitbeendet - "Sofort beenden"
+    darf nur den Arbeitsprozess und seine ExifTool-Prozesse treffen."""
+    eintraege = [            # (Nummer, Eltern-Nummer, erstellt)
+        (100, 4, 50.0),      # Arbeitsprozess
+        (200, 100, 10.0),    # Fenster: Eltern-Nummer 100 gehoerte seinem alten Starter
+        (300, 100, 60.0),    # exiftool.exe, Kind des Arbeitsprozesses
+        (400, 300, 61.0),    # perl.exe, Enkel
+        (500, 200, 70.0),    # Kind des Fensters
+        (600, 100, None),    # Startzeit nicht lesbar: nicht anfassen
+        (700, 700, 80.0),    # zeigt auf sich selbst
+    ]
+    assert sorted(prozesse._nachkommen(eintraege, 100, 50.0)) == [300, 400]
+    assert prozesse._nachkommen(eintraege, 999, None) == []
+
+
+_MIT_KIND = """
+import subprocess, sys, time
+kind = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+print(kind.pid, flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.skipif(not WINDOWS, reason="der eigene Prozessbaum wird nur unter Windows gebraucht")
+def test_windows_baum_beenden_nimmt_die_kinder_mit():
+    """exiftool.exe startet perl.exe: Beendet wird der ganze Baum, ohne taskkill."""
+    import time
+
+    p = subprocess.Popen([sys.executable, "-c", _MIT_KIND], stdout=subprocess.PIPE)
+    kind = int(p.stdout.readline())
+    try:
+        prozesse.baum_beenden_pid(p.pid)
+        p.wait(timeout=15)
+        ende = time.monotonic() + 15
+        while ablauf.pid_lebt(kind) and time.monotonic() < ende:
+            time.sleep(0.1)
+        assert not ablauf.pid_lebt(kind)
+    finally:
+        p.kill()
+        subprocess.run(["taskkill", "/F", "/PID", str(kind)], capture_output=True, check=False)

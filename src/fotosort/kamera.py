@@ -15,19 +15,26 @@ _MEHRFACH_LEER = re.compile(r"\s+")
 
 #: Geraetenamen, die unter Windows kein Ordner- oder Dateiname sein duerfen -
 #: auch nicht mit Endung ("NUL.jpg"). Verglichen ohne Gross-/Kleinschreibung.
+#: Wie in Python 3.13 (ntpath): auch COM/LPT mit hochgestellter 1, 2, 3 und
+#: die Konsolen CONIN$ und CONOUT$.
+_ZIFFERN = "123456789\u00b9\u00b2\u00b3"
 _GERAETENAMEN = frozenset(
-    ["con", "prn", "aux", "nul"] + [f"com{i}" for i in range(1, 10)] + [f"lpt{i}" for i in range(1, 10)]
+    ["con", "prn", "aux", "nul", "conin$", "conout$"]
+    + [f"com{z}" for z in _ZIFFERN] + [f"lpt{z}" for z in _ZIFFERN]
 )
 
 
 def windows_sicher(teil: str) -> str:
     """Einen Ordnernamen so anpassen, dass Windows ihn ohne Sonderweg kennt:
     kein Punkt und kein Leerzeichen am Ende (Windows schneidet sie still ab),
-    kein Geraetename (dann mit "_" dahinter). Gilt auf allen Systemen - das
-    Archiv soll auch ueber eine Freigabe unter Windows lesbar bleiben."""
+    kein Geraetename. Windows sieht dafuer nur den Teil vor dem ersten Punkt
+    (ohne Leerzeichen am Ende) - das "_" kommt deshalb direkt hinter den
+    Geraetenamen: "LPT9.x" -> "LPT9_.x". Gilt auf allen Systemen - das Archiv
+    soll auch ueber eine Freigabe unter Windows lesbar bleiben."""
     teil = teil.rstrip(". ")
-    if teil.split(".", 1)[0].strip().lower() in _GERAETENAMEN:
-        teil += "_"
+    geraet = teil.split(".", 1)[0].rstrip(" ")
+    if geraet.lower() in _GERAETENAMEN:
+        teil = f"{geraet}_{teil[len(geraet):]}"
     return teil
 
 

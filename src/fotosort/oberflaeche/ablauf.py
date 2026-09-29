@@ -170,20 +170,10 @@ def prozess_beenden(pid: int, start: float | None = None, nachsetzen: float = 5.
     schuetzt davor, eine inzwischen neu vergebene Nummer zu treffen.
     """
     if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
-        try:
-            # /T: samt Kindern (exiftool.exe -> perl.exe), /F: ohne Rueckfrage.
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(int(pid))],
-                           capture_output=True, timeout=30, check=False, **prozesse.unsichtbar())
-        except (OSError, subprocess.SubprocessError):
-            pass
-        import ctypes
-        k32 = ctypes.windll.kernel32
-        griff = k32.OpenProcess(0x0001, False, int(pid))   # PROCESS_TERMINATE
-        if griff:
-            try:
-                k32.TerminateProcess(griff, 1)
-            finally:
-                k32.CloseHandle(griff)
+        # Samt Kindern (exiftool.exe -> perl.exe), aber nur echten: Die
+        # Startzeit schliesst Prozesse aus, deren Eltern-Nummer frueher einem
+        # anderen gehoerte - auch das Fenster selbst (prozesse._nachkommen).
+        prozesse.baum_beenden_pid(int(pid), start)
         return
     import signal
 
@@ -240,11 +230,24 @@ class Lauf:
     start: float | None = None   # Startzeit des Prozesses (aus der Statusdatei), gegen PID-Wiederverwendung
 
 
+def _fest(pfad) -> str:
+    """Relativen Pfad fest machen. Der Arbeitsprozess laeuft in einem anderen
+    Ordner als das Fenster; "../Ziel" zeigte dort woanders hin. Kein resolve():
+    Verknuepfungen und Laufwerksbuchstaben bleiben so, wie sie eingegeben wurden."""
+    text = str(pfad or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(Path(text).expanduser().absolute())
+    except (RuntimeError, OSError):   # "~fremder" ohne Heimatordner: so lassen, die Pruefung meldet es
+        return text
+
+
 class Ablauf:
     """Der Zustand der Oberflaeche und alles, was sie tun kann."""
 
     def __init__(self, ziel: str | None = None, config_pfad: str | None = None, ordner: Path | None = None) -> None:
-        self.ordner = Path(ordner) if ordner is not None else oberflaeche_ordner()
+        self.ordner = Path(ordner).absolute() if ordner is not None else oberflaeche_ordner()
         self.status_datei = self.ordner / "status.json"
         self.steuer_datei = self.ordner / "steuer.json"
         self.auftrag_datei = self.ordner / "auftrag.json"
@@ -252,8 +255,8 @@ class Ablauf:
         self.log_datei = self.ordner / "arbeit.log"
         self.sperre = threading.RLock()
         self.lauf: Lauf | None = None
-        self.ziel: str = str(ziel) if ziel else ""
-        self.config_pfad: str | None = str(config_pfad) if config_pfad else None
+        self.ziel: str = _fest(ziel)
+        self.config_pfad: str | None = _fest(config_pfad) or None
         self.quellen: list[str] = []
         self.verschieben = False
         self.profil = "hdd"
@@ -695,7 +698,7 @@ class Ablauf:
 
     def ziel_setzen(self, ziel: str) -> dict:
         with self.sperre:
-            self.ziel = str(ziel or "").strip()
+            self.ziel = _fest(ziel)
             self._speichern()
             return {"ziel": self.ziel, "archiv": self.archiv_info()}
 
@@ -721,7 +724,7 @@ class Ablauf:
     def quelle_hinzufuegen(self, pfad: str, trotzdem: bool = False) -> dict:
         """Quellordner aufnehmen. Ein ganzes Laufwerk oder der Benutzerordner wird
         erst nach Rueckfrage genommen (Antwort {"frage": "quelle_gross"})."""
-        pfad = str(pfad or "").strip()
+        pfad = _fest(pfad)
         if not pfad:
             raise FotosortFehler(meldungen.ob_quelle_fehlt_pfad())
         with self.sperre:

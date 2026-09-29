@@ -221,6 +221,16 @@ def archiv_id_vorhanden(ziel: Path) -> bool:
     return pfade.lang(archiv_id_datei(ziel)).is_file()
 
 
+def ziel_erreichbar(ziel: Path) -> bool:
+    """Ist das Ziel noch da (Platte eingesteckt, Netz verbunden)? Fehlt eine
+    Archivdatei, muss das erst geklaert sein: Ist das ganze Ziel weg, ist nicht
+    die Datei verschwunden."""
+    try:
+        return archiv_id_vorhanden(ziel)
+    except OSError:
+        return False
+
+
 def archiv_id_lesen(ziel: Path) -> str | None:
     """Archiv-Kennung lesen; None, wenn es noch keine gibt.
 
@@ -1380,20 +1390,30 @@ class Datenbank:
         return int(z["n"]), int(z["b"])
 
     def nachpruefbar(self, status: tuple[str, ...], ab: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
-        """Naechste Archivdateien (zielpfad, hash, groesse), nach Zielpfad."""
+        """Naechste Archivdateien, nach Zielpfad: zielpfad, hash, groesse und
+        varianten = Zahl verschiedener (Hash, Groesse) der Zeilen dazu. Ist sie
+        groesser als 1, zeigen Zeilen mit verschiedenem Inhalt auf dieselbe
+        Datei - dann muss jede Zeile fuer sich verglichen werden."""
         self.stapel_schreiben()
         return self.verbindung.execute(
-            f"SELECT zielpfad, MAX(hash) AS hash, MAX(groesse) AS groesse {self._nachpruefbar_sql(status)}"
+            f"SELECT zielpfad, MIN(hash) AS hash, MAX(groesse) AS groesse,"
+            f" COUNT(DISTINCT hash || ':' || groesse) AS varianten {self._nachpruefbar_sql(status)}"
             " AND zielpfad > ? GROUP BY zielpfad ORDER BY zielpfad LIMIT ?",
             (*status, ab, int(grenze)),
         ).fetchall()
 
     def nachpruefbar_alle(self, status: tuple[str, ...]) -> sqlite3.Cursor:
-        """Wie nachpruefbar, aber alle als Cursor (Pruefsummen-Liste)."""
+        """Je Archivdatei eine Zeile (Pruefsummen-Liste). Zeigen Zeilen mit
+        verschiedenem Hash auf dieselbe Datei, gilt der, den das letzte Lesen
+        der Datei bestaetigt hat (Ziel-Index) - nicht der "groesste"."""
         self.stapel_schreiben()
+        platz = ", ".join("?" for _ in status)
         return self.verbindung.execute(
-            f"SELECT zielpfad, MAX(hash) AS hash {self._nachpruefbar_sql(status)}"
-            " GROUP BY zielpfad ORDER BY zielpfad", status,
+            "SELECT d.zielpfad AS zielpfad,"
+            " COALESCE(MAX(CASE WHEN d.hash = i.hash THEN d.hash END), MAX(d.hash)) AS hash"
+            " FROM dateien d LEFT JOIN ziel_index i ON i.zielpfad = d.zielpfad"
+            f" WHERE d.status IN ({platz}) AND d.hash != '' AND d.zielpfad != ''"
+            " GROUP BY d.zielpfad ORDER BY d.zielpfad", status,
         )
 
     def zeilen_mit_zielpfad(self, zielpfad) -> list[sqlite3.Row]:
@@ -1690,39 +1710,47 @@ class Datenbank:
         vorher = ordner / SICHERUNG_VORHER
 
         if Path(pfade.lang(neu)).exists():
-            Path(pfade.lang(neu)).unlink()
+            pfade.geduldig(os.unlink, pfade.lang(neu))
         # Erst lokal sichern (SQLite-Backup, schnell und in sich stimmig),
         # dann die fertige Datei am Stueck ins Ziel kopieren: Auf einem
         # Netzlaufwerk entsteht so nie eine SQLite-Datei in Arbeit (SPEC §6),
         # und statt Zehntausender kleiner Schreibaufrufe gibt es grosse Bloecke.
         lokal = self.pfad.with_name(SICHERUNG_LOKAL)
         if lokal.exists():
-            lokal.unlink()
+            pfade.geduldig(os.unlink, pfade.lang(lokal))
         sicherung = sqlite3.connect(str(pfade.lang(lokal)))
         try:
             self.verbindung.backup(sicherung)
         finally:
             sicherung.close()
         try:
-            shutil.copyfile(pfade.lang(lokal), pfade.lang(neu))
-            with open(pfade.lang(neu), "rb+") as f:
+            # Mit demselben Dateigriff kopieren und auf die Platte zwingen - ein
+            # zweites Oeffnen der frischen Datei scheitert unter Windows, solange
+            # ein Virenscanner sie prueft.
+            with open(pfade.lang(lokal), "rb") as quelle, open(pfade.lang(neu), "wb") as f:
+                shutil.copyfileobj(quelle, f, 1024 * 1024)
+                f.flush()
                 os.fsync(f.fileno())
             if os.stat(pfade.lang(neu)).st_size != os.stat(pfade.lang(lokal)).st_size:
                 raise OSError(f"Sicherungskopie unvollstaendig: {neu}")
         finally:
-            lokal.unlink()
+            try:
+                pfade.geduldig(os.unlink, pfade.lang(lokal))
+            except OSError:
+                pass   # bleibt liegen, der naechste Lauf ersetzt sie; die Sicherung gilt
 
         # Die einzige Stelle, an der ein Umbenennen ersetzen darf: eigene
         # Sicherungsstaende, keine Bild- oder Videodateien.
         if Path(pfade.lang(fertig)).exists():
-            pfade.geduldig(os.replace, pfade.lang(fertig), pfade.lang(vorher))
-        pfade.geduldig(os.replace, pfade.lang(neu), pfade.lang(fertig))
+            pfade.geduldig(os.replace, pfade.lang(fertig), pfade.lang(vorher), fehlernummern=pfade.GESPERRT_ERSETZEN)
+        pfade.geduldig(os.replace, pfade.lang(neu), pfade.lang(fertig), fehlernummern=pfade.GESPERRT_ERSETZEN)
 
         if config_pfad is not None and Path(config_pfad).is_file():
             ziel_conf = ordner / "config.toml"
             zwischen = ordner / "config.toml.neu"
             Path(pfade.lang(zwischen)).write_bytes(Path(config_pfad).read_bytes())
-            pfade.geduldig(os.replace, pfade.lang(zwischen), pfade.lang(ziel_conf))
+            pfade.geduldig(os.replace, pfade.lang(zwischen), pfade.lang(ziel_conf),
+                           fehlernummern=pfade.GESPERRT_ERSETZEN)
 
 
 #: Toleranz beim Vergleich des Aenderungsdatums, in Sekunden.

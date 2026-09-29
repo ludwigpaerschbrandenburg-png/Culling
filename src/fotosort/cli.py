@@ -113,7 +113,8 @@ def exiftool_pruefen(befehl: str, konf, konsole) -> None:
     """Bei jedem Start pruefen, ob ExifTool da und startbar ist.
 
     Vorrang nach SPEC Abschnitt 2: FOTOSORT_EXIFTOOL, dann der
-    Konfigurationswert exiftool_pfad, dann PATH. Harter Abbruch nur bei den
+    Konfigurationswert exiftool_pfad, dann das mitgelieferte ExifTool des
+    Windows-Pakets, dann PATH. Harter Abbruch nur bei den
     Befehlen, die Metadaten brauchen.
     """
     gefunden, wo = exiftool_finden(konf)
@@ -423,9 +424,14 @@ def _abschliessen(archiv, konsole, lauf: int, zusammenfassung: dict | None = Non
     Bericht ins Ziel (SPEC Abschnitt 6 und 10)."""
     datenbank = archiv.datenbank
     datenbank.lauf_beenden(lauf, zusammenfassung)
-    datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
     konsole.print("")
-    konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+    try:
+        datenbank.sichern_nach(archiv.ziel, archiv.konf_pfad)
+        konsole.print(meldungen.datenbank_gesichert(db.sicherung_pfad(archiv.ziel)))
+    except OSError as fehler:
+        # Die Arbeit des Schritts ist getan und steht in der (lokalen)
+        # Datenbank; nur die Kopie im Ziel ist diesmal nicht erneuert.
+        konsole.print(meldungen.sicherung_fehlgeschlagen(fehler))
     txt, csv_d, csv_e = bericht.schreiben(archiv.ziel, datenbank, lauf)
     konsole.print(meldungen.bericht_geschrieben(txt, csv_d, csv_e))
 
@@ -633,6 +639,8 @@ def befehl_pruefen(args, konsole) -> int:
         except FotosortFehler:
             _lauf_sauber_abbrechen(datenbank, lauf)
             raise
+        if ergebnis.ziel_weg:
+            return _pruefen_ziel_weg(archiv, konsole, datenbank, lauf)
         if ergebnis.geplant == 0:
             konsole.print(meldungen.pruefen_nichts_zu_tun())
         else:
@@ -648,6 +656,8 @@ def befehl_pruefen(args, konsole) -> int:
             except FotosortFehler:
                 _lauf_sauber_abbrechen(datenbank, lauf)
                 raise
+            if nach.ziel_weg:
+                return _pruefen_ziel_weg(archiv, konsole, datenbank, lauf)
             konsole.print("")
             konsole.print(meldungen.nachpruefen_ergebnis(nach) if nach.geplant else meldungen.nachpruefen_nichts_zu_tun())
         konsole.print("")
@@ -658,8 +668,11 @@ def befehl_pruefen(args, konsole) -> int:
             _lauf_sauber_abbrechen(datenbank, lauf)
             return ABGEBROCHEN
         try:
-            liste, n = nachpruefen.pruefsummen_schreiben(archiv.ziel, datenbank)
-            konsole.print(meldungen.pruefsummen_geschrieben(liste, n))
+            liste, n, ausserhalb = nachpruefen.pruefsummen_schreiben(archiv.ziel, datenbank)
+            if ausserhalb:
+                konsole.print(meldungen.pruefsummen_nicht_erneuert(ausserhalb, archiv.ziel))
+            else:
+                konsole.print(meldungen.pruefsummen_geschrieben(liste, n))
         except OSError as fehler:
             konsole.print(meldungen.pruefsummen_fehler(fehler))
         dateien = ergebnis.bearbeitet + (nach.bearbeitet if nach else 0)
@@ -669,6 +682,15 @@ def befehl_pruefen(args, konsole) -> int:
         return FEHLER if ergebnis.fehler or (nach is not None and nach.befunde) else OK
     finally:
         datenbank.schliessen()
+
+
+def _pruefen_ziel_weg(archiv, konsole, datenbank, lauf: int) -> int:
+    """Das Ziel verschwand mitten im Pruefen: nichts wurde umgestellt. Keine
+    Sicherung und kein Bericht ins Ziel - es ist ja nicht da."""
+    konsole.print("")
+    konsole.print(meldungen.pruefen_ziel_weg(archiv.ziel))
+    _lauf_sauber_abbrechen(datenbank, lauf)
+    return FEHLER
 
 
 # Vom Arbeitsprozess der Oberflaeche gesetzt: das Wort, das der Nutzer im

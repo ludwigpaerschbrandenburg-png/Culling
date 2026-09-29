@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import warnings
+from pathlib import PureWindowsPath
+
 import pytest
 
 from fotosort import config, kamera
@@ -52,15 +55,25 @@ def test_alias_wird_selbst_bereinigt():
 
 
 @pytest.mark.parametrize("modell, ordner", [
-    ("CON", "CON_"), ("nul", "nul_"), ("COM1", "COM1_"), ("LPT9.x", "LPT9.x_"), ("AUX ", "AUX_"),
+    ("CON", "CON_"), ("nul", "nul_"), ("COM1", "COM1_"), ("LPT9.x", "LPT9_.x"), ("AUX ", "AUX_"),
+    ("aux.jpg", "aux_.jpg"), ("AUX .1", "AUX_ .1"), ("COM\u00b9", "COM\u00b9_"), ("lpt\u00b3", "lpt\u00b3_"),
+    ("CONIN$", "CONIN$_"), ("conout$.x", "conout$_.x"),
     ("Kamera.", "Kamera"), ("CONTAX T2", "CONTAX T2"), ("COM10", "COM10"),
 ])
 def test_windows_geraetenamen_werden_nie_ordnernamen(modell, ordner):
-    """CON, NUL, COM1 ... sind unter Windows keine gueltigen Ordnernamen; ueber
+    """CON, NUL, COM1 ... sind unter Windows keine gueltigen Ordnernamen - auch
+    nicht mit Endung, denn Windows sieht nur den Teil vor dem ersten Punkt. Ueber
     das lange Pfad-Praefix liessen sie sich trotzdem anlegen - und danach mit
-    dem Explorer weder oeffnen noch loeschen."""
+    dem Explorer weder oeffnen noch loeschen. Das "_" kommt deshalb direkt
+    hinter den Geraetenamen."""
     konf = config.Konfiguration()
-    assert kamera.ordnername({"Model": modell}, konf)[0] == ordner
+    ergebnis = kamera.ordnername({"Model": modell}, konf)[0]
+    assert ergebnis == ordner
+    reserviert = getattr(PureWindowsPath, "is_reserved", None)
+    if reserviert is not None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            assert not PureWindowsPath(ergebnis).is_reserved()
 
 
 def test_auch_alias_und_name_fuer_unbekannt_werden_bereinigt():

@@ -270,6 +270,36 @@ def test_quelle_zwischen_lesung_und_loeschung_geaendert_endgueltig(baum, quelle,
     assert "Quelle seit dem Kopieren geaendert" in capsys.readouterr().out
 
 
+def test_windows_sperre_beim_loeschen_wartet_nur_auf_die_unveraenderte_quelle(baum, quelle, ziel, nachschauen, antwort, monkeypatch, capsys):
+    """Windows meldet beim Loeschen "Datei von einem anderen Programm geoeffnet"
+    (Fehler 32) - etwa weil ein Bildprogramm gerade Metadaten hineinschreibt.
+    Nach der Wartepause darf nur geloescht werden, was noch genau die geprueft
+    Datei ist; der neue Inhalt kam nie im Archiv an."""
+    _bis_geprueft(ziel, quelle)
+    datei = Path(baum["analog"])
+    neuer_inhalt = datei.read_bytes() + b"nachtraeglich bearbeitet"
+    echt = os.unlink
+    gesperrt = []
+
+    def unlink(pfad, *args, **kw):
+        if Path(pfad) == pfade.lang(datei) and not gesperrt:
+            gesperrt.append(True)
+            datei.write_bytes(neuer_inhalt)          # das fremde Programm schreibt ...
+            fehler = PermissionError(13, "Freigabeverletzung", str(pfad))
+            fehler.winerror = 32                    # ... und haelt die Datei solange offen
+            raise fehler
+        return echt(pfad, *args, **kw)
+
+    monkeypatch.setattr(pfade.os, "unlink", unlink)
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.0)
+    antwort.append("loeschen")
+    assert _cli("aufraeumen", "--ziel", ziel, "--endgueltig") == cli.FEHLER
+    assert gesperrt and datei.read_bytes() == neuer_inhalt
+    z = _zeilen(nachschauen, ziel)[str(datei)]
+    assert z["status"] == "analysiert" and z["hash"] == ""
+    assert "Quelle seit dem Kopieren geaendert" in capsys.readouterr().out
+
+
 def test_quelle_zwischen_lesung_und_loeschung_geaendert_verschieben(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
     monkeypatch.setattr(kopieren.pfade, "gleiches_laufwerk", lambda a, b: False)
     _vorbereiten(ziel, quelle)
@@ -502,3 +532,60 @@ def test_anhang_abweichend_in_gruppe_wird_gemeldet(baum, quelle, ziel, nachschau
 def test_groessenmeldung_nennt_die_richtige_seite():
     assert "Quelle ist in Ordnung" in meldungen.grund_groesse_abweichung(160, 160, 159)
     assert "Quelle 161" in meldungen.grund_groesse_abweichung(160, 161, 160)
+
+
+# --- Runde 1: Gruppenmitglied nach voruebergehendem Fehler ------------------
+
+
+def test_nachzuegler_der_gruppe_bekommt_den_anhang_seiner_gruppe(baum, quelle, ziel, nachschauen, monkeypatch):
+    """Im Archiv liegt schon eine ANDERE Aufnahme DSC01234.ARW; die Gruppe
+    DSC01234.ARW + .xmp bekommt deshalb den Anhang _1. Scheitert das Sidecar
+    einmal (Karte kurz weg) und wird im naechsten Lauf nachkopiert, gehoert es
+    zu DSC01234_1.ARW - nicht als DSC01234.xmp neben die fremde Aufnahme, der
+    Bildprogramme sonst Bewertungen und Bearbeitung zuordnen."""
+    _vorbereiten(ziel, quelle)
+    zeilen = _zeilen(nachschauen, ziel)
+    raw, xmp = Path(baum["raw"]), Path(baum["sidecar_form1"])
+    assert zeilen[str(xmp)]["gruppe"] == zeilen[str(raw)]["gruppe"]
+    fremd = Path(zeilen[str(raw)]["zielpfad"])
+    fremd.parent.mkdir(parents=True, exist_ok=True)
+    fremd.write_bytes(raw.read_bytes() + b"andere Aufnahme")
+    echt = hashes.kopieren_mit_hash
+
+    def einmal_lesefehler(q, z, *a, **k):
+        if Path(q).name == xmp.name:
+            raise OSError(5, "Eingabe-/Ausgabefehler")
+        return echt(q, z, *a, **k)
+
+    monkeypatch.setattr(hashes, "kopieren_mit_hash", einmal_lesefehler)
+    _cli("kopieren", "--ziel", ziel)
+    z1 = _zeilen(nachschauen, ziel)
+    assert z1[str(xmp)]["status"] == "fehler"
+    haupt = Path(z1[str(raw)]["zielpfad"])
+    assert haupt.name == f"{raw.stem}_1{raw.suffix}"
+    monkeypatch.setattr(hashes, "kopieren_mit_hash", echt)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    neu = Path(_zeilen(nachschauen, ziel)[str(xmp)]["zielpfad"])
+    assert neu == haupt.with_name(f"{raw.stem}_1{xmp.suffix}")
+    assert neu.read_bytes() == xmp.read_bytes()
+    assert not fremd.with_suffix(xmp.suffix).exists()
+
+
+def test_misslungene_sicherung_ist_eine_warnung_der_bericht_kommt_trotzdem(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
+    """Scheitert die Sicherung der Datenbank ins Ziel (Datei dort gesperrt,
+    Platte voll), ist die Arbeit des Schritts trotzdem getan: deutlicher
+    Hinweis, der Bericht wird geschrieben. Frueher endete der Schritt als
+    Fehler, und der Bericht fehlte."""
+    _vorbereiten(ziel, quelle)
+    berichte = ziel / ".fotosortierer" / "berichte"
+    vorher = set(berichte.glob("*.txt"))
+
+    def kein_platz(self, *a, **k):
+        raise OSError(28, "Auf dem Datentraeger ist nicht genug Speicherplatz")
+
+    monkeypatch.setattr(db.Datenbank, "sichern_nach", kein_platz)
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "Sicherung" in aus and "nicht genug Speicherplatz" in aus
+    assert set(berichte.glob("*.txt")) - vorher

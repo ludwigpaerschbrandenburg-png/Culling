@@ -228,8 +228,9 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             ),
             (
                 "exiftool_pfad",
-                "Pfad zum ExifTool-Programm; leer bedeutet ueber PATH suchen.\n"
-                "# Vorrang: FOTOSORT_EXIFTOOL vor exiftool_pfad vor PATH.",
+                "Pfad zum ExifTool-Programm; leer bedeutet: das mitgelieferte ExifTool\n"
+                "# des Windows-Pakets, sonst ueber PATH suchen.\n"
+                "# Vorrang: FOTOSORT_EXIFTOOL vor exiftool_pfad vor mitgeliefertem ExifTool vor PATH.",
                 "",
             ),
         ],

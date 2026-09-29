@@ -211,7 +211,9 @@ def erzeugen(wurzel: Path) -> dict[str, Path]:
     Gibt ein Verzeichnis der wichtigsten Pfade zurueck.
     """
     exiftool_pfad()  # bricht ohne ExifTool ab, bevor etwas entsteht
-    wurzel = Path(wurzel)
+    # Absolut: Das Ziel der Verknuepfung "verlinkt" gilt vom Ordner der
+    # Verknuepfung aus, nicht vom aktuellen Ordner - relativ zeigte sie ins Leere.
+    wurzel = Path(wurzel).absolute()
     quelle = wurzel / "Quelle"
     ausserhalb = wurzel / "Ausserhalb"
     quelle.mkdir(parents=True, exist_ok=True)

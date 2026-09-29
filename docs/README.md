@@ -10,7 +10,7 @@ Notizen, Ideen, Entscheidungen, Bilder.
 | [`SPEC.md`](SPEC.md) | **Die verbindliche Projektbeschreibung.** Bei Widersprüchen gilt sie. |
 | [`PROMPTS.md`](PROMPTS.md) | Die Prompts für Claude Code, Phase für Phase, der Reihe nach einzugeben |
 | [`offene_fragen.md`](offene_fragen.md) | Protokoll der elf Punkte aus der SPEC-Prüfung, alle entschieden, dazu die nachträglichen Präzisierungen A bis AF. Der verbindliche Wortlaut steht in der SPEC. |
-| [`architektur.md`](architektur.md) | Vorschlag für Module, Datenbank und Abhängigkeiten |
+| [`architektur.md`](architektur.md) | Aufbau in Modulen, Datenbank und Abhängigkeiten (Stand v0.7) |
 | [`todo.md`](todo.md) | Was in welcher Phase gebaut wird, plus die offenen Punkte aus der Prüfung |
 
 Die Dauerregeln für die Arbeit am Projekt stehen in [`../CLAUDE.md`](../CLAUDE.md).

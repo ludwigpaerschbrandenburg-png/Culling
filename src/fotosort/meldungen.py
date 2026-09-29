@@ -1280,10 +1280,18 @@ GRUND_NACHPRUEFUNG_VERAENDERT = f"{GRUND_PRUEFUNG}: Archivdatei hat sich seit de
 GRUND_NACHPRUEFUNG_FEHLT = f"{GRUND_PRUEFUNG}: Archivdatei fehlt seit der Pruefung"
 
 
-def ereignis_nachpruefung(grund: str, quelle_da: bool) -> str:
-    if quelle_da:
-        return f"{grund}; Quelle noch da - wird beim naechsten Kopieren neu kopiert"
-    return f"{grund}; Quelle schon geloescht - bitte aus der eigenen Sicherung holen"
+def ereignis_nachpruefung(grund: str, neu_kopieren: int, fehlt: int, geloescht: int, papierkorb: list) -> str:
+    teile = [grund]
+    if neu_kopieren:
+        teile.append("Quelle noch da - wird beim naechsten Kopieren neu kopiert")
+    if fehlt:
+        teile.append("Quelle liegt nicht mehr am alten Ort - Karte oder Platte anschliessen und kopieren,"
+                     " sonst aus der eigenen Sicherung holen")
+    if papierkorb:
+        teile.append("Original liegt noch im Papierkorb der Quelle: " + ", ".join(str(p) for p in papierkorb))
+    if geloescht:
+        teile.append("Quelle schon geloescht - bitte aus der eigenen Sicherung holen")
+    return "; ".join(teile)
 
 
 def ereignis_nachgeprueft(e) -> str:
@@ -1329,6 +1337,15 @@ def nachpruefen_ergebnis(e) -> str:
         if e.neu_zu_kopieren:
             zeilen.append(f"  Aus der noch vorhandenen Quelle neu zu kopieren: {anzahl(e.neu_zu_kopieren)}"
                           " (\"fotosort kopieren\" legt frische Kopien daneben)")
+        if e.quelle_fehlt:
+            zeilen.append(f"  Quelle liegt nicht mehr am alten Ort: {anzahl(len(e.quelle_fehlt))}")
+            zeilen.append("    Liegt das Original noch auf einer Karte oder Platte, die gerade nicht angeschlossen ist:"
+                          " anschliessen und \"fotosort kopieren\" starten. Sonst bitte aus der eigenen Sicherung holen.")
+        if e.im_papierkorb:
+            zeilen.append(f"  Original liegt noch im Papierkorb der Quelle - von dort zurueckholen: {anzahl(len(e.im_papierkorb))}")
+            zeilen.extend(f"    {p}" for p in e.im_papierkorb[:20])
+            if len(e.im_papierkorb) > 20:
+                zeilen.append(f"    ... und {anzahl(len(e.im_papierkorb) - 20)} weitere (siehe Bericht)")
         if e.ohne_quelle:
             zeilen.append(f"  Quelle schon geloescht - bitte aus der eigenen Sicherung holen: {anzahl(len(e.ohne_quelle))}")
     zeilen.append(f"  Dauer:             {dauer(e.sekunden)}")
@@ -1337,6 +1354,25 @@ def nachpruefen_ergebnis(e) -> str:
 
 def nachpruefen_nichts_zu_tun() -> str:
     return "Nachpruefen: Im Archiv gibt es noch keine gepruefte Datei."
+
+
+def sicherung_fehlgeschlagen(fehler: OSError) -> str:
+    return ("ACHTUNG: Die Sicherungskopie der Datenbank im Ziel konnte diesmal nicht erneuert werden:"
+            f" {fehler.strerror or fehler}. Die Arbeit dieses Schritts ist trotzdem erledigt und gespeichert;"
+            " die Sicherung wird beim naechsten Schritt erneut versucht. Haelt ein anderes Programm (Sicherung,"
+            " Sync, Virenscanner) den Ordner .fotosortierer im Ziel offen, bitte kurz schliessen.")
+
+
+def pruefen_ziel_weg(ziel) -> str:
+    return (f"Das Ziel ist mitten im Pruefen nicht mehr erreichbar: {ziel}\n"
+            "Wahrscheinlich wurde die Platte abgezogen, ist eingeschlafen, oder die Netzverbindung ist weg."
+            " Es wurde nichts umgestellt - fehlende Dateien werden deshalb nicht als verloren gemeldet."
+            " Bitte das Ziel wieder anschliessen und das Pruefen erneut starten.")
+
+
+def pruefsummen_nicht_erneuert(ausserhalb: int, ziel) -> str:
+    return (f"Pruefsummen-Liste nicht erneuert: {anzahl(ausserhalb)} Archivdateien liegen laut Datenbank nicht"
+            f" unter {ziel}. Ist das Ziel anders geschrieben oder umgezogen? Die bisherige Liste bleibt stehen.")
 
 
 def pruefsummen_fehler(fehler: OSError) -> str:
@@ -1723,7 +1759,7 @@ def start_frage_modus() -> str:
 
 def start_frage_profil(standard: str) -> str:
     return (
-        "Wo liegt das Ziel? hdd = Festplatte, ssd = SSD, netzwerk = Netzlaufwerk"
+        "Worauf liegen Quelle und Ziel? hdd = mindestens eines auf einer Festplatte, ssd = beide auf SSDs, netzwerk = Netzlaufwerk"
         f" [{standard}]: "
     )
 
@@ -1954,9 +1990,9 @@ SCHRITT_ERKLAERUNG: dict[str, str] = {
 }
 
 OB_PROFILE: list[tuple[str, str]] = [
-    ("hdd", "Festplatte – der Zielordner liegt auf einer normalen Festplatte (Standard, immer sicher)"),
-    ("ssd", "SSD – der Zielordner liegt auf einer SSD (mehrere Dateien gleichzeitig, schneller)"),
-    ("netzwerk", "Netzlaufwerk – der Zielordner liegt auf einem NAS oder einer Netzfreigabe"),
+    ("hdd", "Festplatte – Quelle oder Ziel liegt auf einer normalen Festplatte (Standard, immer sicher)"),
+    ("ssd", "SSD – Quelle und Ziel liegen beide auf SSDs (mehrere Dateien gleichzeitig, schneller)"),
+    ("netzwerk", "Netzlaufwerk – Quelle oder Ziel liegt auf einem NAS oder einer Netzfreigabe"),
 ]
 
 OB_ZUSTAND: dict[str, str] = {

@@ -257,6 +257,57 @@ def test_rueckfall_nimmt_den_zweiten_namen_zurueck(tmp_path, monkeypatch):
     assert a.stat().st_nlink == 1
 
 
+def test_rueckfall_entfernt_nie_den_letzten_namen(tmp_path, monkeypatch):
+    """Ist der alte Name zwischen link und unlink schon weg (anderes Programm,
+    oder NFS meldet eine wiederholte Anfrage als "nicht gefunden", obwohl die
+    erste wirkte), traegt nur noch der neue Name die Datei. Ihn zu entfernen
+    hiesse, das Bild zu loeschen - der Umzug ist dann einfach erledigt."""
+    import os as _os
+
+    if sys.platform.startswith("win"):
+        pytest.skip("Windows nutzt MoveFileEx")
+    monkeypatch.setattr(pfade, "_renameat2_noreplace", lambda von, nach: False)
+    a = tmp_path / "a.part"
+    a.write_bytes(b"bild")
+    b = tmp_path / "a.jpg"
+    echt = _os.unlink
+
+    def unlink_wirkt_meldet_aber_fehlt(pfad, *args, **kw):
+        echt(pfad, *args, **kw)
+        if str(pfad) == str(pfade.lang(a)):
+            raise FileNotFoundError(2, "nicht gefunden", str(pfad))
+
+    monkeypatch.setattr(pfade.os, "unlink", unlink_wirkt_meldet_aber_fehlt)
+    pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert b.read_bytes() == b"bild" and not a.exists()
+
+
+def test_rueckfall_laesst_eine_zwischendurch_ersetzte_quelle_stehen(tmp_path, monkeypatch):
+    """Wird der alte Name zwischen link und unlink durch eine ANDERE Datei
+    ersetzt, darf das unlink sie nicht treffen - und der neue Name, der jetzt
+    der einzige der alten Datei ist, bleibt auch. Beide bleiben, Fehler."""
+    import os as _os
+
+    if sys.platform.startswith("win"):
+        pytest.skip("Windows nutzt MoveFileEx")
+    monkeypatch.setattr(pfade, "_renameat2_noreplace", lambda von, nach: False)
+    a = tmp_path / "a.jpg"
+    a.write_bytes(b"alt")
+    b = tmp_path / "b.jpg"
+    echt_link = _os.link
+
+    def link_dann_ersetzt(von, nach, *args, **kw):
+        echt_link(von, nach, *args, **kw)
+        echt = _os.unlink
+        echt(von)
+        Path(von).write_bytes(b"neu")
+
+    monkeypatch.setattr(pfade.os, "link", link_dann_ersetzt)
+    with pytest.raises(OSError):
+        pfade.umbenennen_ohne_ueberschreiben(a, b)
+    assert a.read_bytes() == b"neu" and b.read_bytes() == b"alt"
+
+
 def test_rueckfall_ohne_schreibrecht_im_quellordner_faellt_aufs_kopieren(tmp_path, monkeypatch):
     if sys.platform.startswith("win"):
         pytest.skip("Windows nutzt MoveFileEx")
@@ -376,6 +427,38 @@ def test_kurz_gesperrte_datei_wird_nach_kurzer_wartezeit_entfernt(tmp_path, monk
     assert not p.exists() and len(versuche) == 3
 
 
+def test_geduld_reicht_fuer_einen_langsamen_virenscanner(monkeypatch):
+    """SPEC §5: zusammen gut 15 s. Ein Virenscanner prueft ein grosses Video
+    laenger als ein paar Sekunden; frueher gab das Programm nach 4,5 s auf."""
+    pausen: list = []
+    monkeypatch.setattr(pfade.time, "sleep", pausen.append)
+
+    def immer_gesperrt():
+        raise _Gesperrt(13, "gesperrt")
+
+    with pytest.raises(PermissionError):
+        pfade.geduldig(immer_gesperrt)
+    assert 14.0 <= sum(pausen) <= 20.0
+
+
+def test_geduld_prueft_vor_jedem_weiteren_versuch(monkeypatch):
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.0)
+    ablauf: list = []
+
+    def gesperrt():
+        ablauf.append("versuch")
+        raise _Gesperrt(13, "gesperrt")
+
+    def pruefen():
+        ablauf.append("pruefen")
+        if ablauf.count("pruefen") == 2:
+            raise RuntimeError("Datei hat sich veraendert")
+
+    with pytest.raises(RuntimeError):
+        pfade.geduldig(gesperrt, vor_wiederholung=pruefen)
+    assert ablauf == ["versuch", "pruefen", "versuch", "pruefen"]
+
+
 def test_geduld_hat_ein_ende_und_gilt_nur_fuer_sperren(monkeypatch):
     monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.001)
     aufrufe = []
@@ -396,3 +479,92 @@ def test_geduld_hat_ein_ende_und_gilt_nur_fuer_sperren(monkeypatch):
     with pytest.raises(PermissionError):
         pfade.geduldig(keine_rechte)
     assert len(aufrufe) == 1
+
+
+# --- Windows-Zweige, unter Linux mit nachgebautem kernel32 geprueft --------
+
+
+class _Kernel32:
+    """Antwortet auf MoveFileExW mit einer vorgegebenen Folge von Fehlernummern
+    (0 = Erfolg); danach immer Erfolg."""
+
+    def __init__(self, folge):
+        self.folge = list(folge)
+        self.aufrufe: list = []
+        self.letzter = 0
+        aussen = self
+
+        class _Funktion:
+            argtypes = restype = None
+
+            def __call__(self, von, nach, flaggen):
+                aussen.aufrufe.append((von, nach, flaggen))
+                nummer = aussen.folge.pop(0) if aussen.folge else 0
+                aussen.letzter = nummer
+                return 0 if nummer else 1
+
+        self.MoveFileExW = _Funktion()
+
+
+@pytest.fixture
+def windows_umbenennen(monkeypatch):
+    import ctypes
+
+    pausen: list = []
+    monkeypatch.setattr(pfade, "_IST_WINDOWS", True)
+    monkeypatch.setattr(pfade.time, "sleep", pausen.append)
+
+    def mit(folge):
+        k = _Kernel32(folge)
+        monkeypatch.setattr(ctypes, "WinDLL", lambda name, use_last_error=False: k, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: k.letzter, raising=False)
+        return k, pausen
+
+    return mit
+
+
+def test_windows_umbenennen_wartet_bei_sperre_und_ersetzt_nie(windows_umbenennen):
+    k, pausen = windows_umbenennen([32, 33, 5])
+    pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/x/a.jpg"))
+    assert len(k.aufrufe) == 4 and len(pausen) == 3
+    # Flagge 8 (auf die Platte schreiben), nie 1 (vorhandene Datei ersetzen).
+    assert all(flaggen == 8 for _von, _nach, flaggen in k.aufrufe)
+
+
+@pytest.mark.parametrize("nummer, fehler", [(80, FileExistsError), (183, FileExistsError),
+                                            (2, FileNotFoundError), (3, FileNotFoundError)])
+def test_windows_umbenennen_fehlernummern(windows_umbenennen, nummer, fehler):
+    k, pausen = windows_umbenennen([nummer])
+    with pytest.raises(fehler):
+        pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/x/a.jpg"))
+    assert len(k.aufrufe) == 1 and not pausen
+
+
+def test_windows_umbenennen_gibt_nach_der_wartezeit_auf(windows_umbenennen):
+    k, pausen = windows_umbenennen([5] * 50)
+    with pytest.raises(OSError):
+        pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/x/a.jpg"))
+    assert len(k.aufrufe) == pfade.GEDULD_VERSUCHE and 14.0 <= sum(pausen) <= 20.0
+
+
+def test_schreibschutz_wird_am_windows_attribut_erkannt(tmp_path, monkeypatch):
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x")
+
+    class _Stat:
+        def __init__(self, attribute):
+            self.st_file_attributes = attribute
+
+    monkeypatch.setattr(pfade.sys, "platform", "win32")
+    monkeypatch.setattr(pfade.os, "stat", lambda pfad, follow_symlinks=True: _Stat(0x1 | 0x20))
+    assert pfade._schreibgeschuetzt(p) is True
+    monkeypatch.setattr(pfade.os, "stat", lambda pfad, follow_symlinks=True: _Stat(0x20))
+    assert pfade._schreibgeschuetzt(p) is False
+
+    def weg(pfad, follow_symlinks=True):
+        raise FileNotFoundError(2, "weg")
+
+    monkeypatch.setattr(pfade.os, "stat", weg)
+    assert pfade._schreibgeschuetzt(p) is False
+    monkeypatch.setattr(pfade.sys, "platform", "linux")
+    assert pfade._schreibgeschuetzt(p) is False

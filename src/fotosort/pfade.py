@@ -309,16 +309,29 @@ class KeinNoReplace(OSError):
 
 #: Unter Windows halten Virenscanner und Suchindex eine frisch geschriebene
 #: Datei kurz offen (Fehler 32 "Sharing Violation", 33 "Lock Violation").
-#: So oft wird dann gewartet und erneut versucht (zusammen gut 15 s).
+#: So oft wird dann gewartet und erneut versucht: Pausen von 1/3 s wachsend
+#: bis 3 s, zusammen 15 s (SPEC §5) - ein Virenscanner prueft ein grosses
+#: Video auch mal einige Sekunden lang.
 GEDULD_VERSUCHE = 10
-GEDULD_PAUSE = 0.3
+GEDULD_PAUSE = 1.0
 _GESPERRT = (32, 33)
+#: Beim Ersetzen einer eigenen Datei (Sicherung, Pruefsummen-Liste) meldet
+#: Windows "Zugriff verweigert" (5), solange ein anderes Programm die alte
+#: Fassung offen haelt - Suchindex, Sync-Programm, Sicherung des NAS.
+GESPERRT_ERSETZEN = (5, 32, 33)
 
 
-def geduldig(fn, *args, fehlernummern=_GESPERRT):
+def geduldig(fn, *args, fehlernummern=_GESPERRT, vor_wiederholung=None):
     """fn(*args); bei einer voruebergehenden Sperre (nur Windows kennt
-    winerror) mit wachsender Pause erneut. Jeder andere Fehler sofort."""
+    winerror) mit wachsender Pause erneut. Jeder andere Fehler sofort.
+
+    vor_wiederholung: wird vor jedem weiteren Versuch aufgerufen und darf ihn
+    mit einer Ausnahme verhindern. Eine Sperre heisst oft: Ein anderes Programm
+    schreibt gerade in die Datei - vor dem Loeschen muss sie danach noch genau
+    die gepruefte sein."""
     for versuch in range(GEDULD_VERSUCHE):
+        if versuch and vor_wiederholung is not None:
+            vor_wiederholung()
         try:
             return fn(*args)
         except OSError as fehler:
@@ -345,7 +358,7 @@ def _schreibschutz_setzen(pfad: Path, an: bool) -> None:
     os.chmod(lang(pfad), _stat.S_IREAD if an else _stat.S_IREAD | _stat.S_IWRITE)
 
 
-def datei_entfernen(pfad: Path) -> None:
+def datei_entfernen(pfad: Path, unveraendert=None) -> None:
     """Eine Datei entfernen, die der Aufrufer vorher vollstaendig geprueft hat.
 
     Unter Windows laesst sich eine Datei mit dem Attribut "Schreibgeschuetzt"
@@ -353,16 +366,22 @@ def datei_entfernen(pfad: Path) -> None:
     und nur fuer genau diese eine Datei, wird das Attribut aufgehoben; klappt
     das Loeschen trotzdem nicht, kommt es zurueck. Fehlende Rechte werden nie
     umgangen: Der Fehler geht dann unveraendert an den Aufrufer.
+
+    unveraendert: Pruefung, die vor jedem weiteren Versuch laeuft (siehe
+    geduldig) und mit einer Ausnahme abbricht, wenn die Datei nicht mehr die
+    gepruefte ist.
     """
     try:
-        geduldig(os.unlink, lang(pfad))
+        geduldig(os.unlink, lang(pfad), vor_wiederholung=unveraendert)
         return
     except PermissionError:
         if not _schreibgeschuetzt(pfad):
             raise
+    if unveraendert is not None:
+        unveraendert()
     _schreibschutz_setzen(pfad, False)
     try:
-        geduldig(os.unlink, lang(pfad))
+        geduldig(os.unlink, lang(pfad), vor_wiederholung=unveraendert)
     except OSError:
         try:
             _schreibschutz_setzen(pfad, True)
@@ -418,6 +437,8 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
     # der zweite Schritt nicht gelingen (Quellordner nicht beschreibbar),
     # wird es gar nicht erst versucht - und scheitert er doch, wird der eben
     # angelegte eigene Name wieder entfernt: Die Quelle bleibt, wie sie war.
+    # Nie wird dabei der letzte Name einer Datei entfernt: Der neue Name wird
+    # nur zurueckgenommen, solange der alte nachweislich dieselbe Datei traegt.
     if not os.access(lang(von.parent), os.W_OK):
         raise KeinNoReplace(f"Quellordner nicht beschreibbar: {von.parent}")
     try:
@@ -429,14 +450,43 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
             raise KeinNoReplace(str(fehler)) from fehler
         raise
     try:
+        gleich = _gleiche_datei(von, nach)
+    except FileNotFoundError:
+        # Der alte Name ist schon weg (ein anderes Programm war schneller):
+        # Die Datei traegt nur noch den neuen Namen - der Umzug ist erledigt.
+        ordner_sichern(nach.parent)
+        return
+    if not gleich:
+        # Unter dem alten Namen liegt inzwischen eine ANDERE Datei: nicht
+        # anruehren. Der neue Name ist jetzt der einzige der alten Datei und
+        # bleibt auch. Beide stehen lassen, als Fehler melden.
+        raise OSError(errno.EEXIST, "Datei waehrend des Umbenennens ersetzt", str(von))
+    try:
         os.unlink(lang(von))
+    except FileNotFoundError:
+        # NFS: Die Antwort auf das erste unlink ging verloren, die Wiederholung
+        # meldet "nicht gefunden" - der alte Name ist weg, der neue bleibt.
+        ordner_sichern(nach.parent)
+        return
     except OSError:
         try:
-            os.unlink(lang(nach))
+            if _gleiche_datei(von, nach):
+                os.unlink(lang(nach))
         except OSError:
             pass
         raise
     ordner_sichern(nach.parent)
+
+
+def _gleiche_datei(a: Path, b: Path) -> bool:
+    """Tragen a und b dieselbe Datei (gleiches Geraet, gleicher Inode)?
+    FileNotFoundError, wenn a fehlt."""
+    sa = os.lstat(lang(a))
+    try:
+        sb = os.lstat(lang(b))
+    except FileNotFoundError:
+        return False
+    return (sa.st_dev, sa.st_ino) == (sb.st_dev, sb.st_ino)
 
 
 _RENAME_NOREPLACE = 1

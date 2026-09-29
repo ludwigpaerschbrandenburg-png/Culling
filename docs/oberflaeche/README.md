@@ -24,7 +24,7 @@ der CI gegen das Windows-Paket.
 | [08](08-uebersicht-nach-pruefen-aufraeumen-karte.png) | Übersicht nach dem Prüfen, Aufräumen-Karte aktiv |
 | [09](09-aufraeumen-bestaetigt.png) | Aufräumen: Bestätigungswort getippt, Knopf aktiv |
 | [10](10-liste-duplikate.png) | Liste (Duplikate), seitenweise |
-| [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt |
+| [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
 | [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).

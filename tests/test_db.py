@@ -346,6 +346,56 @@ def test_sicherung_ist_lesbar_und_vollstaendig(tmp_path, datenbank):
         kopie.close()
 
 
+class _Gesperrt(PermissionError):
+    """Wie Windows beim Ersetzen einer Datei, die ein anderes Programm gerade
+    offen haelt: "Zugriff verweigert" (5); 32 bei einer Freigabeverletzung."""
+
+    def __init__(self, nummer: int):
+        super().__init__(13, "Der Prozess kann nicht auf die Datei zugreifen")
+        self.winerror = nummer
+
+
+def test_sicherung_wartet_auf_eine_kurz_offene_alte_sicherung(tmp_path, datenbank, monkeypatch):
+    """Liest der Suchindex, ein Sync-Programm oder die naechtliche Sicherung des
+    NAS die alte Sicherung gerade, meldet Windows beim Ersetzen Fehler 5. Dann
+    warten und erneut versuchen - frueher endete der ganze Schritt als Fehler."""
+    ziel = tmp_path / "Ziel"
+    ziel.mkdir()
+    datenbank.sichern_nach(ziel)
+    echt = os.replace
+    versuche: list = []
+
+    def ersetzen(a, b):
+        versuche.append(1)
+        if len(versuche) == 1:
+            raise _Gesperrt(5)
+        echt(a, b)
+
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.0)
+    monkeypatch.setattr(db.os, "replace", ersetzen)
+    datenbank.sichern_nach(ziel)
+    assert (ziel / ".fotosortierer" / db.SICHERUNG_VORHER).is_file() and len(versuche) >= 3
+
+
+def test_klemmende_lokale_zwischendatei_macht_die_sicherung_nicht_zunichte(tmp_path, datenbank, monkeypatch):
+    """Die lokale Zwischendatei laesst sich gerade nicht entfernen (Virenscanner):
+    Die Sicherung im Ziel ist trotzdem fertig und steht an ihrem Platz."""
+    ziel = tmp_path / "Ziel"
+    ziel.mkdir()
+    echt = os.unlink
+
+    def unlink(pfad, *a, **k):
+        if Path(pfad).name == db.SICHERUNG_LOKAL:
+            raise _Gesperrt(32)
+        return echt(pfad, *a, **k)
+
+    monkeypatch.setattr(pfade, "GEDULD_PAUSE", 0.0)
+    monkeypatch.setattr(db.os, "unlink", unlink)
+    datenbank.sichern_nach(ziel)
+    assert (ziel / ".fotosortierer" / db.SICHERUNG).is_file()
+    assert not (ziel / ".fotosortierer" / db.SICHERUNG_NEU).exists()
+
+
 def test_sichern_nimmt_die_konfiguration_mit(tmp_path, datenbank):
     ziel = tmp_path / "Ziel"
     ziel.mkdir()

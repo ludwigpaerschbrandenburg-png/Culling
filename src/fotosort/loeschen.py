@@ -250,7 +250,7 @@ def quelldatei_entfernen(dbank: db.Datenbank, lauf: int, quellpfad, lesung: Lesu
     zielpfad = Path(db.text_pfad(zeile["zielpfad"]))
     _unmittelbar_vorher_pruefen(quelle, zielpfad, lesung, zeile["hash"], weise)
     if weise == WEISE_ENDGUELTIG:
-        pfade.datei_entfernen(quelle)
+        pfade.datei_entfernen(quelle, _noch_dieselbe(quelle, lesung.quell_kennung))
         dbank.quelle_geloescht_setzen(quellpfad, lauf, None)
         dbank.ereignis(lauf, ART_QUELLE_GELOESCHT, quelle, 1, meldungen.EREIGNIS_GELOESCHT)
         return None
@@ -258,6 +258,19 @@ def quelldatei_entfernen(dbank: db.Datenbank, lauf: int, quellpfad, lesung: Lesu
     dbank.quelle_geloescht_setzen(quellpfad, lauf, neuer_pfad)
     dbank.ereignis(lauf, ART_QUELLE_IN_PAPIERKORB, quelle, 1, db.pfad_text(neuer_pfad))
     return neuer_pfad
+
+
+def _noch_dieselbe(quelle: Path, quell_kennung: tuple):
+    """Pruefung fuer jeden weiteren Loeschversuch nach einer Windows-Sperre:
+    Wer die Datei gesperrt hielt, kann in sie geschrieben haben."""
+    def pruefen() -> None:
+        try:
+            jetzt = kennung(os.stat(pfade.lang(quelle)))
+        except OSError:
+            jetzt = ()
+        if quell_kennung and jetzt != quell_kennung:
+            raise Verweigert(meldungen.GRUND_QUELLE_ABWEICHUNG)
+    return pruefen
 
 
 def _papierkorb_pfad(wurzel: Path, quelle: Path, papierkorb: Path) -> Path:
@@ -312,8 +325,8 @@ def _in_papierkorb(quelle: Path, ziel: Path, erwarteter_hash: str, quell_kennung
                 os.unlink(pfade.lang(kandidat))
                 raise Verweigert(meldungen.GRUND_QUELLE_ABWEICHUNG)
             try:
-                pfade.datei_entfernen(quelle)
-            except OSError:
+                pfade.datei_entfernen(quelle, _noch_dieselbe(quelle, quell_kennung))
+            except (OSError, Verweigert):
                 # Quelle bleibt (fehlende Rechte o. ae.): die eigene Kopie wieder
                 # wegnehmen, sonst laege der Inhalt doppelt herum.
                 os.unlink(pfade.lang(kandidat))

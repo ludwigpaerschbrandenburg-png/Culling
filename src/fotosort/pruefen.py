@@ -58,6 +58,11 @@ class Ergebnis:
     abgebrochen: bool = False
     hash_worker: int = 0
     profil: str = ""
+    ziel_weg: bool = False           # das ganze Ziel war mitten im Lauf nicht mehr erreichbar
+
+
+class ZielWeg(Exception):
+    """Das ganze Ziel ist nicht mehr erreichbar - nicht bloss eine Datei."""
 
 
 @dataclass
@@ -136,9 +141,10 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
             wait([offen[0][1]], timeout=1.0)
             while offen and offen[0][1].done():
                 z, zukunft, gelesen = offen.popleft()
-                _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige, gelesen)
-    except KeyboardInterrupt:
+                _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige, gelesen, ziel)
+    except (KeyboardInterrupt, ZielWeg) as grund:
         e.abgebrochen = True
+        e.ziel_weg = isinstance(grund, ZielWeg)
         stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
     finally:
@@ -149,13 +155,18 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     return e
 
 
-def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzeige, gelesen: bool) -> None:
+def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzeige, gelesen: bool,
+               ziel: Path | None = None) -> None:
     """gelesen: diese Zeile hat die Datei selbst lesen lassen (zaehlt Bytes);
     Duplikate teilen sich die Lesung ihrer Partnerdatei."""
     quellpfad = z["quellpfad"]
     zielpfad = Path(db.text_pfad(z["zielpfad"]))
     if L.art == "abgebrochen":
         return  # bleibt im alten Status, naechster Lauf macht weiter
+    if L.art in ("fehlt", "fehler") and ziel is not None and not db.ziel_erreichbar(ziel):
+        # Nicht die Datei fehlt, sondern das ganze Ziel (Platte abgezogen,
+        # Netz weg): nichts umstellen, auch diese Lesung nicht verbuchen.
+        raise ZielWeg
     e.bearbeitet += 1
     anzeige.weiter(1, L.groesse if (L.art == "ok" and gelesen) else 0)
     if L.art == "ok" and L.groesse != int(z["groesse"]):

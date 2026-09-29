@@ -160,6 +160,55 @@ def _stamm(zeile) -> str:
     return Path(db.text_pfad(gruppe)).stem
 
 
+#: Status, deren Datei unter ihrem eigenen Namen im Ziel liegt (Duplikate
+#: zeigen auf eine fremde Partnerdatei und sagen nichts ueber den Anhang).
+_ABGELEGT = ("kopiert", "geprueft", "quelle_geloescht", "verschoben")
+
+
+def _anhang_aus_namen(quellname: str, zielname: str, stamm: str) -> int | None:
+    """Welchen Anhang (mit_anhang) traegt zielname gegenueber quellname?"""
+    if zielname == quellname:
+        return 0
+    if stamm and quellname.startswith(stamm):
+        rest = quellname[len(stamm):]
+        kopf = f"{stamm}_"
+        if zielname.startswith(kopf) and zielname.endswith(rest) and len(zielname) > len(kopf) + len(rest):
+            ziffern = zielname[len(kopf):len(zielname) - len(rest)]
+            if ziffern.isdigit():
+                return int(ziffern)
+    return None
+
+
+def _gruppen_anhang(dbank: db.Datenbank, zeile) -> int:
+    """Den Anhang, den die schon abgelegten Mitglieder der Gruppe im Ziel
+    tragen (die Hauptdatei zuerst). Ein Nachzuegler - etwa ein Sidecar, dessen
+    Kopie einmal scheiterte - muss ihn auch bekommen, sonst liegt er neben
+    einer fremden Aufnahme gleichen Namens."""
+    gruppe = zeile["gruppe"]
+    if not gruppe:
+        return 0
+    stamm = _stamm(zeile)
+    # Beide Werte so, wie sie in der Datenbank stehen (auch in roher Form).
+    mitglieder = sorted(dbank.gruppe_zeilen(zeile["quellwurzel"], gruppe),
+                        key=lambda g: g["quellpfad"] != gruppe)
+    for g in mitglieder:
+        if g["quellpfad"] == zeile["quellpfad"] or g["status"] not in _ABGELEGT or not g["zielpfad"]:
+            continue
+        k = _anhang_aus_namen(Path(db.text_pfad(g["quellpfad"])).name, Path(db.text_pfad(g["zielpfad"])).name, stamm)
+        if k is not None:
+            return k
+    return 0
+
+
+def _neuer_zielpfad(struktur, dbank: db.Datenbank, zeile, konf) -> Path:
+    """Zielname einer wieder freigegebenen Zeile: aus den gespeicherten Feldern
+    neu berechnet, mit dem Anhang ihrer Gruppe."""
+    from . import analyse
+
+    neu = analyse.zielpfad_aus_zeile(struktur, zeile, konf)
+    return mit_anhang(neu, _gruppen_anhang(dbank, zeile), _stamm(zeile))
+
+
 def _L(p: Path) -> Path:
     return pfade.lang(p)
 
@@ -1110,9 +1159,9 @@ def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: in
     Partnerdatei eines Duplikats; der berechnete Name wird aus den
     gespeicherten Feldern neu bestimmt. Die fehlerhafte Zieldatei bleibt
     liegen ("Niemals ueberschreiben"): Die frische Kopie bekommt bei
-    belegtem Namen den Anhang _1.
+    belegtem Namen den Anhang _1. Ein Gruppenmitglied behaelt den Anhang
+    seiner Gruppe (_gruppen_anhang).
     """
-    from . import analyse
     from . import ziel as ziel_modul
 
     zeilen = dbank.zeilen_mit_fehlergrund(meldungen.GRUND_PRUEFUNG)
@@ -1125,7 +1174,7 @@ def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: in
             # Keine Quelle mehr (verschoben oder verschwunden): Es gibt nichts,
             # was neu kopiert werden koennte. Bleibt Fehler, steht im Bericht.
             continue
-        neu = analyse.zielpfad_aus_zeile(struktur, z, konf)
+        neu = _neuer_zielpfad(struktur, dbank, z, konf)
         dbank.zurueck_auf_analysiert(z["quellpfad"], neu)
         dbank.ereignis(lauf, ART_NEU_NACH_PRUEFUNG, z["quellpfad"], 1, meldungen.EREIGNIS_NEU_NACH_PRUEFUNG)
         freigegeben += 1
@@ -1145,7 +1194,6 @@ def _nach_fehler_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: int)
     gespeicherten Feldern neu berechnet. Veraendert: zurueck auf gefunden,
     die naechste Analyse ordnet sie neu ein. Im Ziel wird nichts angefasst;
     ein inhaltsgleiches Stueck dort wird wie immer als Duplikat erkannt."""
-    from . import analyse
     from . import ziel as ziel_modul
 
     struktur = None
@@ -1158,7 +1206,7 @@ def _nach_fehler_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: int)
             if st.st_size == int(z["groesse"]) and db._gleiche_zeit(st.st_mtime, z["mtime"]):
                 if struktur is None:
                     struktur = ziel_modul.Zielstruktur(ziel)
-                dbank.zurueck_auf_analysiert(z["quellpfad"], analyse.zielpfad_aus_zeile(struktur, z, konf))
+                dbank.zurueck_auf_analysiert(z["quellpfad"], _neuer_zielpfad(struktur, dbank, z, konf))
                 dbank.status_setzen(z["quellpfad"], "analysiert")   # Grund leeren
             else:
                 dbank.zurueck_auf_gefunden(z["quellpfad"], st.st_size, st.st_mtime)

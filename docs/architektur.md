@@ -1,6 +1,8 @@
-# Architekturvorschlag
+# Architektur
 
-Vorschlag aus Prompt 0, noch nichts davon gebaut. Grundlage ist [`SPEC.md`](SPEC.md).
+Architektur von fotosort, Stand v0.7 (Phasen 1 bis 7 und der Feinschliff aus Prompt 9 gebaut;
+Phase 8, der Server, steht aus). Ursprünglich der Vorschlag aus Prompt 0. Grundlage ist
+[`SPEC.md`](SPEC.md).
 Alle elf Punkte aus [`offene_fragen.md`](offene_fragen.md) sind entschieden und hier
 eingearbeitet. Diese Datei erklärt und begründet die SPEC, sie ersetzt sie nicht: bei einem
 Widerspruch gilt die SPEC.
@@ -35,7 +37,7 @@ Culling/ (Repository-Wurzel)
 │  ├─ analyse.py             Phase 2: Gruppen, Metadaten, Datum, Ziel je Datei
 │  ├─ metadaten.py           ExifTool-Pool (-stay_open); Videos ohne -fast2; Prozesszahl nach Profil, gestaffelter Start;
 │  │                          Start über perl.exe + exiftool.pl, wo die Windows-Fassung das erlaubt (exiftool_befehl)
-│  ├─ prozesse.py            Popen-Argumente für Hilfsprozesse: unter Windows kein Konsolenfenster (CREATE_NO_WINDOW, SW_HIDE)
+│  ├─ prozesse.py            Popen-Argumente für Hilfsprozesse: unter Windows kein Konsolenfenster (CREATE_NO_WINDOW, SW_HIDE); Startzeit; Prozessbaum beenden (Windows: nur echte Nachkommen)
 │  ├─ datum.py               Aufnahmedatum bestimmen        ← reine Logik
 │  ├─ kamera.py              Modell → Ordnername, Aliase    ← reine Logik
 │  ├─ dateitypen.py          Dateityp, Sidecar-Zuordnung    ← reine Logik
@@ -44,10 +46,11 @@ Culling/ (Repository-Wurzel)
 │  ├─ hashes.py              BLAKE3-Prüfsummen, Byte-Vergleich
 │  ├─ kopieren.py            Phase 3: übertragen
 │  ├─ pruefen.py             Phase 4: nachrechnen
+│  ├─ nachpruefen.py         pruefen --alles: das ganze Archiv erneut lesen; Prüfsummen-Liste pruefsummen.b3
 │  ├─ zielindex.py            fotosort ziel-index --neu-aufbauen: das Ziel vollstaendig lesen, Index neu (SPEC §6, §8), fortsetzbar
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
-│  ├─ fortschritt.py         laufende Anzeige (Kopieren, Prüfen)
+│  ├─ fortschritt.py         laufende Anzeige (Analyse, Kopieren, Prüfen, Aufräumen, Neueinlesen)
 │  ├─ restzeit.py            Restzeit: erst nach 60 s und 3 %, gleitende Minute, 5-s-Takt, abgerundet (Fenster und Konsole)
 │  ├─ bericht.py             Text- und CSV-Bericht
 │  ├─ messen.py              fotosort messen: Lese-/Schreibtempo, Profilvorschlag (Phase 6)
@@ -130,14 +133,15 @@ ersten beiden gelten für alle Sidecar-Endungen; die dritte fängt die Sony-Vide
 die sonst durchfallen würden. `gruppen.py` benutzt das Ergebnis, um Gruppen zu bilden; die
 Einordnung selbst bleibt reine Logik und damit in Sekunden durchtestbar.
 
-`aufraeumen.py` ist das einzige Modul, das löscht. Bei Quelldateien aus dem Bestand der
-Datenbank fragt es vor jeder Datei den Status ab und arbeitet ausschließlich mit `geprueft`
-und `duplikat_bestaetigt`; jeder andere Status führt dazu, dass die Datei stehen bleibt. Der
-Status allein reicht nicht — dazu kommt die Frischlesung **beider** Dateien im aktuellen
-Lauf, der Quelldatei wie der Zieldatei (SPEC §5, Begründung in 4.10). Davon getrennt und eng
-begrenzt sind die beiden Dateiarten, die nie in der Datenbank stehen: die Reste-Dateien aus
-Phase 6 und liegengebliebene `.part`-Dateien. Gebaut wird das Modul trotzdem erst in seiner
-eigenen Phase.
+`loeschen.py` ist die einzige Stelle, an der eine Quelldatei entfernt wird
+(`quelldatei_entfernen`). Aufgerufen wird sie von `aufraeumen.py` und von `kopieren.py` im
+Verschieben-Modus; sie prüft Status (`geprueft`, `duplikat_bestaetigt`), die Frischlesung
+**beider** Dateien im laufenden Lauf und beide Hashes selbst an der frisch gelesenen Zeile und
+vertraut keinem Aufrufer (SPEC §5, Begründung in 4.10). Davon getrennt und eng begrenzt sind
+die beiden Dateiarten, die nie in der Datenbank stehen: die Reste-Dateien aus Phase 6
+(`aufraeumen.py`, vor jeder Löschung gegen die Datenbank geprüft) und liegengebliebene
+`.part`-Dateien (`kopieren.py`). `nachpruefen.py` (`pruefen --alles`) liest das Archiv nur und
+nimmt Zeilen höchstens die Löschberechtigung – es löscht nie.
 
 ---
 
@@ -187,8 +191,9 @@ eine vorhandene, aber unlesbare ID nie durch eine neue ersetzt, sondern führt z
 Eine neue ID zeigte auf eine neue, leere Datenbank, das Programm hielte das Ziel für leer und
 kopierte alles noch einmal.
 
-Im Ziel liegen unter `.fotosortierer/` nur drei Dinge: die Archiv-ID, die Berichte und nach
-jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank. Die Dateinamen und das
+Im Ziel liegen unter `.fotosortierer/` nur fünf Dinge: die Archiv-ID, die Berichte, nach
+jeder abgeschlossenen Phase eine Sicherungskopie der Datenbank, die Kopie der `config.toml` und
+nach jedem Prüfen die Prüfsummen-Liste `pruefsummen.b3` (Format von `b3sum`). Die Dateinamen und das
 Verfahren mit genau zwei aufbewahrten Ständen stehen in SPEC §6. Hier steht, warum es die
 SQLite-Backup-Funktion sein muss und kein einfaches Kopieren der Datei: Nur sie erzeugt von
 einer Datenbank, die gerade benutzt wird, eine in sich stimmige Kopie; ein Dateikopiervorgang
@@ -205,11 +210,14 @@ Die Spalten sind dieselben wie in SPEC §6; hier steht zu jeder, wofür sie gebr
 | `quellpfad` | absoluter, aufgelöster Pfad der Quelldatei. Er ist eindeutig und damit der Schlüssel der Tabelle |
 | `quellwurzel` | der beim Scan angegebene Quell-Wurzelordner. Daraus ergibt sich der Pfad relativ zur Wurzel für die Ausschlussmuster — und deshalb muss `--quelle` nur beim Scan angegeben werden (SPEC §8) |
 | `groesse`, `mtime` | Größe und Änderungsdatum beim letzten Scan; zusammen die Grundlage der Änderungserkennung beim zweiten Scan |
-| `dateityp` | `foto`, `raw`, `video` oder `sidecar`. Nur diese vier gelten als echter Dateityp; daran hängt, dass keine Datei aus dem Bestand der Datenbank je als Reste-Datei durchgeht (SPEC §5) |
+| `dateityp` | `foto`, `raw`, `video`, `sidecar` oder `sonstiges`. Nur die ersten vier gelten als echter Dateityp; daran hängt, dass keine Datei aus dem Bestand der Datenbank je als Reste-Datei durchgeht (SPEC §5) |
 | `gruppe` | Kennung der zusammengehörigen Dateien (RAW+JPG+Sidecars). Alle Dateien einer Gruppe bekommen denselben Zielordner und denselben Namensanhang |
 | `hash` | BLAKE3-Prüfsumme der Quelldatei, wird beim Kopieren nebenbei berechnet; bei umbenannten Dateien erst in der Prüf-Phase aus der Zieldatei. Leer, solange die Datei noch nicht gelesen wurde |
 | `kamera` | fertiger Ordnername nach der Alias-Tabelle, z. B. `A7C2` |
 | `kamera_modell` | roher Modellname aus den Metadaten, für die Liste der gefundenen Modelle |
+| `schreibpfad` | die Datei, in die gerade geschrieben wird (`.part` oder im Rückfall der Endname); nach dem Aufräumen in den Papierkorb der Ort im Ordner `_geloescht_` |
+| `kopiert_in_lauf` | Lauf des Anspruchs (Status `kopieren_laeuft`), für das Aufräumen nach einem Absturz (SPEC §5) |
+| `umbenannt` | 1, wenn der Anspruch ein Umbenennen im Verschieben-Modus ist; trennt nach einem Absturz ein fertiges Umbenennen von einer abgebrochenen Kopie |
 | `aufnahme_zeit` | ermitteltes Datum mit Uhrzeit, als Ortszeit; daraus werden die Ordner gebildet |
 | `datum_quelle` | welche der sechs Datumsquellen aus SPEC §3 gewonnen hat, als Zahl 1 bis 6 |
 | `datum_sicher` | 0 oder 1. Unsicher ist ausschließlich das Datum aus Quelle 6; das steuert `_Ohne_Datum/` |
@@ -305,10 +313,11 @@ Dateien (`verschoben`) wird der Hash hier in der Prüf-Phase nachgetragen.
 
 ### Tabelle `laeufe` — Verlauf
 
-Eine Zeile je Programmstart: `nummer`, `befehl`, `start`, `ende` (SPEC §6). Die `nummer` ist
-der Wert, der in `bestaetigt_in_lauf`, `gefunden_in_lauf` und `zuletzt_gesehen_in_lauf` steht
-— deshalb braucht ein Lauf überhaupt eine Nummer. Stürzt das Programm ab oder wird es mit
-Strg+C beendet, bleibt `ende` leer; daran ist ein abgebrochener Lauf später erkennbar. Aus
+Eine Zeile je verändernden Befehl: `nummer`, `befehl`, `start`, `ende`, `zusammenfassung`
+(SPEC §6). Die `nummer` ist der Wert, der in `bestaetigt_in_lauf`, `gefunden_in_lauf` und
+`zuletzt_gesehen_in_lauf` steht — deshalb braucht ein Lauf überhaupt eine Nummer. Ein mit
+Strg+C geordnet beendeter Lauf bekommt ein `ende` und das Ereignis `abgebrochen`, aber keine
+Zusammenfassung; stürzt das Programm ab, bleibt `ende` leer. Aus
 diesen Zeilen entsteht der Verlauf im Bericht, und Geschwindigkeitsmessungen zwischen
 verschiedenen Einstellungen lassen sich vergleichen.
 
@@ -600,16 +609,10 @@ Kopieren geändert". Ohne diesen Test darf nicht gelöscht werden.
 
 ---
 
-## 5. Was als Nächstes passiert
+## 5. Wie es weitergeht
 
-Alle elf Punkte aus [`offene_fragen.md`](offene_fragen.md) sind entschieden und in
-[`SPEC.md`](SPEC.md) eingearbeitet. Damit gibt es nichts mehr zu klären, bevor gebaut wird.
-
-Als Nächstes Phase 1 laut [`PROMPTS.md`](PROMPTS.md): Grundgerüst mit `pyproject.toml` und
-dem Befehl `fotosort`, `config.toml`, das SQLite-Schema samt Ziel-Index, das Skript für den
-künstlichen Testbaum (SPEC §11), `fotosort scan` und `fotosort status`, dazu die Prüfungen
-beim Start — ExifTool vorhanden, Ziel nicht in der Quelle und umgekehrt, Datenbankpfad nicht
-auf einem Netzlaufwerk.
+Offene Punkte und Entscheidungen für den Nutzer stehen in [`todo.md`](todo.md); als Nächstes
+steht Prompt 8 an (Server im Container auf TrueNAS, [`PROMPTS.md`](PROMPTS.md)).
 
 Entwickelt und getestet wird im Linux-Container mit dem künstlichen Testbaum; ExifTool ist
 dort installiert. Echte Fotos bleiben außen vor (`CLAUDE.md`, SPEC §11).

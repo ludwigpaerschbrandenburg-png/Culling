@@ -305,9 +305,8 @@ Regel); eine spätere Beschleunigung wäre, die zweite Lesung samt `unlink` in d
 - **`fotosort messen` schreibt mit `fsync`** (jede Messdatei wird wirklich auf die Platte
   gebracht), damit der Zwischenspeicher das Schreibtempo nicht schönt; das Lesen nutzt je Stufe
   andere Dateien. Beim ersten Durchlauf kann der Cache trotzdem mitspielen — zweimal messen.
-- **Nicht gebaut (bewusst, nicht in der Aufgabenliste von Phase 6):** das Zeitlimit für einen
-  hängenden ExifTool-Stapel (siehe Phase 2, „Aus der Abnahme") und die Erkennung zweier
-  Laufwerksbuchstaben auf derselben Platte (unten, ungemessen). Beides bleibt offen.
+- **Nicht gebaut (bewusst):** die Erkennung zweier Laufwerksbuchstaben auf derselben Platte
+  (unten, ungemessen). Das Zeitlimit für hängende ExifTool-Stapel ist inzwischen gebaut (Phase 2).
 
 ### Aus der Prüfung von Phase 6 (ein unabhängiger Prüfer)
 
@@ -603,9 +602,154 @@ Lückenliste (weil aus der SPEC unmittelbar fällig):
       Neuaufbau 9,3 s (2.167 Dateien/s, 174 MB/s, 4 Hash-Worker); danach Scan, Analyse und
       Kopieren erneut: 0 kopiert, 20.096 als Duplikat erkannt, Zahl der Dateien im Ziel unverändert.
 
+### Runde 1, zweiter Teil: Befunde der Fehlersuche und Lücken der Kategorie A
+
+Grundlage: Code-Karte je Modul, Recherche zu bezahlten Einlese-, Sortier- und Duplikat-Werkzeugen
+und sieben Fehlersuchen (Verlustpfade, Windows/Netz/Dateinamen, Absturz/Fortsetzen, Datum/Kamera
+mit echten Kamera- und Handy-Dateiformaten, Bedienung, Tempo/Speicher, Doku). Jeder Punkt mit Test.
+
+**Datensicherheit** (Commit 84efb4f)
+- [x] Kopie mit `fsync` vor dem Schließen, kurze Schreibvorgänge fortgesetzt, Länge nachgeprüft;
+      Zielordner nach dem Umbenennen gesichert (Windows: `MOVEFILE_WRITE_THROUGH`).
+- [x] Datenbank mit `synchronous=FULL`; Linux: `renameat2` mit `RENAME_NOREPLACE`.
+- [x] Ziel über einen zweiten Weg (zweite Einhängung) an der Archiv-Kennung erkannt.
+- [x] Papierkorb-Rückfall hält die Quelle vor dem Entfernen gegen die Frischlesung.
+- [x] Archivsperre, die sich nicht nehmen lässt: Abbruch statt still ohne.
+
+**Robustheit** (Commit af6d000)
+- [x] Abgestürztes ExifTool wird ersetzt; nach 5 Abstürzen in Folge wird aufgegeben.
+- [x] Vorübergehende Fehler (Datei fehlte, ExifTool abgestürzt/Zeitlimit, Lese-/Schreibfehler)
+      werden beim nächsten Lauf von selbst erneut versucht (Ereignis `neu_nach_fehler`).
+- [x] Quelle mitten im Kopieren abgezogen: Dateien bleiben offen statt `fehler`.
+- [x] „Sofort beenden" beendet den Prozessbaum und fasst nach 5 s hart nach.
+- [x] Statusdateien unter Windows mit Wiederholung; `wiederherstellen --ersetzen` sperrt zuerst.
+- [x] Beschädigte Datenbank: verständliche Meldung, im Fenster „Datenbank zurückholen" mit
+      Aufheben der beschädigten Datei.
+- [x] Windows: schreibgeschützte Quelldateien werden nach allen Prüfungen entfernt; gesperrte
+      `Thumbs.db` hält nur ihren Ordner auf; Zielnamen in Arbeit ohne Groß-/Kleinschreibung.
+
+**Bedienung und Tempo** (Commit 91c8354)
+- [x] Fenstergröße an kleine Bildschirme angepasst, Wartezeiger und gesperrte Knöpfe, keine
+      Restzeit nach dem Ende, „Nicht fertig geworden" mit Grund, „ZIELORDNER NICHT GEFUNDEN",
+      eigene Fenstertexte, ExifTool „nicht gefunden" getrennt von „startet nicht",
+      Tausenderpunkte, deutsche Kommandozeilen-Hilfe.
+- [x] Passende Indizes für die Seitenabfragen (vorher quadratisch), `ordner_inhalt` filtert in
+      SQL, zweiter Scan schreibt die Quellwurzel nur bei Änderung, Archivstand im Fenster nur
+      einmal gerechnet, Sicherung lokal und dann am Stück ins Ziel, Bericht mit Cursor,
+      Analyse überlappt Seiten, Ziel-Index meldet beim Durchsuchen Fortschritt.
+
+**Datum, Kamera, Windows** (Commit 8b512ab)
+- [x] Dateinamen von Signal und macOS-Bildschirmfotos mit Uhrzeit; PNG/HEIC/HEIF/CR3/AVIF ohne
+      `-fast2`; Modell „1.10" bleibt Text; Windows-sichere Ordnernamen (CON, NUL, Punkt am Ende);
+      Unicode-Form (NFD) vorhandener Ordner; Warten bei Virenscanner-Sperren; Netzabbruch beim
+      Aufräumen trägt nichts nach; Schreibprobe vor dem Kopieren; langes Präfix für
+      Hilfsdateien; übersprungene Dateien nach Endung im Bericht.
+
+**Doku-Befunde im Code** (Commit 17b4d6f) und **neue Funktionen** (Commit 04d3fda)
+- [x] Profil-Texte ehrlich, Analyse mit Restzeit in der Konsole, `dateien.csv` mit allen
+      Spalten, Texte zentral in `meldungen.py`, Modulköpfe aktuell.
+- [x] **`pruefen --alles` / „Archiv nachprüfen…"**: das ganze Archiv erneut lesen (Bitfäule,
+      veränderte oder verschwundene Archivdateien); mit Quelle neu kopieren, ohne Quelle laut melden.
+- [x] **Prüfsummen-Liste** `.fotosortierer/pruefsummen.b3` (Format von `b3sum`) nach jedem Prüfen.
+- [x] **Hilfe** im Fenster (Knopf und F1), **Taskleisten-Hinweis** am Ende eines Schritts.
+- [x] Rückgabewerte in der LIESMICH beschrieben.
+
+**Aus der Prüfung von Runde 1** (zwei unabhängige Prüfer: Verlustpfade, Windows/Regressionen;
+je Befund zuerst ein Test)
+- [x] **Nachprüfen sah die Quelle nur am Status:** Karte selbst formatiert, dann Archivdatei
+      kaputt – gemeldet wurde „wird neu kopiert", obwohl nichts mehr zu kopieren war. Jetzt wird
+      nachgesehen; „Quelle liegt nicht mehr am alten Ort" bzw. der Pfad im Ordner `_geloescht_`.
+- [x] **Nachprüfen je Zeile statt „größter Hash":** Zwei Zeilen mit verschiedenem Inhalt auf
+      einer Archivdatei ergaben mal einen Fehlalarm, mal einen verschwiegenen Verlust.
+- [x] **Ziel mitten im Prüfen weg** (Platte eingeschlafen): Abbruch ohne Umstellen statt
+      tausendfach „fehlt" – im normalen `pruefen` und in `pruefen --alles`.
+- [x] **Umbenennen im Rückfall `link` + `unlink`** entfernt nie den letzten Namen einer Datei
+      (alter Name schon weg, NFS-Wiederholung, alter Name inzwischen eine andere Datei).
+- [x] **Löschen nach Windows-Sperre:** vor jedem weiteren Versuch die Quelle erneut gegen die
+      Frischlesung halten – wer sperrt, schreibt vielleicht gerade hinein.
+- [x] **Nachzügler einer Gruppe** (Sidecar nach vorübergehendem Fehler) bekommt den Anhang seiner
+      Gruppe, statt neben einer fremden Aufnahme gleichen Namens zu landen.
+- [x] **Prüfsummen-Liste bei anderer Schreibweise des Ziels** (relativ, Verknüpfung, Windows
+      Groß-/Kleinschreibung): dieselbe Liste; passt eine Zeile nicht, bleibt die alte stehen.
+- [x] **Sicherung ins Ziel:** Fehler 5 beim Ersetzen wird abgewartet, die lokale Zwischendatei
+      verdirbt keine gelungene Sicherung, eine misslungene Sicherung ist eine Warnung und der
+      Bericht kommt trotzdem.
+- [x] **Wartezeit bei Windows-Sperren** jetzt 15 s wie in SPEC §5 (vorher 4,5 s).
+- [x] **Windows-Gerätenamen:** „_" direkt hinter den Gerätenamen („LPT9_.x"), dazu COM¹–³,
+      LPT¹–³, CONIN$, CONOUT$.
+- [x] **Startzeit unter Linux** ab dem Hochfahren statt nach der Uhr (nach Uhrsprung galt der
+      lebende Arbeitsprozess als abgestürzt).
+- [x] **„Sofort beenden" unter Windows ohne `taskkill /T`:** eigene Prozessliste, nur Prozesse,
+      die nach ihrem Elternprozess entstanden (sonst konnte eine wiederverwendete Nummer das
+      Fenster selbst treffen). Unter Windows nur in der CI geprüft.
+- [x] **Relative Pfade** im Fenster (`fenster --durchlauf ../Ziel`) werden fest gemacht; der
+      Arbeitsprozess läuft in einem anderen Ordner. Der künstliche Testbaum legt seine
+      Verknüpfung jetzt auch bei relativem Pfad richtig an.
+- [x] Tests für Windows-Zweige, die sich unter Linux nachbauen lassen (MoveFileExW mit
+      nachgebautem kernel32, Schreibschutz-Attribut, Bildschirmfotos 1180×800).
+
+**Bewusst nicht gebaut in Runde 1**
+- **Platten-Syncs bündeln** (Tempo-Befund): Beim Aufräumen und beim Verschieben auf demselben
+  Laufwerk wird je Datei einzeln festgeschrieben (`synchronous=FULL`), nach jedem Umbenennen
+  der Ordner gesichert. Im Container kostet das Minuten je Million Dateien, auf einer echten
+  Festplatte vermutlich Stunden. Plan: K Dateien je Festschreiben, Ordner-`fsync` einmal je
+  Zielordner und Runde, vor dem Festschreiben des Status und vor jeder Löschung. Es berührt die
+  Regel „vor dem Löschen nachweislich auf der Platte" – erst auf dem Ryzen und gegen TrueNAS
+  messen, dann bauen.
+- Die Erkennung zweier Laufwerksbuchstaben auf derselben Platte (siehe Phase 6).
+
 ### Entscheidungen für den Nutzer
 
-(werden nach der Lückenliste ergänzt)
+Jeder Punkt hat eine Empfehlung; gebaut wird erst nach Zustimmung.
+
+1. **Hash-Worker nach Profil?** Die SPEC ist widersprüchlich: §4/§8 sagen „mit den Hash-Workern
+   des Profils", §9 sagt „0 = Anzahl Kerne". Heute liest `pruefen` auf einer Festplatte mit so
+   vielen Strängen, wie der Prozessor Kerne hat – auf einer Festplatte meist langsamer.
+   *Empfehlung:* bei `hash_worker = 0` nach Profil: hdd 2, netzwerk 4, ssd Kerne.
+2. **Gruppenmitglieder mitlesen?** Gruppiert wird nur nach dem Stammnamen. `IMG_0001.JPG` von 2016
+   und `IMG_0001.MOV` von 2021 (Zähler neu begonnen) landen zusammen im Ordner von 2016.
+   *Empfehlung:* Mitglieder mit Foto-/RAW-/Videotyp mitlesen (billig) und nur gruppieren, wenn
+   die Aufnahmezeiten nah beieinander liegen (±5 s, Live Photos ±3 s); sonst eigene Hauptdatei,
+   Ereignis `gruppe_getrennt`.
+3. **Kaputte Hauptdatei:** Eine 0-Byte-ARW zieht das gesunde JPG auf `fehler`, eine RAW ohne
+   Datum schickt das JPG nach `_Ohne_Datum`. *Empfehlung:* dann das nächste Mitglied zur
+   Hauptdatei machen, nur die kaputte Datei auf `fehler` (setzt Punkt 2 voraus).
+4. **Kameras, die Ortszeit statt Weltzeit schreiben** (GoPro u. a.): Videos werden um 1–2 h
+   verschoben, nachts in den falschen Tag. *Empfehlung:* Liste `datum.ortszeit_hersteller`
+   (Standard `["GoPro"]`), bei der `CreateDate` als Ortszeit gilt.
+5. **Weitere Datumsquellen:** XMP `DateCreated`, PNG `CreationTime` und das Datum aus einem
+   `.xmp`-Sidecar werden nicht gelesen (Scan-TIFF mit Lightroom-Datum landet in `_Ohne_Datum`).
+   *Empfehlung:* als Unterpunkte von Quelle 4, das `.xmp` nur, wenn Quellen 1–4 nichts liefern.
+6. **„Z" (Weltzeit) in DateTimeOriginal bei Videos** wird als Ortszeit genommen.
+   *Empfehlung:* wie Quelle 3 umrechnen und kennzeichnen.
+7. **Nur Hersteller, kein Modell:** heute „Unbekannte_Kamera". *Empfehlung:* so lassen (ein
+   Ordner „Canon" wäre irreführend), aber im Bericht zählen.
+8. **Weitere Endungen in der Standardliste:** `.3gp`, `.m4v` (alte Handys, Videos), `.heif`,
+   `.avif`, `.insv`/`.insp` (Insta360), `.gpr` (GoPro RAW); als Sidecar `.lrv`, `.srt`.
+   Heute werden sie übersprungen (der Bericht zählt sie jetzt nach Endung).
+   *Empfehlung:* `.3gp`, `.m4v`, `.heif`, `.avif`, `.insv`, `.insp`, `.gpr` aufnehmen.
+9. **Auffällige Kamerauhr melden:** Ein Datum 2000-01-01 (leerer Uhrenakku) gilt als sicher.
+   *Empfehlung:* Berichtsliste „Datum auffällig" (weicht stark vom Dateinamen oder
+   Änderungsdatum ab), ohne umzusortieren.
+10. **Berichte begrenzen:** SPEC §10 verlangt nach jedem Lauf den ganzen Bericht; bei einer
+    Million Dateien sind das ~350 MB je Lauf, ~1,7 GB je Durchgang, nie aufgeräumt.
+    *Empfehlung:* nur die letzten 10 Berichte behalten, CSV gepackt (`.csv.gz`), lange Listen im
+    Text auf 1.000 Zeilen kürzen (vollständig in der CSV).
+11. **Namen ohne Groß-/Kleinschreibung auch auf Linux eindeutig?** Auf einem Linux-Ziel dürfen
+    `IMG.JPG` und `img.jpg` im selben Ordner liegen – über SMB unter Windows ist dann eine davon
+    nicht erreichbar. *Empfehlung:* Zielnamen immer ohne Groß-/Kleinschreibung eindeutig machen
+    (zweite bekommt `_1`).
+12. **Mindestgröße des Fensters:** Auf einem Bildschirm unter 1040×700 (SPEC §8) wird die
+    Mindestgröße jetzt verkleinert, sonst lägen die Knöpfe außerhalb. *Empfehlung:* so lassen
+    und die SPEC entsprechend fassen.
+13. **CLAUDE.md:** Die Liste der Statuswerte nennt `kopieren_laeuft` nicht (SPEC und Code
+    kennen elf Werte). *Empfehlung:* ergänzen – es ist deine Regeldatei, deshalb nicht von mir
+    geändert.
+14. **Papierkorb zurücklegen:** Ein Befehl, der den Ordner `_geloescht_<Datum>` an die
+    ursprünglichen Orte zurücklegt. Heute geht das von Hand (es ist ein normaler Ordner).
+    *Empfehlung:* erst bauen, wenn es gebraucht wird.
+15. **Außerhalb des Auftrags (Art des Programms):** Bilder bewerten/aussortieren (Culling im
+    engeren Sinn), Dateien umbenennen, mehrere Ziele zugleich, Ähnlichkeitssuche. Nicht gebaut.
 
 ---
 

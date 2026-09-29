@@ -104,6 +104,21 @@ def test_ziel_und_einstellungen_werden_gemerkt(ob, tmp_path, ziel):
     assert neu.ziel == str(ziel) and neu.verschieben is True and neu.profil == "ssd"
 
 
+def test_relative_pfade_werden_fest_gemacht(tmp_path, quelle, ziel, monkeypatch):
+    """Der Arbeitsprozess laeuft in einem anderen Ordner als das Fenster. Ein
+    relativer Pfad ("../Ziel") zeigte dort woanders hin: Der Schritt fand seine
+    Statusdatei nicht und galt als abgestuerzt. Also alles vorher fest machen."""
+    monkeypatch.chdir(tmp_path)
+    ab = ablauf_modul.Ablauf(ziel=os.path.relpath(ziel), ordner=Path("oberflaeche"),
+                             config_pfad="eigene.toml")
+    assert ab.ordner.is_absolute() and ab.status_datei.is_absolute()
+    assert Path(ab.ziel) == ziel and Path(ab.config_pfad) == tmp_path / "eigene.toml"
+    ab.ziel_setzen(os.path.relpath(ziel))
+    assert Path(ab.ziel) == ziel
+    ab.quelle_hinzufuegen(os.path.relpath(quelle))
+    assert [Path(q) for q in ab.quellen] == [quelle]
+
+
 def test_quelle_wird_geprueft_wie_im_gefuehrten_modus(ob, quelle, ziel, tmp_path):
     ab, client = ob
     _post(client, "/api/ziel", {"ziel": str(ziel)})

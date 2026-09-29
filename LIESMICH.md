@@ -119,7 +119,7 @@ Auf der Startseite tragen Sie ein:
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
 | **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
 | **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
-| **Zielordner liegt auf** | „hdd" lassen (Festplatte); bei einer SSD oder einem Netzlaufwerk das Passende wählen. Das steuert nur, wie viele Dateien gleichzeitig kopiert werden. |
+| **Quelle und Ziel liegen auf** | „hdd" lassen, sobald Quelle **oder** Ziel auf einer normalen Festplatte liegt; „ssd" nur, wenn beide auf SSDs liegen; „netzwerk" bei einem Netzlaufwerk. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
 
 Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
 dessen Stand und die bekannten Quellen, und **„Weitermachen"** springt zum offenen Schritt, ohne
@@ -207,6 +207,29 @@ dem der Quelldatei verglichen. Ausgabe: **geprüft (Zieldatei stimmt)** und, fal
 etwas nicht stimmt, **Fehler** mit Grund. Eine fehlerhafte Kopie wird nie gelöscht
 oder überschrieben; ein erneutes Kopieren legt eine frische Kopie daneben.
 
+Danach legt das Programm neben das Archiv eine **Prüfsummen-Liste**
+(`<Ziel>\.fotosortierer\pruefsummen.b3`): je Archivdatei ihr Fingerabdruck. Das Format ist
+das des kleinen, freien Werkzeugs `b3sum` – so lässt sich das Archiv auch in vielen Jahren noch
+ohne fotosort prüfen (`b3sum --check pruefsummen.b3` im Zielordner).
+
+**Archiv nachprüfen:** Ein Archiv lebt Jahre, und Festplatten altern. Der Knopf **„Archiv
+nachprüfen…"** unten in der Übersicht (im schwarzen Fenster: `fotosort.bat pruefen --alles`)
+liest **jede** schon geprüfte Datei im Archiv erneut und vergleicht sie mit ihrem
+Fingerabdruck. Im Archiv wird dabei nichts verändert. Findet es eine veränderte oder
+verschwundene Datei, sieht es nach, wo das Original ist, und sagt es Ihnen:
+
+- **Original liegt noch in der Quelle:** Beim nächsten Kopieren kommt eine frische Kopie daneben.
+- **„Quelle liegt nicht mehr am alten Ort":** Das Original ist nicht dort, wo es beim Kopieren
+  lag – vielleicht ist die Karte oder Platte gerade nicht angeschlossen. Anschließen und
+  kopieren; sonst aus der eigenen Sicherung holen.
+- **„Original liegt noch im Papierkorb der Quelle":** Es liegt im Ordner `_geloescht_…` der
+  Quelle (der Pfad steht dabei) – von dort zurückholen.
+- **„Quelle schon gelöscht":** Dann hilft nur die eigene Sicherung.
+
+Ist mitten im Nachprüfen das ganze Archiv weg (Platte eingeschlafen oder abgezogen), bricht
+es ab und stellt nichts um – anschließen und noch einmal starten. Empfehlung: etwa einmal im
+Jahr und immer, bevor Sie eine Platte weitergeben oder die Sicherung erneuern.
+
 ### Schritt 5: Quelle aufräumen
 
 Das Aufräumen ist die Karte rechts in der Übersicht. Sie zeigt je Quellordner, wie viele
@@ -266,6 +289,7 @@ fotosort.bat kopieren   --ziel D:\Archiv --dry-run          (nur zeigen, was pas
 fotosort.bat kopieren   --ziel D:\Archiv
 fotosort.bat kopieren   --ziel D:\Archiv --verschieben      (Original nach gelungener Pruefung loeschen)
 fotosort.bat pruefen    --ziel D:\Archiv
+fotosort.bat pruefen    --ziel D:\Archiv --alles             (danach das ganze Archiv erneut lesen: Archiv nachpruefen)
 fotosort.bat aufraeumen --ziel D:\Archiv --dry-run          (Liste zeigen, nichts tun)
 fotosort.bat aufraeumen --ziel D:\Archiv                    (in den Ordner _geloescht_<Datum>)
 fotosort.bat aufraeumen --ziel D:\Archiv --endgueltig       (wirklich loeschen)
@@ -293,9 +317,14 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
   Netzlaufwerk gilt nie als „gleiches Laufwerk".
 - `aufraeumen --quelle D:\Chaos` beschränkt das Aufräumen auf diese eine Quelle;
   ohne Angabe wird je Quelle einzeln gefragt.
-- `--profil hdd|ssd|netzwerk`, `--kopier-worker N`, `--hash-worker N` bestimmen, wie
-  viele Dateien gleichzeitig kopiert bzw. gelesen werden. Was auf Ihrem Rechner am
-  besten ist, sagt `fotosort.bat messen`.
+- `--profil hdd|ssd|netzwerk` bestimmt beim Kopieren, wie viele Dateien gleichzeitig kopiert
+  werden, und bei der Analyse die Zahl der ExifTool-Programme. Wie viele Dateien gleichzeitig
+  gelesen und geprüft werden (Prüfen, Aufräumen, Archiv neu einlesen), stellt `--hash-worker N`
+  ein (ohne Angabe: so viele wie der Prozessor Kerne hat). Was auf Ihrem Rechner am besten ist,
+  sagt `fotosort.bat messen`.
+- `pruefen --alles` liest nach dem normalen Prüfen das ganze Archiv erneut (siehe Schritt 4,
+  „Archiv nachprüfen"). Rückgabewert 1, wenn eine Archivdatei verändert ist, fehlt oder sich
+  nicht lesen ließ.
 - `messen` legt im Ziel nur einen vorübergehenden Messordner an, der am Ende wieder
   verschwindet, und schlägt am Ende Werte für die Einstellungen vor.
 - `wiederherstellen` holt die Datenbank (das Gedächtnis des Archivs) aus der Sicherungskopie
@@ -311,6 +340,11 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
   Fenster heißt dasselbe „Archiv neu einlesen…" (unten auf der Hauptansicht).
 - `status` nennt am Ende auch, wann die Sicherungskopie im Ziel zuletzt geschrieben wurde und
   wie viele Dateien im Ziel das Programm kennt.
+- `fotosort.bat --help` und `fotosort.bat <befehl> --help` zeigen alle Schalter.
+
+**Rückgabewerte** (für eigene Skripte oder die Aufgabenplanung): `0` alles in Ordnung, `1` es
+gab Fehler (sie stehen im Bericht) oder der Schritt konnte nicht beginnen, `2` eine Angabe
+fehlte, `130` abgebrochen (Strg+C, „Abbrechen").
 
 ---
 
@@ -331,9 +365,14 @@ die Gesamtzahl der Dateien erst am Ende feststeht.
 **Pause** hält
 nach der laufenden Datei an, **Fortsetzen** macht weiter, **Abbrechen** beendet den Schritt
 sauber – das Bisherige bleibt gespeichert, der nächste Lauf macht dort weiter. Reagiert ein
-Schritt nicht auf „Abbrechen", erscheint nach einer Weile „Sofort beenden". Im schwarzen
-Fenster zeigt beim Kopieren und Prüfen eine Zeile dasselbe. Am Ende jeder Phase stehen Dauer
-und Durchsatz.
+Schritt nicht auf „Abbrechen", erscheint nach einer Weile „Sofort beenden"; es beendet auch die
+ExifTool-Programme des Schritts. Im schwarzen Fenster zeigt bei Analyse, Kopieren, Prüfen,
+Aufräumen und dem Neueinlesen eine Zeile dasselbe. Am Ende jeder Phase stehen Dauer und
+Durchsatz. Ist ein Schritt fertig, während Sie in einem anderen Programm arbeiten, blinkt
+fotosort in der Taskleiste.
+
+**Hilfe:** Der Knopf „Hilfe" oben rechts oder die Taste **F1** zeigt diese Anleitung im
+Programm.
 
 Die Listen **Fehler**, **Duplikate** und **Ohne Datum** öffnen sich über die Knöpfe unten in
 der Übersicht – immer seitenweise mit 100 Zeilen (‹ › blättert), nie alles auf einmal.
@@ -507,8 +546,41 @@ Legen Sie **keine** neue Kennung an und löschen Sie die Datei `archiv-id.txt` n
 gälte das Archiv als leer, und alles würde noch einmal kopiert.
 
 **Eine Datei steht auf `fehler`:** Der Grund steht im Bericht. Meist ist die Datei
-nicht lesbar, oder die Kopie stimmte nicht. Die Quelldatei bleibt unangetastet. Nach
-dem Beheben der Ursache (Kabel, Rechte, Platz) einfach `kopieren` erneut aufrufen.
+nicht lesbar, oder die Kopie stimmte nicht. Die Quelldatei bleibt unangetastet. War die Ursache
+vorübergehend – Karte kurz gezogen, Netz weg, ExifTool abgestürzt –, versucht der nächste Lauf
+die Datei **von selbst** erneut, sobald sie wieder da ist (Analyse und Kopieren sagen am Anfang,
+wie viele). Sonst nach dem Beheben der Ursache (Kabel, Rechte, Platz) einfach `kopieren` erneut
+aufrufen.
+
+**Platte abgezogen oder Netz weg mitten im Kopieren oder Aufräumen:** Die restlichen Dateien
+dieser Quelle bleiben offen (nicht „Fehler"), der Lauf nennt die Quelle; nach dem Wieder-
+anstecken macht der nächste Lauf dort weiter. Beim Aufräumen wird für eine nicht erreichbare
+Quelle nichts eingetragen und nichts gelöscht. Verschwindet beim **Prüfen** das Archiv selbst,
+meldet das Programm „Das Ziel ist mitten im Pruefen nicht mehr erreichbar" und stellt nichts
+um – wieder anschließen und das Prüfen noch einmal starten.
+
+**„ACHTUNG: Die Sicherungskopie der Datenbank im Ziel konnte diesmal nicht erneuert werden":**
+Der Schritt selbst ist fertig und gespeichert, auch der Bericht ist geschrieben. Nur die
+Sicherungskopie im Zielordner ist diesmal alt geblieben; der nächste Schritt versucht es erneut.
+Häufige Ursache: Ein Sicherungs- oder Sync-Programm liest gerade den Ordner `.fotosortierer`
+im Ziel, oder die Platte ist voll. Wartet ein Virenscanner oder der Suchindex nur kurz, wartet
+das Programm von selbst bis zu 15 Sekunden.
+
+**„Pruefsummen-Liste nicht erneuert":** Das Archiv wurde unter einem anderen Pfad aufgerufen,
+als beim Kopieren (etwa nach einem Umzug auf eine andere Platte). Die bisherige Liste bleibt
+stehen; den Bildern fehlt nichts.
+
+**„Die Datenbank des Archivs lässt sich nicht lesen – die Datei ist beschädigt":** Die Bilder im
+Archiv sind davon nicht betroffen. Auf der Startseite erscheint „Datenbank zurückholen…"; die
+beschädigte Datei wird dabei unter neuem Namen aufgehoben, nicht gelöscht. Im schwarzen Fenster:
+`fotosort.bat wiederherstellen --ersetzen --ziel D:\Archiv`.
+
+**„ExifTool wurde gefunden, ließ sich aber nicht starten":** Meist hält ein Virenscanner
+`perl.exe` beim ersten Start fest. Noch einmal versuchen; hilft das nicht, die Ausnahme aus
+Abschnitt 1 einrichten.
+
+**„Im Zielordner lässt sich nichts anlegen":** Das Netzlaufwerk ist nur lesend verbunden, es
+fehlen Rechte, oder die Karte hat den Schreibschutz-Schalter. Es wurde nichts kopiert.
 
 **Eine Datei steht nach dem Aufräumen unter „Quelle seit dem Kopieren geändert":**
 Die Datei wurde nach dem Kopieren noch bearbeitet. Sie wurde **nicht** gelöscht. Der
@@ -535,9 +607,19 @@ neben der alten den Anhang `_1`.
   (`perl.exe`) im Hintergrund. Sie öffnen kein eigenes Fenster (seit v0.5). Meldet der
   Virenscanner trotzdem `perl.exe` aus dem Programmordner, ist das ein Fehlalarm auf das
   mitgelieferte ExifTool – Abschnitt 1, „Wenn der Virenscanner anschlägt".
-- **Hängt ExifTool an einer Datei,** wartet das Programm gut eine Minute, beendet es dann und
-  startet es neu; nur diese eine Datei bekommt den Status `fehler` (Grund: Zeitlimit), alle
-  anderen werden normal gelesen.
+- **Hängt ExifTool an einer Datei oder stürzt es ab,** beendet das Programm es und startet es
+  neu (beim Hängen nach gut einer Minute); nur diese eine Datei bekommt den Status `fehler`,
+  alle anderen werden normal gelesen, und der nächste Lauf versucht sie erneut.
+- **Das Archiv über Jahre heil halten:** Etwa einmal im Jahr „Archiv nachprüfen…" laufen lassen
+  (Schritt 4). Das Archiv gehört zusätzlich auf eine zweite Platte oder ins Netz gesichert –
+  fotosort ersetzt keine Sicherung. Die Prüfsummen-Liste `pruefsummen.b3` im Ordner
+  `.fotosortierer` reist mit und prüft auch die Sicherung.
+- **Schreibgeschützte Dateien** (etwa von Speicherkarten, deren Bilder in der Kamera
+  „geschützt" wurden) räumt das Programm unter Windows trotzdem auf – erst nachdem die Kopie im
+  Archiv geprüft ist, und nur genau diese Datei.
+- **Ordnernamen** bleiben unter Windows gültig: Ein Kameramodell wie „CON" oder „LPT9.x" (Namen,
+  die Windows für Geräte reserviert) bekommt direkt dahinter ein „_" („LPT9_.x"); ein Punkt am
+  Ende wird entfernt.
 - **Eigene Ordnervorlage:** Steht `{kamera}` in derselben Ebene wie das Datum
   (`{jahr}-{monat}-{tag} {kamera}`), kann ein Tagesordner mit Zusatz für die falsche
   Kamera wiederverwendet werden. Mit der Standardvorlage passiert das nicht.

@@ -194,14 +194,23 @@ def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle,
     f.close()
 
 
-def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys):
+def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys, monkeypatch):
+    """Mit relativen Pfaden: Der Arbeitsprozess laeuft in einem anderen Ordner
+    als das Fenster - frueher fand er dann seine Statusdatei nicht und der
+    erste Schritt galt als abgestuerzt."""
+    from PySide6.QtGui import QImage
+
+    monkeypatch.chdir(tmp_path)
     fotos = tmp_path / "fotos"
-    rc = cli.main(["fenster", "--durchlauf", str(ziel), str(quelle), "--fotos", str(fotos)])
+    rc = cli.main(["fenster", "--durchlauf", os.path.relpath(ziel), os.path.relpath(quelle), "--fotos", "fotos"])
     aus = capsys.readouterr().out
     assert rc == cli.OK, aus
     assert "Durchlauf bestanden" in aus
     bilder = sorted(p.name for p in fotos.glob("*.png"))
     assert len(bilder) == 12 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "12-dialog-ordner-anlegen.png"
+    # Die Bildschirmfotos fuer die Anleitung zeigen das Fenster in voller Groesse.
+    bild = QImage(str(fotos / "03-uebersicht-nach-scan.png"))
+    assert (bild.width(), bild.height()) == (1180, 800)
 
 
 def test_selbsttest_des_fensters(capsys):
@@ -471,4 +480,22 @@ def test_fertiger_schritt_meldet_sich_in_der_taskleiste(app, tmp_path, monkeypat
     f.poll.start()
     f.lauf_abfragen()
     assert gemeldet == [f]
+    f.close()
+
+
+def test_wartezeiger_laesst_keine_zeitgeber_dazwischen(app, tmp_path, monkeypatch):
+    """Der Wartezeiger darf die Ereignisschleife nicht laufen lassen: Sonst springt
+    ein Zeitgeber (Statusabfrage, Durchlauf) mitten in einen Klick hinein und
+    loest denselben Schritt ein zweites Mal aus."""
+    from PySide6.QtCore import QTimer
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    gefeuert = []
+    t = QTimer()
+    t.setInterval(0)
+    t.timeout.connect(lambda: gefeuert.append(1))
+    t.start()
+    with f.beschaeftigt():
+        assert not gefeuert
+    t.stop()
     f.close()
