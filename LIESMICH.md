@@ -210,7 +210,8 @@ oder überschrieben; ein erneutes Kopieren legt eine frische Kopie daneben.
 Danach legt das Programm neben das Archiv eine **Prüfsummen-Liste**
 (`<Ziel>\.fotosortierer\pruefsummen.b3`): je Archivdatei ihr Fingerabdruck. Das Format ist
 das des kleinen, freien Werkzeugs `b3sum` – so lässt sich das Archiv auch in vielen Jahren noch
-ohne fotosort prüfen (`b3sum --check pruefsummen.b3` im Zielordner).
+ohne fotosort prüfen: im Zielordner `b3sum --check .fotosortierer\pruefsummen.b3` (die Pfade in der
+Liste gelten vom Zielordner aus).
 
 **Archiv nachprüfen:** Ein Archiv lebt Jahre, und Festplatten altern. Der Knopf **„Archiv
 nachprüfen…"** unten in der Übersicht (im schwarzen Fenster: `fotosort.bat pruefen --alles`)
