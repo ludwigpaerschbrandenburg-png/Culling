@@ -725,6 +725,7 @@ def test_geordneter_abbruch_schliesst_den_lauf(
     def scheitern(*args, **kwargs):
         raise FotosortFehler("Abbruch: aus Gruenden")
 
+    echt = cli.scan.ausfuehren_mehrere
     monkeypatch.setattr(cli.scan, "ausfuehren_mehrere", scheitern)
     rueckgabe, ausgabe = _laufen(
         capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel)
@@ -732,7 +733,8 @@ def test_geordneter_abbruch_schliesst_den_lauf(
     assert rueckgabe == cli.FEHLER
     assert "aus Gruenden" in ausgabe
 
-    monkeypatch.undo()
+    # Nicht monkeypatch.undo(): Das naehme auch die Test-Umgebung (Archiv-Ordner) zurueck.
+    monkeypatch.setattr(cli.scan, "ausfuehren_mehrere", echt)
     _, status = _laufen(capsys, "status", "--ziel", str(ziel))
     assert "nicht beendet" not in status
 

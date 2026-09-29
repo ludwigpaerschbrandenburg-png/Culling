@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten, steuerung
+from . import FotosortFehler, dateitypen, db, gruppen, kamera, meldungen, metadaten, pfade, steuerung
 from . import datum as datum_modul
 from . import ziel as ziel_modul
 
@@ -23,6 +23,9 @@ GRUND_METADATEN = "Metadaten nicht lesbar"
 GRUND_ZEILENUMBRUCH = "Zeilenumbruch im Dateinamen - bitte umbenennen"
 GRUND_KEIN_UTF8 = "Dateiname ist kein gueltiges UTF-8 - bitte umbenennen"
 GRUND_HAUPTDATEI = "Hauptdatei"
+
+#: Ereignis: eine Zeile mit voruebergehendem Fehler wird erneut versucht.
+ART_ERNEUT_VERSUCHT = "neu_nach_fehler"
 
 SEITE = 5000
 _ANZEIGE_ALLE = 100
@@ -40,6 +43,8 @@ class Ergebnis:
     stapel: int = 0
     prozesse: int = 0
     zeitlimits: int = 0
+    abstuerze: int = 0
+    erneut_versucht: int = 0         # voruebergehende Fehler frueherer Laeufe
     sekunden: float = 0.0
     abgebrochen: bool = False
     mehrdeutig_gemeldet: set = field(default_factory=set)
@@ -62,6 +67,9 @@ def ausfuehren(
         raise FotosortFehler(meldungen.zeitzone_ungueltig(fehler)) from fehler
     struktur = ziel_modul.Zielstruktur(ziel)
     trenner = os.sep
+    ergebnis.erneut_versucht = _fehler_erneut_versuchen(dbank, lauf)
+    if ergebnis.erneut_versucht and konsole is not None:
+        konsole.print(meldungen.analyse_erneut_versucht(ergebnis.erneut_versucht))
     gesamt = dbank.anzahl_zu_analysieren()
     anzeige = _Anzeige(konsole, gesamt)
 
@@ -93,6 +101,7 @@ def ausfuehren(
             ergebnis.abgebrochen = True
         finally:
             ergebnis.zeitlimits = pool.zeitlimits
+            ergebnis.abstuerze = pool.abstuerze
             dbank.stapel_schreiben()
             anzeige.stop()
 
@@ -134,11 +143,14 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
     felder_von: dict[str, dict] = {}
     stapel = metadaten.stapel_bilden(zu_lesen)
     ergebnis.stapel += len(stapel)
-    for zukunft in [pool.einreichen(s) for s in stapel]:
+    for s, zukunft in [(s, pool.einreichen(s)) for s in stapel]:
         try:
             felder_von.update(zukunft.result())
-        except metadaten.MetadatenFehler:
-            pass  # betroffene Dateien fehlen dann in felder_von -> Status fehler
+        except metadaten.MetadatenFehler as fehler:
+            # Der ganze Stapel ist nicht gelesen: Jede Datei bekommt den Grund
+            # (Status fehler), damit Bericht und naechster Lauf ihn kennen.
+            for pfad, _typ in s:
+                felder_von.setdefault(metadaten.schluessel(pfad), {"Error": str(fehler)})
 
     # 3. Auswerten und schreiben.
     for name, zeile in ohne_haupt:
@@ -246,6 +258,57 @@ def zielpfad_aus_zeile(struktur, zeile, konf) -> Path:
     name = Path(db.text_pfad(zeile["quellpfad"])).name
     pfad, _ort = ziel_modul.zielpfad(struktur, d, zeile["kamera"] or konf.wert("kamera.unbekannt"), name, konf)
     return pfad
+
+
+def _voruebergehend(grund: str) -> bool:
+    """Liegt der Fehler vermutlich nicht an der Datei? Die Datei war beim Lesen
+    nicht da (Karte gezogen, Netz weg), ExifTool ist abgestuerzt, hing oder
+    liess sich nicht starten. Ein Fehler, den ExifTool zur Datei selbst meldet
+    ("File format error"), bleibt - bis sich die Datei aendert (Scan)."""
+    kopf = f"{GRUND_HAUPTDATEI}: "
+    if grund.startswith(kopf):
+        grund = grund[len(kopf):]
+    if grund == GRUND_METADATEN:
+        return True
+    return grund.startswith(tuple(
+        f"{GRUND_METADATEN}: {text}" for text in (
+            meldungen.EXIFTOOL_ZEITLIMIT, meldungen.EXIFTOOL_ABGESTUERZT,
+            meldungen.EXIFTOOL_STUERZT_WIEDERHOLT, meldungen.EXIFTOOL_NICHT_STARTBAR,
+        )
+    ))
+
+
+def _fehler_erneut_versuchen(dbank, lauf: int) -> int:
+    """Zeilen mit voruebergehendem Fehler zurueck auf gefunden, wenn ihre
+    Quelldatei wieder da ist. Gruppenmitglieder ("Hauptdatei: ...") nur,
+    wenn ihre Hauptdatei mitkommt oder nicht mehr auf fehler steht - sonst
+    wuerden sie in jedem Lauf nutzlos erneut versucht."""
+    zurueck: set[str] = set()
+    n = 0
+
+    def zuruecksetzen(z) -> bool:
+        try:
+            st = os.stat(pfade.lang(Path(db.text_pfad(z["quellpfad"]))))
+        except OSError:
+            return False
+        dbank.zurueck_auf_gefunden(z["quellpfad"], st.st_size, st.st_mtime)
+        dbank.ereignis(lauf, ART_ERNEUT_VERSUCHT, z["quellpfad"], 1, z["fehlergrund"])
+        return True
+
+    for z in dbank.zeilen_mit_fehlergrund(GRUND_METADATEN):
+        if _voruebergehend(z["fehlergrund"]) and zuruecksetzen(z):
+            zurueck.add(z["quellpfad"])
+            n += 1
+    for z in dbank.zeilen_mit_fehlergrund(f"{GRUND_HAUPTDATEI}: "):
+        if not _voruebergehend(z["fehlergrund"]):
+            continue
+        haupt = dbank.zeile(z["gruppe"]) if z["gruppe"] else None
+        if z["gruppe"] not in zurueck and (haupt is None or haupt["status"] == "fehler"):
+            continue
+        if zuruecksetzen(z):
+            n += 1
+    dbank.stapel_schreiben()
+    return n
 
 
 def _fehler_setzen(dbank, quellpfad, grund: str, gruppe) -> None:

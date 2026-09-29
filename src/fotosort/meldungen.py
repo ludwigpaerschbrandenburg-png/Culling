@@ -624,6 +624,20 @@ def config_wird_geoeffnet(pfad: Path) -> str:
 # ----------------------------------------------------------- Archivsperre ----
 
 
+def datenbank_beschaedigt(pfad, fehler) -> str:
+    """Die lokale Datenbank ist keine SQLite-Datei mehr oder zerstoert."""
+    return (
+        "Die Datenbank des Archivs laesst sich nicht lesen - die Datei ist beschaedigt:\n"
+        f"  {pfad}\n"
+        f"  ({fehler})\n"
+        "Die Bilder im Ziel sind davon nicht betroffen, und es wurde nichts veraendert.\n"
+        "So geht es weiter:\n"
+        "  fotosort wiederherstellen --ersetzen --ziel <Ziel>\n"
+        "holt den letzten Stand aus der Sicherungskopie im Ziel zurueck; die beschaedigte\n"
+        "Datei wird dabei aufgehoben, nicht geloescht. Im Fenster: \"Archiv retten...\"."
+    )
+
+
 def archiv_belegt(pfad) -> str:
     """Ein zweiter Lauf auf dasselbe Archiv (SPEC Abschnitt 6)."""
     return (
@@ -648,6 +662,18 @@ def datenbank_belegt(pfad) -> str:
 
 
 # ---------------------------------------------------- Fehler des Systems ----
+
+
+def datenbank_fehler_unterwegs(grund: str) -> str:
+    """Ein SQLite-Fehler mitten in der Arbeit (nicht beim Oeffnen)."""
+    return (
+        "Abbruch: Die Datenbank des Archivs meldet einen Fehler.\n"
+        f"  Grund: {grund}\n"
+        "Bisher Geschriebenes bleibt erhalten; im Ziel wurde nichts ueberschrieben.\n"
+        "Laesst sich die Datenbank danach nicht mehr oeffnen, holt\n"
+        "  fotosort wiederherstellen --ersetzen --ziel <Ziel>\n"
+        "den letzten Stand aus der Sicherungskopie im Ziel zurueck."
+    )
 
 
 def system_fehler(pfad, grund: str) -> str:
@@ -875,6 +901,19 @@ def zahl_mindestens_eins(text: str) -> str:
 
 
 EXIFTOOL_ZEITLIMIT = "ExifTool hat innerhalb des Zeitlimits nicht geantwortet (Datei uebersprungen, Prozess neu gestartet)"
+EXIFTOOL_ABGESTUERZT = "ExifTool ist beim Lesen abgestuerzt (Datei uebersprungen, Prozess neu gestartet)"
+EXIFTOOL_STUERZT_WIEDERHOLT = (
+    "ExifTool stuerzt wiederholt ab; es liegt nicht an einer einzelnen Datei."
+    " Die Dateien bekommen den Status fehler und werden beim naechsten Lauf erneut versucht"
+)
+EXIFTOOL_NICHT_STARTBAR = "ExifTool laesst sich nicht starten"
+
+
+def analyse_erneut_versucht(n: int) -> str:
+    return (
+        f"{anzahl(n)} Dateien, deren Metadaten beim letzten Mal nicht gelesen werden konnten"
+        " (Datei nicht erreichbar, ExifTool abgestuerzt oder haengengeblieben), werden erneut versucht."
+    )
 
 
 def analyse_beginnt(prozesse: int, offen: int) -> str:
@@ -910,6 +949,10 @@ def analyse_ergebnis(e) -> str:
         zeilen.append(f"  davon mehrdeutig (alphabetisch gewaehlt): {anzahl(e.mehrdeutig)}")
     if getattr(e, "zeitlimits", 0):
         zeilen.append(f"  ExifTool wegen Zeitlimit neu gestartet: {anzahl(e.zeitlimits)}")
+    if getattr(e, "abstuerze", 0):
+        zeilen.append(f"  ExifTool nach Absturz neu gestartet:    {anzahl(e.abstuerze)}")
+    if getattr(e, "erneut_versucht", 0):
+        zeilen.append(f"  erneut versucht (Fehler beim letzten Mal): {anzahl(e.erneut_versucht)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         pro_sekunde = f"{e.bearbeitet / e.sekunden:.1f}".replace(".", ",")
@@ -982,6 +1025,7 @@ EREIGNIS_NACHTRAEGLICH = "Kopie aus abgebrochenem Lauf war vollstaendig"
 EREIGNIS_RUECKFALL_ORDNER = "Dateisystem kann kein nicht ueberschreibendes Umbenennen"
 EREIGNIS_RUECKFALL_ZIEL = "Ziel kann kein nicht ueberschreibendes Umbenennen: ohne .part, exklusiv angelegt"
 EREIGNIS_QUELLE_UEBERSPRUNGEN = "nicht erreichbar, uebersprungen"
+EREIGNIS_QUELLE_ABGEZOGEN = "waehrend des Kopierens nicht mehr erreichbar, restliche Dateien bleiben offen"
 
 
 def profil_ungueltig(profil, erlaubt: list) -> str:
@@ -1098,6 +1142,10 @@ def kopieren_ergebnis(e) -> str:
         f"  Quelle seit der Analyse veraendert (neu einordnen):  {anzahl(e.quelle_veraendert)}",
         f"  Fehler:                      {anzahl(e.fehler)}",
     ]
+    if getattr(e, "neu_nach_fehler", 0):
+        zeilen.append(f"  erneut versucht (Fehler beim letzten Mal): {anzahl(e.neu_nach_fehler)}")
+    for wurzel in getattr(e, "quellen_abgezogen", []):
+        zeilen.append(f"  Quelle waehrend des Laufs nicht mehr erreichbar, Rest bleibt offen: {wurzel}")
     if e.part_aufgeraeumt or e.angefangene_entfernt or e.nachtraeglich_bestaetigt:
         zeilen.append("  Reste eines abgebrochenen Laufs:")
         if e.part_aufgeraeumt:
@@ -1215,6 +1263,22 @@ def pruefen_zusammenfassung(status: dict, noch_zu_pruefen: int) -> str:
     return "\n".join(zeilen)
 
 
+def kopieren_neu_nach_fehler(n: int) -> str:
+    return (
+        f"{anzahl(n)} Datei{'en' if n != 1 else ''}, deren Kopieren beim letzten Mal scheiterte"
+        " (Datei nicht erreichbar, Lese- oder Schreibfehler), sind wieder da und werden erneut versucht."
+    )
+
+
+def kopieren_quelle_abgezogen(wurzel) -> str:
+    return (
+        f"Die Quelle ist waehrend des Kopierens nicht mehr erreichbar (abgezogen, Netz getrennt?):\n"
+        f"  {wurzel}\n"
+        "Aus ihr wird in diesem Lauf nichts mehr begonnen. Ihre restlichen Dateien bleiben offen\n"
+        "(nicht als Fehler) und werden beim naechsten \"kopieren\" uebertragen, sobald sie wieder da ist."
+    )
+
+
 def kopieren_neu_nach_pruefung(n: int) -> str:
     return (
         f"{anzahl(n)} Datei{'en' if n != 1 else ''} mit fehlgeschlagener Pruefung"
@@ -1261,6 +1325,7 @@ EREIGNIS_GELOESCHT = "Quelldatei endgueltig geloescht"
 EREIGNIS_NACHGETRAGEN = "Loeschung aus abgebrochenem Lauf nachgetragen (Quelle fehlt, Ziel stimmt, Frischlesung war festgeschrieben)"
 EREIGNIS_REST_NICHT_ENTFERNT = "Name in reste_dateien, steht aber mit echtem Dateityp in der Datenbank - nicht entfernt"
 EREIGNIS_REST_ENTFERNT = "Reste-Datei entfernt"
+EREIGNIS_REST_GESPERRT = "Reste-Datei liess sich nicht entfernen, Ordner bleibt stehen"
 EREIGNIS_LEERER_ORDNER = "leerer Ordner entfernt"
 
 
@@ -1374,7 +1439,7 @@ def aufraeumen_ergebnis(e) -> str:
     if e.leere_ordner_entfernt or e.reste_entfernt or e.reste_verweigert:
         zeilen.append(f"  leere Ordner entfernt:             {anzahl(e.leere_ordner_entfernt)}")
         zeilen.append(f"  Reste-Dateien entfernt:            {anzahl(e.reste_entfernt)}")
-        zeilen.append(f"  Reste mit echtem Dateityp, NICHT entfernt: {anzahl(e.reste_verweigert)}")
+        zeilen.append(f"  Reste NICHT entfernt (echter Dateityp oder gesperrt): {anzahl(e.reste_verweigert)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         zeilen.append(f"  Durchsatz:       {durchsatz(e.bearbeitet, e.bytes_gelesen, e.sekunden)}")
@@ -1764,6 +1829,14 @@ def ob_restzeit(sekunden, zustand: str) -> str:
     return restzeit_kurz(float(sekunden))
 
 
+def ob_steuern_fehlgeschlagen(datei, fehler: OSError) -> str:
+    return (
+        f"Der Wunsch ließ sich nicht weitergeben: Die Datei {datei} kann gerade nicht"
+        f" geschrieben werden ({fehler.strerror or fehler}). Die Arbeit läuft unverändert"
+        " weiter. Bitte in ein paar Sekunden noch einmal versuchen."
+    )
+
+
 def ob_kein_lauf() -> str:
     return "Im Moment läuft nichts, das sich anhalten oder abbrechen ließe."
 
@@ -1874,12 +1947,23 @@ def ob_rettung_neuaufbau() -> str:
     )
 
 
-def ob_frage_wiederherstellen(zeit: str, lokal) -> str:
+def ob_rettung_beschaedigt(zeit: str) -> str:
     return (
+        "Die Merkliste des Programms zu diesem Archiv (die Datenbank) ist auf diesem PC beschädigt und lässt sich nicht "
+        f"lesen. Im Zielordner liegt eine Sicherungskopie vom {zeit or 'unbekannten Zeitpunkt'}. Sie lässt sich mit einem "
+        "Klick zurückholen; die beschädigte Datei wird dabei aufgehoben, kopierte Fotos bleiben unangetastet."
+    )
+
+
+def ob_frage_wiederherstellen(zeit: str, lokal, ersetzen: bool = False) -> str:
+    text = (
         f"Die Sicherungskopie vom {zeit or 'unbekannten Zeitpunkt'} wird nach {lokal} zurückgeholt. Was nach diesem "
         "Stand geschah, kennt das Programm danach nicht mehr; ein erneuter Scan und ein erneutes Kopieren finden das "
         "Fehlende, ohne etwas doppelt zu kopieren. Gelöscht wird nichts."
     )
+    if ersetzen:
+        text += " Die beschädigte Datenbank wird unter neuem Namen im selben Ordner aufgehoben."
+    return text
 
 
 def ob_wiederhergestellt(dateien: int, zeit: str) -> str:

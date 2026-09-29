@@ -147,10 +147,24 @@ def pid_lebt(pid: int, start: float | None = None) -> bool:
     return True
 
 
-def prozess_beenden(pid: int) -> None:
+def prozess_beenden(pid: int, start: float | None = None, nachsetzen: float = 5.0) -> None:
     """Sofort beenden (nur auf ausdruecklichen Wunsch nach einem Abbruch, der
-    nicht greift). Die Datenbank uebersteht das; Reste raeumt der naechste Lauf auf."""
+    nicht greift). Die Datenbank uebersteht das; Reste raeumt der naechste Lauf auf.
+
+    Beendet wird der ganze Baum, also auch die ExifTool-Prozesse des
+    Arbeitsprozesses - sie liefen sonst ohne Eltern weiter. Unter Linux/macOS
+    erst mit der Bitte SIGTERM (der Arbeitsprozess bricht dann ab wie mit
+    Strg+C); lebt er nach "nachsetzen" Sekunden noch, etwa weil er in einem
+    haengenden Netzlaufwerk feststeckt, hart mit SIGKILL. Die Startzeit
+    schuetzt davor, eine inzwischen neu vergebene Nummer zu treffen.
+    """
     if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
+        try:
+            # /T: samt Kindern (exiftool.exe -> perl.exe), /F: ohne Rueckfrage.
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(int(pid))],
+                           capture_output=True, timeout=30, check=False, **prozesse.unsichtbar())
+        except (OSError, subprocess.SubprocessError):
+            pass
         import ctypes
         k32 = ctypes.windll.kernel32
         griff = k32.OpenProcess(0x0001, False, int(pid))   # PROCESS_TERMINATE
@@ -161,10 +175,38 @@ def prozess_beenden(pid: int) -> None:
                 k32.CloseHandle(griff)
         return
     import signal
+
+    def senden(signal_nummer: int) -> None:
+        try:
+            # Eigene Gruppe nur, wenn der Prozess losgeloest (start_new_session)
+            # gestartet wurde - nie die Gruppe, in der das Fenster selbst laeuft.
+            if os.getpgid(int(pid)) == int(pid) and os.getpgid(0) != int(pid):
+                os.killpg(int(pid), signal_nummer)
+            else:
+                os.kill(int(pid), signal_nummer)
+        except OSError:
+            pass
+
+    senden(signal.SIGTERM)
+    if nachsetzen <= 0:
+        return
+
+    def nachfassen() -> None:
+        if pid_lebt(pid, start) and not _ist_zombie(pid):
+            senden(signal.SIGKILL)
+
+    zeitgeber = threading.Timer(nachsetzen, nachfassen)
+    zeitgeber.daemon = True
+    zeitgeber.start()
+
+
+def _ist_zombie(pid: int) -> bool:
+    """Beendet, aber vom Elternprozess noch nicht abgeholt (Linux)."""
     try:
-        os.kill(int(pid), signal.SIGTERM)
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="ascii", errors="replace")
     except OSError:
-        pass
+        return False
+    return stat[stat.rindex(")") + 2:].startswith("Z")
 
 
 class _StilleKonsole:
@@ -383,6 +425,12 @@ class Ablauf:
         return meldungen.SCHRITT_NAME.get(schritt, schritt)
 
     def steuern(self, wunsch: str) -> dict:
+        try:
+            return self._steuern(wunsch)
+        except OSError as fehler:
+            raise FotosortFehler(meldungen.ob_steuern_fehlgeschlagen(self.steuer_datei, fehler)) from fehler
+
+    def _steuern(self, wunsch: str) -> dict:
         with self.sperre:
             if not self.lauf_lebt() or self.lauf is None:
                 raise FotosortFehler(meldungen.ob_kein_lauf())
@@ -395,9 +443,10 @@ class Ablauf:
             elif wunsch == "sofort":
                 steuerung.wunsch_schreiben(self.steuer_datei, abbrechen=True)
                 if self.lauf.prozess is not None:
-                    self.lauf.prozess.terminate()
+                    if self.lauf.prozess.poll() is None:
+                        prozess_beenden(self.lauf.prozess.pid, self.lauf.start)
                 elif pid_lebt(self.lauf.pid, self.lauf.start):
-                    prozess_beenden(self.lauf.pid)   # nie einen fremden Prozess mit derselben Nummer
+                    prozess_beenden(self.lauf.pid, self.lauf.start)   # nie einen fremden Prozess mit derselben Nummer
                 return {"ok": True, "text": meldungen.ob_abgebrochen_hart(self.lauf.schritt)}
             else:
                 raise FotosortFehler(meldungen.ob_kein_lauf())
@@ -491,6 +540,12 @@ class Ablauf:
         except FotosortFehler:
             return {}
         if db.datenbank_pfad(lokal).is_file():
+            # Vorhanden, aber zerstoert: aus der Sicherung ersetzen (die
+            # beschaedigte Datei wird aufgehoben). Ohne Sicherung bleibt nur
+            # "Archiv verwerfen..." - das zeigt die Startseite ohnehin.
+            if db.datenbank_beschaedigt(lokal) and db.sicherung_pfad(ziel).is_file():
+                return {"rettung": "wiederherstellen",
+                        "rettung_text": meldungen.ob_rettung_beschaedigt(self._sicherung_zeit())}
             return {}
         if db.sicherung_pfad(ziel).is_file():
             return {"rettung": "wiederherstellen", "rettung_text": meldungen.ob_rettung_wiederherstellen(self._sicherung_zeit())}
@@ -504,16 +559,19 @@ class Ablauf:
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self._schritt_name(self.lauf.schritt if self.lauf else "")))
             ziel, lokal, _im_ziel = self._archiv_orte()
-            if db.datenbank_pfad(lokal).is_file():
+            # Eine lesbare Datenbank wird hier nie ersetzt - nur eine fehlende
+            # oder beschaedigte (die wird aufgehoben, nicht geloescht).
+            ersetzen = db.datenbank_pfad(lokal).is_file()
+            if ersetzen and not db.datenbank_beschaedigt(lokal):
                 raise FotosortFehler(meldungen.ob_datenbank_schon_da())
             sicherung = db.sicherung_pfad(ziel)
             if not sicherung.is_file():
                 raise FotosortFehler(meldungen.wiederherstellen_keine_sicherung(sicherung, ziel))
             zeit = self._sicherung_zeit()
             if not ja:
-                return {"frage": "wiederherstellen", "text": meldungen.ob_frage_wiederherstellen(zeit, lokal)}
+                return {"frage": "wiederherstellen", "text": meldungen.ob_frage_wiederherstellen(zeit, lokal, ersetzen)}
             stille = _StilleKonsole()
-            rc = cli.befehl_wiederherstellen(self._namensraum("wiederherstellen", ersetzen=False, vorheriger_stand=False), stille)
+            rc = cli.befehl_wiederherstellen(self._namensraum("wiederherstellen", ersetzen=ersetzen, vorheriger_stand=False), stille)
             if rc != cli.OK:
                 raise FotosortFehler("\n".join(stille.zeilen))
         stand = self.archiv_lesen()

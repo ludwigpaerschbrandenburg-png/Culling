@@ -250,7 +250,7 @@ def quelldatei_entfernen(dbank: db.Datenbank, lauf: int, quellpfad, lesung: Lesu
     zielpfad = Path(db.text_pfad(zeile["zielpfad"]))
     _unmittelbar_vorher_pruefen(quelle, zielpfad, lesung, zeile["hash"], weise)
     if weise == WEISE_ENDGUELTIG:
-        os.unlink(pfade.lang(quelle))
+        pfade.datei_entfernen(quelle)
         dbank.quelle_geloescht_setzen(quellpfad, lauf, None)
         dbank.ereignis(lauf, ART_QUELLE_GELOESCHT, quelle, 1, meldungen.EREIGNIS_GELOESCHT)
         return None
@@ -312,9 +312,9 @@ def _in_papierkorb(quelle: Path, ziel: Path, erwarteter_hash: str, quell_kennung
                 os.unlink(pfade.lang(kandidat))
                 raise Verweigert(meldungen.GRUND_QUELLE_ABWEICHUNG)
             try:
-                os.unlink(pfade.lang(quelle))
+                pfade.datei_entfernen(quelle)
             except OSError:
-                # Quelle bleibt (Schreibschutz o. ae.): die eigene Kopie wieder
+                # Quelle bleibt (fehlende Rechte o. ae.): die eigene Kopie wieder
                 # wegnehmen, sonst laege der Inhalt doppelt herum.
                 os.unlink(pfade.lang(kandidat))
                 raise

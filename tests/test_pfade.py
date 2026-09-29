@@ -290,3 +290,61 @@ def test_lage_erkennt_das_ziel_an_seiner_kennung(tmp_path):
     anderes.mkdir()
     _archiv_marke(anderes, "b" * 32)                     # ein anderes Archiv als Quelle ist erlaubt
     assert pfade.lage_pruefen(anderes, ziel) == "getrennt"
+
+
+# ------------------------------------------- Schreibschutz (Windows) ----
+
+
+def _unlink_einmal_verweigert(monkeypatch, wie_oft: int = 1) -> list:
+    import os as _os
+    echt = _os.unlink
+    aufrufe: list = []
+
+    def unlink(pfad, *a, **k):
+        aufrufe.append(pfad)
+        if len(aufrufe) <= wie_oft:
+            raise PermissionError(13, "Zugriff verweigert")
+        echt(pfad, *a, **k)
+
+    monkeypatch.setattr(pfade.os, "unlink", unlink)
+    return aufrufe
+
+
+def test_schreibgeschuetzte_datei_wird_nach_allen_pruefungen_trotzdem_entfernt(tmp_path, monkeypatch):
+    """Unter Windows laesst sich eine Datei mit dem Attribut "Schreibgeschuetzt"
+    (haeufig bei Kopien von Speicherkarten und CDs) nicht loeschen. Frueher endete
+    jede solche Datei beim Aufraeumen als Fehler; jetzt wird das Attribut fuer
+    genau diese eine, schon gepruefte Datei aufgehoben."""
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x")
+    aufrufe = _unlink_einmal_verweigert(monkeypatch)
+    monkeypatch.setattr(pfade, "_schreibgeschuetzt", lambda pfad: True)
+    aufgehoben: list = []
+    monkeypatch.setattr(pfade, "_schreibschutz_setzen", lambda pfad, an: aufgehoben.append(an))
+    pfade.datei_entfernen(p)
+    assert not p.exists() and len(aufrufe) == 2 and aufgehoben == [False]
+
+
+def test_ohne_schreibschutz_bleibt_der_fehler_ein_fehler(tmp_path, monkeypatch):
+    """Fehlende Rechte (nicht der Schreibschutz) werden nicht umgangen."""
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x")
+    _unlink_einmal_verweigert(monkeypatch)
+    monkeypatch.setattr(pfade, "_schreibgeschuetzt", lambda pfad: False)
+    aufgehoben: list = []
+    monkeypatch.setattr(pfade, "_schreibschutz_setzen", lambda pfad, an: aufgehoben.append(an))
+    with pytest.raises(PermissionError):
+        pfade.datei_entfernen(p)
+    assert p.exists() and aufgehoben == []
+
+
+def test_schreibschutz_kommt_zurueck_wenn_das_entfernen_trotzdem_scheitert(tmp_path, monkeypatch):
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x")
+    _unlink_einmal_verweigert(monkeypatch, wie_oft=2)
+    monkeypatch.setattr(pfade, "_schreibgeschuetzt", lambda pfad: True)
+    aufgehoben: list = []
+    monkeypatch.setattr(pfade, "_schreibschutz_setzen", lambda pfad, an: aufgehoben.append(an))
+    with pytest.raises(PermissionError):
+        pfade.datei_entfernen(p)
+    assert p.exists() and aufgehoben == [False, True]

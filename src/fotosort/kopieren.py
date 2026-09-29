@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import unicodedata
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -45,6 +46,7 @@ ART_ANGEFANGENE_ENTFERNT = "angefangene_zieldatei_entfernt"
 ART_NACHTRAEGLICH_BESTAETIGT = "kopie_nachtraeglich_bestaetigt"
 ART_EXFAT_RUECKFALL = "rueckfall_kopieren"
 ART_NEU_NACH_PRUEFUNG = "neu_nach_pruefung"
+ART_NEU_NACH_FEHLER = "neu_nach_fehler"
 ART_ANHANG_ABWEICHEND = "anhang_abweichend"
 
 # Deutsche Texte, die in die Datenbank gelangen, stehen in meldungen.py.
@@ -83,6 +85,8 @@ class Ergebnis:
     profil: str = ""
     exfat_rueckfall: bool = False
     neu_nach_pruefung: int = 0       # nach fehlgeschlagener Pruefung neu zu kopieren
+    neu_nach_fehler: int = 0         # voruebergehender Fehler eines frueheren Laufs, Quelle wieder da
+    quellen_abgezogen: list[str] = field(default_factory=list)   # waehrend des Laufs verschwunden
     # Verschieben-Modus (SPEC Abschnitt 4 Phase 3, Phase 5):
     verschieben: bool = False
     verschoben: int = 0              # durch Umbenennen ins Ziel gebracht
@@ -224,6 +228,47 @@ class _Quelle:
                 return None
 
 
+class _InArbeit:
+    """Zielnamen, die gerade entstehen - verglichen ohne Gross-/Kleinschreibung
+    und in einer Unicode-Form (NFC). Unter Windows, auf SMB-Freigaben und exFAT
+    sind IMG_0001.JPG und img_0001.jpg derselbe Name; zwei solche Kopien duerfen
+    nie gleichzeitig laufen, sonst waeren ihre .part-Dateien dieselbe Datei.
+    Auf einem Dateisystem, das beides unterscheidet, kostet das nur einen
+    kurzen Aufschub bis zur naechsten Runde."""
+
+    def __init__(self) -> None:
+        self._namen: dict[str, set[str]] = {}
+
+    @staticmethod
+    def schluessel(t: str) -> str:
+        return unicodedata.normalize("NFC", t).casefold()
+
+    def add(self, p) -> None:
+        t = db.pfad_text(p)
+        self._namen.setdefault(self.schluessel(t), set()).add(t)
+
+    def discard(self, p) -> None:
+        t = db.pfad_text(p)
+        k = self.schluessel(t)
+        namen = self._namen.get(k)
+        if namen is not None:
+            namen.discard(t)
+            if not namen:
+                del self._namen[k]
+
+    def clear(self) -> None:
+        self._namen.clear()
+
+    def __contains__(self, p) -> bool:
+        return self.schluessel(db.pfad_text(p)) in self._namen
+
+    def fremd(self, p, eigene_namen: frozenset[str]) -> bool:
+        """Entsteht unter diesem Namen (in irgendeiner Schreibweise) gerade
+        etwas, das nicht zu den eigenen Namen der fragenden Gruppe gehoert?"""
+        namen = self._namen.get(self.schluessel(db.pfad_text(p)), set())
+        return bool(namen - eigene_namen)
+
+
 @dataclass
 class _Auftrag:
     zeile: object                    # sqlite3.Row der Quelldatei
@@ -324,7 +369,7 @@ class _Lauf:
         self.kopierer = ThreadPoolExecutor(max_workers=kopier_worker, thread_name_prefix="kopie")
         self.hasher = ThreadPoolExecutor(max_workers=hash_worker, thread_name_prefix="hash")
         self.max_offen = max(4, kopier_worker * 4)
-        self.in_arbeit: set[str] = set()       # Zielnamen (Text), die gerade entstehen
+        self.in_arbeit = _InArbeit()           # Zielnamen, die gerade entstehen
         self.offen: list[list[_Auftrag]] = []  # eingereichte Gruppen
         self.bereit: list[list[_Auftrag]] = [] # beansprucht, Anspruch noch nicht festgeschrieben
         # Hash -> (Endname, Bytes) der Dateien, deren Umbenennen in dieser
@@ -332,6 +377,7 @@ class _Lauf:
         # Runde findet seinen Partner so auch vor dem Eintrag im Ziel-Index.
         self.hash_anstehend: dict[str, tuple[Path, int]] = {}
         self.wartend: deque[tuple[_Quelle, list]] = deque()
+        self.weg: set[str] = set()             # Quellwurzeln, die mitten im Lauf verschwunden sind
         self.ergebnis = Ergebnis()
         self.anzeige: fortschritt.Fortschritt | None = None
 
@@ -353,7 +399,7 @@ class _Lauf:
         t = db.pfad_text(p)
         if t in eigene_dateien:
             return False
-        if t in self.in_arbeit and t not in eigene_namen:
+        if self.in_arbeit.fremd(p, eigene_namen):
             return True
         if t in bekannt_frei:
             return False
@@ -449,7 +495,7 @@ class _Lauf:
         auftraege: list[_Auftrag] = []
         for z in zeilen:
             ziel = Path(db.text_pfad(z["zielpfad"]))
-            if db.pfad_text(ziel) in self.in_arbeit or db.pfad_text(part_pfad(ziel)) in self.in_arbeit:
+            if ziel in self.in_arbeit or part_pfad(ziel) in self.in_arbeit:
                 return False
             auftraege.append(_Auftrag(z, Path(db.text_pfad(z["quellpfad"])), ziel, part_pfad(ziel), _stamm(z)))
         if self.verschieben and self.umbenennen_moeglich(zeilen[0]["quellwurzel"]):
@@ -462,8 +508,8 @@ class _Lauf:
             return True   # als Fehler verbucht, nichts mehr zu tun
         for a in auftraege:
             self.dbank.kopieren_beanspruchen(a.zeile["quellpfad"], a.ziel, a.schreibziel, self.lauf)
-            self.in_arbeit.add(db.pfad_text(a.ziel))
-            self.in_arbeit.add(db.pfad_text(a.schreibziel))
+            self.in_arbeit.add(a.ziel)
+            self.in_arbeit.add(a.schreibziel)
             if db.pfad_text(a.ziel) != db.pfad_text(a.schreibziel):
                 a.ziel_da = _stat(a.ziel) is not None
                 if a.ziel_da:
@@ -586,11 +632,30 @@ class _Lauf:
                 break
         return kopieren_stattdessen
 
+    def quelle_abgezogen(self, a: _Auftrag) -> bool:
+        """Fehlt die Datei, weil ihre ganze Quelle weg ist (Platte abgezogen,
+        Netz getrennt)? Dann bleibt sie offen (analysiert) statt fehler, und
+        aus dieser Quelle wird in diesem Lauf nichts mehr begonnen."""
+        wurzel = a.zeile["quellwurzel"]
+        if wurzel in self.weg:
+            return True
+        if not wurzel or Path(db.text_pfad(wurzel)).is_dir():
+            return False
+        self.weg.add(wurzel)
+        self.ergebnis.quellen_abgezogen.append(wurzel)
+        self.dbank.ereignis(self.lauf, ART_QUELLE_NICHT_ERREICHBAR, wurzel, 1, meldungen.EREIGNIS_QUELLE_ABGEZOGEN)
+        if self.konsole is not None:
+            self.konsole.print(meldungen.kopieren_quelle_abgezogen(db.text_pfad(wurzel)))
+        return True
+
     def _quelle_fehlt(self, a: _Auftrag) -> None:
         e = self.ergebnis
-        e.fehler += 1
         e.bearbeitet += 1
-        self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_QUELLE_FEHLT)
+        if self.quelle_abgezogen(a):
+            self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
+        else:
+            e.fehler += 1
+            self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_QUELLE_FEHLT)
         if self.anzeige:
             self.anzeige.weiter(1, 0)
 
@@ -742,13 +807,13 @@ class _Lauf:
         for a in auftraege:
             k: _Kopie = a.zukunft.result()
             a.ergebnis = k
-            self.in_arbeit.discard(db.pfad_text(a.schreibziel))
+            self.in_arbeit.discard(a.schreibziel)
             if k.art == "ok":
                 if self.anzeige:
                     self.anzeige.weiter(1, k.bytes)
                 bleiben.append(a)
                 continue
-            self.in_arbeit.discard(db.pfad_text(a.ziel))
+            self.in_arbeit.discard(a.ziel)
             if k.art == "belegt":
                 # Der Schreibname war belegt. Im Rueckfall der endgueltige Name
                 # (jemand war schneller): naechster freier Name beim zweiten
@@ -776,9 +841,10 @@ class _Lauf:
             if k.art == "abgebrochen":
                 self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
             elif k.art == "fehlt":
-                e.fehler += 1
                 self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
-                self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_QUELLE_FEHLT)
+                if not self.quelle_abgezogen(a):
+                    e.fehler += 1
+                    self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", GRUND_QUELLE_FEHLT)
             elif k.art == "veraendert":
                 e.quelle_veraendert += 1
                 self.dbank.zurueck_auf_gefunden(a.zeile["quellpfad"], k.bytes, k.mtime_ns / 1e9)
@@ -794,7 +860,7 @@ class _Lauf:
             partner = self._duplikat_partner(a)
             if partner is not None:
                 _entfernen_eigene(a.schreibziel)
-                self.in_arbeit.discard(db.pfad_text(a.ziel))
+                self.in_arbeit.discard(a.ziel)
                 self.dbank.duplikat_setzen(a.zeile["quellpfad"], partner, a.ergebnis.hash, self.lauf)
                 self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(partner))
                 e.duplikate += 1
@@ -823,12 +889,14 @@ class _Lauf:
             self._endgueltig(a, anhang, vorgemerkt=True)
 
     def _part_unbeansprucht(self, a: _Auftrag) -> bool:
-        """Beansprucht eine andere Zeile den Zielnamen dieser .part-Datei?"""
+        """Beansprucht eine andere Zeile den Zielnamen dieser .part-Datei - auch
+        in anderer Gross-/Kleinschreibung oder Unicode-Form? Zeilen im Status
+        kopieren_laeuft sind nur die gerade laufenden, also wenige."""
+        eigener = _InArbeit.schluessel(db.pfad_text(a.ziel))
         for z in self.dbank.verbindung.execute(
-            "SELECT quellpfad FROM dateien WHERE zielpfad = ? AND status = 'kopieren_laeuft'",
-            (db.pfad_text(a.ziel),),
+            "SELECT quellpfad, zielpfad FROM dateien WHERE status = 'kopieren_laeuft'"
         ):
-            if z["quellpfad"] != a.zeile["quellpfad"]:
+            if z["quellpfad"] != a.zeile["quellpfad"] and _InArbeit.schluessel(z["zielpfad"]) == eigener:
                 return False
         return True
 
@@ -910,7 +978,7 @@ class _Lauf:
                                     f"{meldungen.EREIGNIS_ANHANG_ABWEICHEND}: {db.pfad_text(endname)}")
                 e.anhang_abweichend += 1
             anhang = k
-        self.in_arbeit.discard(db.pfad_text(a.ziel))
+        self.in_arbeit.discard(a.ziel)
         self.dbank.kopiert_setzen(a.zeile["quellpfad"], endname, a.ergebnis.hash, self.lauf)
         # Groesse und Zeit der eben geschriebenen Datei liefert der Worker:
         # kein stat je Datei im Hauptstrang noetig.
@@ -979,7 +1047,7 @@ class _Lauf:
     def _fehler(self, a: _Auftrag, grund: str) -> None:
         _entfernen_eigene(a.schreibziel)
         self._anstehend_erledigt(a, None)
-        self.in_arbeit.discard(db.pfad_text(a.ziel))
+        self.in_arbeit.discard(a.ziel)
         self.dbank.zurueck_auf_analysiert(a.zeile["quellpfad"], a.ziel)
         self.dbank.status_setzen(a.zeile["quellpfad"], "fehler", grund)
         self.ergebnis.fehler += 1
@@ -1061,6 +1129,41 @@ def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: in
     return freigegeben
 
 
+#: Fehlergruende aus dem Kopieren, die nicht an der Datei liegen muessen:
+#: Datei kurz nicht erreichbar, Lese-/Schreibfehler, .part-Datei belegt.
+VORUEBERGEHEND = (GRUND_QUELLE_FEHLT, GRUND_KOPIE, GRUND_PART_BELEGT, meldungen.GRUND_PART_INHALT)
+
+
+def _nach_fehler_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: int) -> int:
+    """Zeilen, deren Kopieren in einem frueheren Lauf voruebergehend scheiterte,
+    wieder freigeben, wenn ihre Quelldatei wieder lesbar da ist. Unveraendert
+    (Groesse und Aenderungszeit): zurueck auf analysiert, Zielname aus den
+    gespeicherten Feldern neu berechnet. Veraendert: zurueck auf gefunden,
+    die naechste Analyse ordnet sie neu ein. Im Ziel wird nichts angefasst;
+    ein inhaltsgleiches Stueck dort wird wie immer als Duplikat erkannt."""
+    from . import analyse
+    from . import ziel as ziel_modul
+
+    struktur = None
+    n = 0
+    for praefix in VORUEBERGEHEND:
+        for z in dbank.zeilen_mit_fehlergrund(praefix):
+            st = _stat(Path(db.text_pfad(z["quellpfad"])))
+            if st is None:
+                continue   # weiter nicht da: bleibt Fehler, steht im Bericht
+            if st.st_size == int(z["groesse"]) and db._gleiche_zeit(st.st_mtime, z["mtime"]):
+                if struktur is None:
+                    struktur = ziel_modul.Zielstruktur(ziel)
+                dbank.zurueck_auf_analysiert(z["quellpfad"], analyse.zielpfad_aus_zeile(struktur, z, konf))
+                dbank.status_setzen(z["quellpfad"], "analysiert")   # Grund leeren
+            else:
+                dbank.zurueck_auf_gefunden(z["quellpfad"], st.st_size, st.st_mtime)
+            dbank.ereignis(lauf, ART_NEU_NACH_FEHLER, z["quellpfad"], 1, z["fehlergrund"])
+            n += 1
+    dbank.stapel_schreiben()
+    return n
+
+
 def planen(ziel: Path, dbank: db.Datenbank) -> Plan:
     """--dry-run: nur zaehlen, nichts anfassen, kein Lauf."""
     plan = Plan()
@@ -1103,6 +1206,9 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
         e.neu_nach_pruefung = _nach_pruefung_zuruecksetzen(ziel, konf, dbank, lauf)
         if e.neu_nach_pruefung and konsole is not None:
             konsole.print(meldungen.kopieren_neu_nach_pruefung(e.neu_nach_pruefung))
+        e.neu_nach_fehler = _nach_fehler_zuruecksetzen(ziel, konf, dbank, lauf)
+        if e.neu_nach_fehler and konsole is not None:
+            konsole.print(meldungen.kopieren_neu_nach_fehler(e.neu_nach_fehler))
 
         # 2. Vorpruefungen. Gezaehlt wird nur, was aus erreichbaren Quellen
         #    ansteht - sonst waeren Platzpruefung und Anzeige zu hoch.
@@ -1183,7 +1289,7 @@ def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:
         if q is None:
             # Ein einzelner Wiederholungsversuch: Zeile frisch aus der Datenbank.
             z = L.dbank.zeile(zeilen[0]["quellpfad"])
-            if z is None or z["status"] != "analysiert":
+            if z is None or z["status"] != "analysiert" or z["quellwurzel"] in L.weg:
                 continue
             return _Quelle(z["quellwurzel"], Path(db.text_pfad(z["quellwurzel"])), ""), [z]
         return q, zeilen
@@ -1191,6 +1297,9 @@ def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:
         quellen = reihe[0]
         reihe.rotate(-1)            # dieses Laufwerk liegt jetzt hinten
         while quellen:
+            if quellen[0].wurzel in L.weg:
+                quellen.pop(0)          # mitten im Lauf verschwunden: nichts mehr beginnen
+                continue
             gruppe = quellen[0].naechste_gruppe(L.dbank)
             if gruppe is not None:
                 return quellen[0], gruppe

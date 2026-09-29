@@ -328,7 +328,17 @@ def _ordner_leeren(pfad: Path, wurzel: Path, ziel: Path, reste: list[str], konf,
         liste.append(pfad)
         return True
     for r in reste_hier:
-        os.unlink(pfade.lang(r))
+        try:
+            pfade.datei_entfernen(r)
+        except FileNotFoundError:
+            continue
+        except OSError as fehler:
+            # Gesperrt (der Explorer haelt Thumbs.db gern offen) oder keine
+            # Rechte: Dieser Ordner bleibt stehen, die anderen nicht.
+            e.reste_verweigert += 1
+            dbank.ereignis(lauf, loeschen.ART_REST_NICHT_ENTFERNT, r, 1,
+                           f"{meldungen.EREIGNIS_REST_GESPERRT}: {fehler.strerror or fehler}")
+            return False
         dbank.ereignis(lauf, loeschen.ART_REST_ENTFERNT, r, 1, meldungen.EREIGNIS_REST_ENTFERNT)
         e.reste_entfernt += 1
     try:

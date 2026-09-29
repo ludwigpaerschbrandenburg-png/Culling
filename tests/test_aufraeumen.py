@@ -329,6 +329,28 @@ def test_ordner_mit_fremder_txt_bleibt_stehen(baum, quelle, ziel, nachschauen, a
     assert fremd.exists() and (quelle / "Videos").exists()
 
 
+def test_gesperrte_thumbs_db_haelt_nur_ihren_ordner_auf(baum, quelle, ziel, nachschauen, antwort, monkeypatch, capsys):
+    """Der Windows-Explorer haelt Thumbs.db oft offen. Frueher brach das Entfernen
+    der leeren Ordner dann ganz ab; jetzt bleibt nur dieser eine Ordner stehen."""
+    from fotosort import pfade
+    _bis_geprueft(ziel, quelle)
+    (quelle / "Videos" / "Thumbs.db").write_bytes(b"vorschau")
+    echt = pfade.datei_entfernen
+
+    def gesperrt(pfad):
+        if Path(pfad).name == "Thumbs.db":
+            raise PermissionError(13, "Der Prozess kann nicht auf die Datei zugreifen")
+        echt(pfad)
+
+    monkeypatch.setattr(pfade, "datei_entfernen", gesperrt)
+    antwort.extend(["loeschen", "entfernen"])
+    assert _cli("aufraeumen", "--ziel", ziel, "--endgueltig", "--leere-ordner") == cli.OK
+    assert (quelle / "Videos" / "Thumbs.db").exists()
+    assert not (quelle / "Analog").exists()           # die anderen Ordner sind trotzdem weg
+    nicht = _ereignisse(nachschauen, ziel, loeschen.ART_REST_NICHT_ENTFERNT)
+    assert any("zugreifen" in e["text"] for e in nicht)
+
+
 def test_reste_datei_mit_echtem_typ_wird_nicht_entfernt(baum, quelle, ziel, nachschauen, antwort, tmp_path, archiv_basis, capsys):
     """'.jpg' in reste_dateien darf die Loeschregel nicht aushebeln (SPEC Abschnitt 5)."""
     _vorbereiten(ziel, quelle)

@@ -169,3 +169,45 @@ def test_neuer_rechner_ohne_archiv_ordner(baum, quelle, ziel, archiv_basis, nach
     assert (ordner / config.DATEINAME).read_bytes() == konf_im_ziel
     assert _zeilen(nachschauen, ziel) == vorher
     assert _cli("pruefen", "--ziel", ziel) == cli.OK
+
+
+def test_ersetzen_legt_nichts_beiseite_solange_ein_lauf_arbeitet(baum, quelle, ziel, archiv_basis, capsys):
+    """Ein anderer Lauf haelt das Archiv: --ersetzen darf seine Datenbank nicht
+    unter ihm wegziehen. Frueher wurde erst beiseitegelegt und dann gesperrt."""
+    _bis_kopiert(ziel, quelle)
+    ordner = _archiv_ordner(ziel, archiv_basis)
+    vorher = (ordner / db.DATEINAME).stat().st_mtime_ns
+    fremd = db.Archivsperre(db.sperr_pfad(ordner))
+    assert fremd.nehmen()
+    try:
+        capsys.readouterr()
+        assert _cli("wiederherstellen", "--ersetzen", "--ziel", ziel) == cli.FEHLER
+        assert "laeuft bereits ein Vorgang" in capsys.readouterr().out
+        assert (ordner / db.DATEINAME).stat().st_mtime_ns == vorher
+        assert not list(ordner.glob(db.DATENBANK_ERSETZT + "*"))
+        assert not (ordner / db.DATENBANK_NEU).exists()
+    finally:
+        fremd.freigeben()
+    # Danach geht es; die Sperre ist wieder frei.
+    assert _cli("wiederherstellen", "--ersetzen", "--ziel", ziel) == cli.OK
+    assert _cli("status", "--ziel", ziel) == cli.OK
+
+
+def test_kaputte_lokale_datenbank_wird_verstaendlich_gemeldet(baum, quelle, ziel, archiv_basis, nachschauen, capsys):
+    """Die lokale Datenbank ist zerstoert (Absturz der Platte, Fremdprogramm):
+    Statt eines englischen Programmfehlers kommt eine Meldung mit dem Weg
+    hinaus - und der Weg funktioniert."""
+    _bis_kopiert(ziel, quelle)
+    vorher = _zeilen(nachschauen, ziel)
+    ordner = _archiv_ordner(ziel, archiv_basis)
+    _lokal_loeschen(ziel, archiv_basis)
+    (ordner / db.DATEINAME).write_bytes(b"kein sqlite, nur Muell " * 1000)
+    capsys.readouterr()
+    assert _cli("status", "--ziel", ziel) == cli.FEHLER
+    aus = capsys.readouterr().out
+    assert "Traceback" not in aus and "laesst sich nicht lesen" in aus
+    assert "wiederherstellen --ersetzen" in aus
+    assert _cli("wiederherstellen", "--ersetzen", "--ziel", ziel) == cli.OK
+    assert _zeilen(nachschauen, ziel) == vorher
+    # Die kaputte Datei ist aufgehoben, nicht geloescht.
+    assert [p for p in ordner.glob(db.DATENBANK_ERSETZT + "*") if not p.name.endswith(("-wal", "-shm"))]

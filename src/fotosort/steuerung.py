@@ -33,20 +33,43 @@ SCHREIB_ABSTAND = 0.5      # Sekunden zwischen zwei Statusdateien
 HERZSCHLAG = 2.0           # spaetestens so oft wird der Stand geschrieben, auch ohne Fortschritt
 
 
+#: Unter Windows ist eine Datei, die ein anderer Prozess gerade offen hat
+#: (das Fenster beim Lesen, ein Virenscanner), fuer einen Augenblick nicht
+#: ersetzbar. So oft und so lange wird es erneut versucht (zusammen 2 s).
+SPERRE_VERSUCHE = 40
+SPERRE_PAUSE = 0.05
+
+
 def json_schreiben(pfad: Path, daten: dict) -> None:
-    """Datei komplett neu schreiben, nie halb: erst .neu, dann umbenennen."""
+    """Datei komplett neu schreiben, nie halb: erst .neu, dann umbenennen.
+
+    Diese Dateien gehoeren nur der Oberflaeche (Stand, Wuensche) - kein
+    Bild, deshalb ist Ersetzen hier richtig."""
     pfad = Path(pfad)
     pfad.parent.mkdir(parents=True, exist_ok=True)
     vorlaeufig = pfad.with_name(pfad.name + ".neu")
     vorlaeufig.write_text(json.dumps(daten, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(vorlaeufig, pfad)
+    for versuch in range(SPERRE_VERSUCHE):
+        try:
+            os.replace(vorlaeufig, pfad)
+            return
+        except PermissionError:
+            if versuch == SPERRE_VERSUCHE - 1:
+                raise
+            time.sleep(SPERRE_PAUSE)
 
 
 def json_lesen(pfad: Path) -> dict | None:
-    try:
-        return json.loads(Path(pfad).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    for versuch in range(3):
+        try:
+            return json.loads(Path(pfad).read_text(encoding="utf-8"))
+        except PermissionError:
+            # Gerade im Ersetzen (Windows): gleich noch einmal.
+            if versuch < 2:
+                time.sleep(SPERRE_PAUSE)
+        except (OSError, ValueError):
+            return None
+    return None
 
 
 _MEINE_STARTZEIT = prozesse.startzeit(os.getpid())

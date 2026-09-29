@@ -108,3 +108,54 @@ def test_startzeit_erkennt_wiederverwendete_prozessnummer():
     finally:
         kind.kill()
         kind.wait()
+
+
+_HAENGT_MIT_KIND = """
+import signal, subprocess, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)   # wie ein Prozess, der in einem Netzlaufwerk feststeckt
+kind = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+print(kind.pid, flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.skipif(WINDOWS, reason="Prozessgruppen gibt es so nur unter Linux/macOS")
+def test_sofort_beenden_nimmt_haengenden_prozess_samt_kindern(tmp_path):
+    """"Sofort beenden" bittet erst (SIGTERM an die ganze Gruppe, also auch an
+    ExifTool) und fasst nach kurzer Zeit hart nach. Frueher blieb ein haengender
+    Arbeitsprozess stehen, und seine ExifTool-Prozesse liefen ohne Eltern weiter."""
+    import os
+    import time
+
+    p = subprocess.Popen([sys.executable, "-c", _HAENGT_MIT_KIND], stdout=subprocess.PIPE,
+                         **prozesse.losgeloest())
+    kind = int(p.stdout.readline())
+    try:
+        start = prozesse.startzeit(p.pid)
+        ablauf.prozess_beenden(p.pid, start, nachsetzen=0.5)
+        p.wait(timeout=15)
+        ende = time.monotonic() + 15
+        while ablauf.pid_lebt(kind) and time.monotonic() < ende:
+            time.sleep(0.1)
+        assert not ablauf.pid_lebt(kind)
+    finally:
+        for pid in (p.pid, kind):
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+
+
+@pytest.mark.skipif(WINDOWS, reason="Prozessgruppen gibt es so nur unter Linux/macOS")
+def test_sofort_beenden_trifft_nie_die_eigene_gruppe():
+    """Ein Prozess ohne eigene Gruppe (nicht losgeloest gestartet) wird allein
+    beendet - nie die Gruppe, in der auch das Fenster selbst laeuft."""
+    import os
+
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        assert os.getpgid(p.pid) == os.getpgid(0)
+        ablauf.prozess_beenden(p.pid, prozesse.startzeit(p.pid), nachsetzen=0.2)
+        p.wait(timeout=15)
+    finally:
+        p.kill()

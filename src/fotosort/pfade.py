@@ -306,6 +306,50 @@ class KeinNoReplace(OSError):
     """Das Dateisystem kann kein nicht ueberschreibendes Umbenennen (exFAT, FAT32)."""
 
 
+def _schreibgeschuetzt(pfad: Path) -> bool:
+    """Traegt die Datei das Windows-Attribut "Schreibgeschuetzt"? Ausserhalb
+    von Windows gibt es dieses Attribut nicht (dort entscheiden die Rechte
+    des Ordners, und die werden nie umgangen)."""
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        attribute = getattr(os.stat(lang(pfad), follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attribute & 0x1)   # FILE_ATTRIBUTE_READONLY
+
+
+def _schreibschutz_setzen(pfad: Path, an: bool) -> None:
+    import stat as _stat
+    os.chmod(lang(pfad), _stat.S_IREAD if an else _stat.S_IREAD | _stat.S_IWRITE)
+
+
+def datei_entfernen(pfad: Path) -> None:
+    """Eine Datei entfernen, die der Aufrufer vorher vollstaendig geprueft hat.
+
+    Unter Windows laesst sich eine Datei mit dem Attribut "Schreibgeschuetzt"
+    nicht loeschen - haeufig bei Kopien von Speicherkarten und CDs. Nur dann,
+    und nur fuer genau diese eine Datei, wird das Attribut aufgehoben; klappt
+    das Loeschen trotzdem nicht, kommt es zurueck. Fehlende Rechte werden nie
+    umgangen: Der Fehler geht dann unveraendert an den Aufrufer.
+    """
+    try:
+        os.unlink(lang(pfad))
+        return
+    except PermissionError:
+        if not _schreibgeschuetzt(pfad):
+            raise
+    _schreibschutz_setzen(pfad, False)
+    try:
+        os.unlink(lang(pfad))
+    except OSError:
+        try:
+            _schreibschutz_setzen(pfad, True)
+        except OSError:
+            pass
+        raise
+
+
 def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
     """von -> nach, ohne je eine vorhandene Datei zu ersetzen (SPEC §5).
 

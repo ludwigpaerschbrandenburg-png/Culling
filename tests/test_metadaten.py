@@ -182,17 +182,17 @@ def test_pool_ohne_with_block_meldet_das():
         p.einreichen([("x.jpg", FOTO)])
 
 
-def nachgebautes_exiftool(tmp_path: Path) -> str:
+def nachgebautes_exiftool(tmp_path: Path, zusatz: str = "") -> str:
     """Startbarer Ersatz fuer ExifTool (tests/exiftool_haengt.py) als Skript
     bzw. .cmd, damit der Pool ihn wie das echte Programm startet."""
     import sys
     skript = Path(__file__).with_name("exiftool_haengt.py")
     if sys.platform.startswith("win"):
         huelle = tmp_path / "exiftool_haengt.cmd"
-        huelle.write_text(f'@"{sys.executable}" "{skript}" %*\r\n', encoding="utf-8")
+        huelle.write_text(f'@"{sys.executable}" "{skript}" {zusatz} %*\r\n', encoding="utf-8")
     else:
         huelle = tmp_path / "exiftool_haengt.sh"
-        huelle.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{skript}" "$@"\n', encoding="utf-8")
+        huelle.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{skript}" {zusatz} "$@"\n', encoding="utf-8")
         huelle.chmod(0o755)
     return str(huelle)
 
@@ -217,6 +217,69 @@ def test_haengender_stapel_kostet_nur_die_eine_datei(tmp_path, monkeypatch):
         assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
         assert len(pool._alle) == 1
     assert time.monotonic() - beginn < 20.0
+
+
+def _schnell(monkeypatch) -> None:
+    monkeypatch.setattr(metadaten, "ZEITLIMIT_GRUND", 30.0)
+    monkeypatch.setattr(metadaten, "STARTABSTAND", 0.0)
+
+
+def test_abstuerzender_stapel_kostet_nur_die_eine_datei(tmp_path, monkeypatch):
+    """Stirbt ExifTool mitten im Stapel, wird es neu gestartet und der Stapel
+    Datei fuer Datei nachgelesen. Frueher blieb der tote Prozess im Strang
+    stehen, und jeder weitere Stapel endete als Fehler."""
+    _schnell(monkeypatch)
+    programm = nachgebautes_exiftool(tmp_path)
+    a, stirbt, b = (str(tmp_path / n) for n in ("a.jpg", "stirbt.jpg", "b.jpg"))
+    with metadaten.ExifToolPool(programm, 1) as pool:
+        ergebnis = pool.lesen([(a, FOTO), (stirbt, FOTO), (b, FOTO)])
+        assert ergebnis[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        assert ergebnis[metadaten.schluessel(b)]["Model"] == "Nachbau"
+        assert "abgestuerzt" in ergebnis[metadaten.schluessel(stirbt)]["Error"]
+        assert pool.abstuerze == 2 and pool.zeitlimits == 0   # Stapel und die eine Datei
+        assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        assert len(pool._alle) == 1
+
+
+def test_von_aussen_beendeter_prozess_wird_ersetzt(tmp_path, monkeypatch):
+    """Der Prozess stirbt zwischen zwei Stapeln (Speicher knapp, Virenscanner):
+    Der naechste Stapel bekommt einen neuen Prozess und wird normal gelesen."""
+    _schnell(monkeypatch)
+    programm = nachgebautes_exiftool(tmp_path)
+    a = str(tmp_path / "a.jpg")
+    with metadaten.ExifToolPool(programm, 1) as pool:
+        assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        alt = pool._alle[0]
+        alt.prozess.kill()
+        alt.prozess.wait(timeout=10)
+        assert pool.lesen([(a, FOTO)])[metadaten.schluessel(a)]["Model"] == "Nachbau"
+        assert pool.abstuerze == 1 and pool._alle and pool._alle[0] is not alt
+
+
+def test_immer_abstuerzendes_exiftool_endet_mit_fehler_statt_endlos(tmp_path, monkeypatch):
+    """Startet ExifTool gar nicht erst richtig, wird nicht fuer jede Datei ein
+    neuer Prozess versucht: Nach wenigen Abstuerzen in Folge endet der Stapel
+    mit einem Fehler (die Dateien bekommen Status fehler und werden beim
+    naechsten Lauf erneut versucht)."""
+    _schnell(monkeypatch)
+    programm = nachgebautes_exiftool(tmp_path, "--stirbt-sofort")
+    stapel = [(str(tmp_path / f"{i}.jpg"), FOTO) for i in range(50)]
+    with metadaten.ExifToolPool(programm, 1) as pool:
+        with pytest.raises(metadaten.MetadatenFehler):
+            pool.lesen(stapel)
+        assert pool.abstuerze <= metadaten.ABSTUERZE_IN_FOLGE + 1
+        with pytest.raises(metadaten.MetadatenFehler):
+            pool.lesen(stapel)
+        assert pool.abstuerze <= metadaten.ABSTUERZE_IN_FOLGE + 2
+
+
+def test_nicht_startbares_exiftool_ist_ein_metadatenfehler(tmp_path, monkeypatch):
+    """Verschwindet das Programm waehrend des Laufs (USB-Stick abgezogen),
+    kommt ein MetadatenFehler statt eines Absturzes der ganzen Analyse."""
+    _schnell(monkeypatch)
+    with metadaten.ExifToolPool(str(tmp_path / "gibt_es_nicht"), 1) as pool:
+        with pytest.raises(metadaten.MetadatenFehler):
+            pool.lesen([(str(tmp_path / "a.jpg"), FOTO)])
 
 
 def test_ohne_zeitlimit_kein_waechter(baum):

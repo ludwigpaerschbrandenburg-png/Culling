@@ -454,3 +454,53 @@ def test_cli_analyse_mit_exiftool_pfad_nur_in_config(capsys, quelle, ziel, monke
     monkeypatch.delenv("FOTOSORT_EXIFTOOL", raising=False)
     rueckgabe, ausgabe = _laufen(capsys, "analyse", "--ziel", ziel)
     assert rueckgabe == cli.OK, ausgabe
+
+
+# ------------------------------------------ voruebergehende Fehler ----
+
+
+def test_voruebergehender_exiftool_fehler_wird_beim_naechsten_lauf_erneut_versucht(vorbereitet, ziel, konf, baum):
+    """Ein Absturz oder Zeitlimit von ExifTool liegt selten an der Datei. Frueher
+    blieb die Gruppe fuer immer auf fehler; jetzt versucht die naechste Analyse
+    sie erneut. Ein Fehler, der an der Datei selbst liegt, bleibt."""
+    from fotosort import meldungen
+    dbank, lauf, _ = vorbereitet
+    _analyse(dbank, lauf, ziel, konf)
+    richtig = {k: dict(_zeile(dbank, baum[k])) for k in ("raw", "jpg", "sidecar_form1")}
+    grund = f"{analyse.GRUND_METADATEN}: {meldungen.EXIFTOOL_ABGESTUERZT}"
+    analyse._fehler_setzen(dbank, baum["raw"], grund, "")
+    for k in ("jpg", "sidecar_form1"):
+        analyse._fehler_setzen(dbank, baum[k], f"{analyse.GRUND_HAUPTDATEI}: {grund}", baum["raw"])
+    analyse._fehler_setzen(dbank, baum["analog"], f"{analyse.GRUND_METADATEN}: File format error", "")
+    dbank.stapel_schreiben()
+
+    e = _analyse(dbank, lauf, ziel, konf)
+    assert e.erneut_versucht == 3
+    for k, vorher in richtig.items():
+        z = dict(_zeile(dbank, baum[k]))
+        assert z["status"] == "analysiert" and z["fehlergrund"] == ""
+        assert (z["zielpfad"], z["aufnahme_zeit"], z["kamera"]) == (vorher["zielpfad"], vorher["aufnahme_zeit"], vorher["kamera"])
+    assert _zeile(dbank, baum["analog"])["status"] == "fehler"
+    ereignisse = dbank.ereignisse_liste(analyse.ART_ERNEUT_VERSUCHT)
+    assert len(ereignisse) == 3
+
+
+def test_stapelfehler_nennt_den_grund(vorbereitet, ziel, konf, monkeypatch):
+    """Scheitert ein ganzer Stapel (ExifTool stuerzt wiederholt ab), steht der
+    Grund bei jeder Datei - nicht nur "Metadaten nicht lesbar"."""
+    from fotosort import meldungen, metadaten
+    dbank, lauf, _ = vorbereitet
+
+    def scheitert(self, pfade_typ):
+        raise metadaten.MetadatenFehler(meldungen.EXIFTOOL_STUERZT_WIEDERHOLT)
+
+    echt = metadaten.ExifToolPool._lesen
+    monkeypatch.setattr(metadaten.ExifToolPool, "_lesen", scheitert)
+    _analyse(dbank, lauf, ziel, konf)
+    zeilen = dbank.verbindung.execute("SELECT fehlergrund FROM dateien WHERE status = 'fehler'").fetchall()
+    assert zeilen and all("stuerzt wiederholt ab" in z["fehlergrund"] for z in zeilen)
+    # Sobald ExifTool wieder geht, holt die naechste Analyse alles nach.
+    monkeypatch.setattr(metadaten.ExifToolPool, "_lesen", echt)
+    e = _analyse(dbank, lauf, ziel, konf)
+    assert e.erneut_versucht == len(zeilen)
+    assert dbank.zaehler_je_status().get("fehler", 0) == 0

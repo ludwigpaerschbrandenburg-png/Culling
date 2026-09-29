@@ -276,6 +276,53 @@ def test_quelldatei_verschwunden_wird_fehler(baum, quelle, ziel, nachschauen, ca
     assert "Fehler:                      1" in capsys.readouterr().out
 
 
+def test_quelldatei_wieder_da_wird_beim_naechsten_lauf_kopiert(baum, quelle, ziel, nachschauen, capsys, tmp_path):
+    """Eine Datei, die beim Kopieren fehlte (Karte kurz gezogen, Netz weg),
+    blieb frueher fuer immer auf fehler. Ist sie wieder da, holt das naechste
+    kopieren sie nach."""
+    _vorbereiten(ziel, quelle)
+    beiseite = tmp_path / "beiseite.bin"
+    shutil.move(baum["analog"], beiseite)
+    assert _cli("kopieren", "--ziel", ziel) == cli.FEHLER
+    assert _zeilen(nachschauen, ziel)[str(baum["analog"])]["status"] == "fehler"
+    shutil.move(beiseite, baum["analog"])
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert "erneut versucht" in capsys.readouterr().out
+    z = _zeilen(nachschauen, ziel)[str(baum["analog"])]
+    assert z["status"] == "kopiert" and z["fehlergrund"] == ""
+    assert hashes.blake3_datei(Path(z["zielpfad"])) == hashes.blake3_datei(baum["analog"])
+    assert len(_ereignisse(nachschauen, ziel, kopieren.ART_NEU_NACH_FEHLER)) == 1
+
+
+def test_quelle_waehrend_des_kopierens_abgezogen(baum, quelle, ziel, nachschauen, capsys, tmp_path, monkeypatch):
+    """Die ganze Quelle verschwindet mitten im Lauf (USB-Platte abgezogen): Ihre
+    Dateien bleiben offen statt einzeln als Fehler zu enden, der Lauf nennt
+    die Quelle, und nach dem Wiederanstecken geht es normal weiter."""
+    _vorbereiten(ziel, quelle)
+    beiseite = tmp_path / "abgezogen"
+    echt = kopieren._quellen
+
+    def abziehen(*a, **k):
+        ergebnis = echt(*a, **k)
+        shutil.move(quelle, beiseite)       # nach der Vorpruefung, vor der ersten Datei
+        return ergebnis
+
+    monkeypatch.setattr(kopieren, "_quellen", abziehen)
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "nicht mehr erreichbar" in aus and str(quelle) in aus
+    zeilen = _echte(_zeilen(nachschauen, ziel))
+    assert not [z for z in zeilen.values() if z["status"] == "fehler"]
+    assert all(z["status"] == "analysiert" for z in zeilen.values())
+    # Nicht monkeypatch.undo(): Das naehme auch die Test-Umgebung (Archiv-Ordner) zurueck.
+    monkeypatch.setattr(kopieren, "_quellen", echt)
+    shutil.move(beiseite, quelle)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert all(z["status"] in ("kopiert", "duplikat") for z in _echte(_zeilen(nachschauen, ziel)).values())
+
+
 # ------------------------------------------------- Duplikate ueber Quellen ----
 
 
@@ -628,3 +675,26 @@ def test_entfernen_eigene_wartet_auf_den_virenscanner(tmp_path, monkeypatch):
     # Eine fehlende Datei ist kein Fehler.
     monkeypatch.setattr(kopieren.os, "unlink", echt)
     kopieren._entfernen_eigene(tmp_path / "gibt_es_nicht.part")
+
+
+def test_namen_in_arbeit_gelten_ohne_gross_klein_und_unicode_form():
+    """Unter Windows, auf SMB-Freigaben und exFAT sind IMG_0001.JPG und
+    img_0001.jpg derselbe Name, ebenso "é" in zwei Unicode-Schreibweisen.
+    Frueher galten zwei solche Kopien gleichzeitig als frei; ihre .part-Dateien
+    waren auf der Platte dieselbe Datei."""
+    import unicodedata
+
+    arbeit = kopieren._InArbeit()
+    arbeit.add(Path("/z/2026/IMG_0001.JPG"))
+    assert Path("/z/2026/img_0001.jpg") in arbeit
+    assert Path("/z/2026/IMG_0002.JPG") not in arbeit
+    nfd = unicodedata.normalize("NFD", "/z/2026/Café.jpg")
+    arbeit.add(Path(unicodedata.normalize("NFC", "/z/2026/Café.jpg")))
+    assert Path(nfd) in arbeit
+    # Der eigene Name zaehlt nicht als fremd, ein anderer mit gleichem Schluessel schon.
+    assert not arbeit.fremd(Path("/z/2026/IMG_0001.JPG"), frozenset({db.pfad_text(Path("/z/2026/IMG_0001.JPG"))}))
+    assert arbeit.fremd(Path("/z/2026/img_0001.jpg"), frozenset({db.pfad_text(Path("/z/2026/img_0001.jpg"))}))
+    arbeit.discard(Path("/z/2026/IMG_0001.JPG"))
+    assert Path("/z/2026/img_0001.jpg") not in arbeit
+    arbeit.clear()
+    assert Path(nfd) not in arbeit

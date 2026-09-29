@@ -82,6 +82,22 @@ class ZeitlimitUeberschritten(MetadatenFehler):
     """ExifTool hat innerhalb des Zeitlimits nicht geantwortet und wurde beendet."""
 
 
+class ProzessBeendet(MetadatenFehler):
+    """Der ExifTool-Prozess lebt nicht mehr (abgestuerzt oder von aussen
+    beendet). Er muss ersetzt werden; der Stapel ist nicht gelesen."""
+
+
+class SchonBeendet(ProzessBeendet):
+    """Der Prozess war schon tot, bevor der Stapel ihn erreichte - an den
+    Dateien dieses Stapels kann es nicht liegen."""
+
+
+#: So viele Abstuerze hintereinander, ohne dass dazwischen etwas gelesen
+#: wurde, und es wird nicht mehr neu gestartet: Dann liegt es nicht an einer
+#: Datei, sondern an ExifTool selbst.
+ABSTUERZE_IN_FOLGE = 5
+
+
 def schluessel(pfad) -> str:
     """Pfad in der Form, unter der die ExifTool-Antwort zugeordnet wird.
 
@@ -170,13 +186,17 @@ class _Prozess:
         self.programm = programm
         self.zaehler = 0
         self.abgewuergt = False
-        self.prozess = subprocess.Popen(
-            exiftool_befehl(programm) + ["-stay_open", "True", "-@", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            **prozesse.unsichtbar(),
-        )
+        try:
+            self.prozess = subprocess.Popen(
+                exiftool_befehl(programm) + ["-stay_open", "True", "-@", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                **prozesse.unsichtbar(),
+            )
+        except OSError as fehler:
+            # Programm verschwunden (Stick abgezogen) oder nicht startbar.
+            raise MetadatenFehler(f"{meldungen.EXIFTOOL_NICHT_STARTBAR}: {fehler}") from fehler
 
     def _abwuergen(self) -> None:
         """Nach Ablauf des Zeitlimits: Prozess samt Kindern beenden, damit
@@ -201,6 +221,8 @@ class _Prozess:
         zeilen = _argumente(typ) + [p for p, _ in pfade_typ]
         eingabe = "\n".join(zeilen) + f"\n-execute{nummer}\n"
         assert self.prozess.stdin is not None and self.prozess.stdout is not None
+        if self.prozess.poll() is not None:
+            raise SchonBeendet(meldungen.EXIFTOOL_ABGESTUERZT)
         waechter = threading.Timer(limit, self._abwuergen) if limit else None
         if waechter is not None:
             waechter.daemon = True
@@ -210,7 +232,7 @@ class _Prozess:
                 self.prozess.stdin.write(eingabe.encode("utf-8", "surrogateescape"))
                 self.prozess.stdin.flush()
             except OSError as fehler:
-                raise MetadatenFehler(f"ExifTool nimmt keine Eingabe an: {fehler}") from fehler
+                raise ProzessBeendet(f"{meldungen.EXIFTOOL_ABGESTUERZT}: {fehler}") from fehler
 
             ende = f"{{ready{nummer}}}".encode()
             puffer = bytearray()
@@ -219,7 +241,7 @@ class _Prozess:
                 if not zeile:
                     if self.abgewuergt:
                         raise ZeitlimitUeberschritten(meldungen.EXIFTOOL_ZEITLIMIT)
-                    raise MetadatenFehler("ExifTool hat sich unerwartet beendet")
+                    raise ProzessBeendet(meldungen.EXIFTOOL_ABGESTUERZT)
                 if zeile.rstrip(b"\r\n") == ende:
                     break
                 puffer.extend(zeile)
@@ -240,6 +262,8 @@ class _Prozess:
         return ergebnis
 
     def beenden(self) -> None:
+        if self.prozess.poll() is not None:
+            return
         try:
             if self.prozess.stdin is not None:
                 self.prozess.stdin.write(b"-stay_open\nFalse\n")
@@ -247,7 +271,9 @@ class _Prozess:
                 self.prozess.stdin.close()
             self.prozess.wait(timeout=10)
         except (OSError, subprocess.TimeoutExpired, ValueError):
-            self.prozess.kill()
+            # Samt Kindern: unter Windows haelt perl.exe hinter exiftool.exe
+            # sonst weiter die Datei offen, die es gerade liest.
+            prozesse.baum_beenden(self.prozess)
 
 
 class ExifToolPool:
@@ -262,6 +288,8 @@ class ExifToolPool:
         self._executor: ThreadPoolExecutor | None = None
         self._naechster_start = 0.0
         self.zeitlimits = 0          # wie oft ein Prozess wegen Zeitlimit ersetzt wurde
+        self.abstuerze = 0           # wie oft ein abgestuerzter Prozess ersetzt wurde
+        self._abstuerze_in_folge = 0
 
     def __enter__(self) -> "ExifToolPool":
         self._executor = ThreadPoolExecutor(max_workers=self.prozesse, thread_name_prefix="exiftool")
@@ -290,25 +318,53 @@ class ExifToolPool:
                 self._alle.append(p)
         return p
 
-    def _ersetzen(self, p: _Prozess) -> None:
-        """Einen abgewuergten Prozess vergessen; der naechste Aufruf startet neu."""
+    def _ersetzen(self, p: _Prozess, zeitlimit_: bool) -> None:
+        """Einen abgewuergten oder abgestuerzten Prozess vergessen; der
+        naechste Aufruf startet neu."""
         p.beenden()
         with self._schloss:
             if p in self._alle:
                 self._alle.remove(p)
-            self.zeitlimits += 1
+            if zeitlimit_:
+                self.zeitlimits += 1
+            else:
+                self.abstuerze += 1
+                self._abstuerze_in_folge += 1
         if getattr(self._lokal, "prozess", None) is p:
             self._lokal.prozess = None
 
     def _lesen(self, pfade_typ: list[tuple[str, str]]) -> dict[str, dict]:
+        with self._schloss:
+            aufgegeben = self._abstuerze_in_folge >= ABSTUERZE_IN_FOLGE
+        if aufgegeben:
+            # ExifTool selbst ist kaputt, nicht eine Datei: nicht fuer jede
+            # Datei einen neuen Prozess versuchen.
+            raise MetadatenFehler(meldungen.EXIFTOOL_STUERZT_WIEDERHOLT)
         p = self._prozess()
         try:
-            return p.lesen(pfade_typ, zeitlimit(len(pfade_typ)))
+            ergebnis = p.lesen(pfade_typ, zeitlimit(len(pfade_typ)))
         except ZeitlimitUeberschritten:
-            self._ersetzen(p)
+            self._ersetzen(p, zeitlimit_=True)
+            grund = meldungen.EXIFTOOL_ZEITLIMIT
+        except SchonBeendet:
+            # Zwischen zwei Stapeln gestorben: mit neuem Prozess denselben
+            # Stapel noch einmal (begrenzt durch ABSTUERZE_IN_FOLGE oben).
+            self._ersetzen(p, zeitlimit_=False)
+            return self._lesen(pfade_typ)
+        except ProzessBeendet:
+            self._ersetzen(p, zeitlimit_=False)
+            grund = meldungen.EXIFTOOL_ABGESTUERZT
+        else:
+            with self._schloss:
+                self._abstuerze_in_folge = 0
+            return ergebnis
         if len(pfade_typ) <= 1:
             # Diese eine Datei ist es: Sie bekommt einen Fehler, alles andere geht weiter.
-            return {schluessel(pf): {"Error": meldungen.EXIFTOOL_ZEITLIMIT} for pf, _t in pfade_typ}
+            with self._schloss:
+                aufgegeben = self._abstuerze_in_folge >= ABSTUERZE_IN_FOLGE
+            if aufgegeben:
+                raise MetadatenFehler(meldungen.EXIFTOOL_STUERZT_WIEDERHOLT)
+            return {schluessel(pf): {"Error": grund} for pf, _t in pfade_typ}
         # Den Stapel Datei fuer Datei nachlesen: nur die haengende Datei kostet
         # noch ein Zeitlimit, die uebrigen sind in Sekundenbruchteilen gelesen.
         ergebnis: dict[str, dict] = {}

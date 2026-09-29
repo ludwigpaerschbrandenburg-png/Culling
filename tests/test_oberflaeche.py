@@ -576,6 +576,43 @@ def test_laufender_schritt_wird_beim_naechsten_oeffnen_uebernommen(tmp_path):
         ab.steuern("abbrechen")
 
 
+def test_kurz_gesperrte_datei_wird_trotzdem_geschrieben(tmp_path, monkeypatch):
+    """Unter Windows schlaegt das Umbenennen fehl, solange ein anderer Prozess
+    (das Fenster, ein Virenscanner) die Datei gerade offen hat. Frueher ging
+    dann ein Abbruchwunsch oder die Endmeldung des Arbeitsprozesses verloren."""
+    echt = os.replace
+    versuche = []
+
+    def gesperrt(a, b):
+        versuche.append(1)
+        if len(versuche) <= 3:
+            raise PermissionError(13, "Der Prozess kann nicht auf die Datei zugreifen")
+        echt(a, b)
+
+    monkeypatch.setattr(steuerung.os, "replace", gesperrt)
+    monkeypatch.setattr(steuerung, "SPERRE_PAUSE", 0.001)
+    steuerung.json_schreiben(tmp_path / "steuer.json", {"abbrechen": True})
+    assert steuerung.json_lesen(tmp_path / "steuer.json") == {"abbrechen": True}
+    assert len(versuche) == 4
+
+
+def test_steuern_meldet_nicht_schreibbare_datei_verstaendlich(tmp_path):
+    ordner = tmp_path / "ob"
+    ordner.mkdir()
+    jetzt = time.time()
+    steuerung.json_schreiben(ordner / "status.json", {
+        "schritt": "kopieren", "zustand": "laeuft", "pid": os.getpid(), "beginn": jetzt, "aktualisiert": jetzt,
+        "dateien": 3, "gesamt": 10, "bytes": 300, "gesamt_bytes": 1000, "sekunden": 1.0, "lauf": 4, "rc": None,
+        "hinweis": "",
+    })
+    ab = ablauf_modul.Ablauf(ordner=ordner)
+    assert ab.lauf_lebt()
+    (ordner / "steuer.json").mkdir()          # laesst sich nicht ersetzen
+    with pytest.raises(ablauf_modul.FotosortFehler) as f:
+        ab.steuern("abbrechen")
+    assert "nicht weitergeben" in str(f.value)
+
+
 def test_verschwundener_prozess_gilt_als_abgestuerzt(tmp_path):
     ordner = tmp_path / "ob"
     ordner.mkdir()
@@ -665,6 +702,32 @@ def test_fehlende_datenbank_wird_von_der_startseite_zurueckgeholt(ob, quelle, zi
     z = client.get("/api/zustand").json()
     assert z["archiv"]["naechster"] == "pruefen" and "rettung" not in z["archiv"]
     assert "nichts zurückzuholen" in _fehler(client, "/api/wiederherstellen", {"ja": True})
+
+
+def test_beschaedigte_datenbank_wird_von_der_startseite_ersetzt(ob, quelle, ziel, archiv_basis, nachschauen):
+    """Die lokale Datenbank ist zerstoert: Frueher stuerzte das Fenster beim
+    Oeffnen ab. Jetzt zeigt die Startseite den Grund und bietet das Zurueckholen
+    aus der Sicherung an; die beschaedigte Datei wird aufgehoben, nicht geloescht."""
+    ab, client = ob
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["kopieren", "--ziel", str(ziel)]) == cli.OK
+    vorher = _zeilen(nachschauen, ziel)
+    _post(client, "/api/ziel", {"ziel": str(ziel)})
+    lokal = _lokal_weg(ziel, archiv_basis)
+    (lokal / db.DATEINAME).write_bytes(b"kaputt" * 1000)
+    z = client.get("/api/zustand").json()
+    assert z["archiv"]["da"] and "beschaedigt" in z["archiv"]["fehler"]
+    assert z["archiv"]["rettung"] == "wiederherstellen" and "beschädigt" in z["archiv"]["rettung_text"]
+    a = _post(client, "/api/wiederherstellen")
+    assert a["frage"] == "wiederherstellen" and "aufgehoben" in a["text"]
+    a = _post(client, "/api/wiederherstellen", {"ja": True})
+    assert "zurückgeholt" in a["text"] and a["archiv"]["naechster"] == "pruefen"
+    assert _zeilen(nachschauen, ziel) == vorher
+    aufgehoben = [p for p in lokal.glob(db.DATENBANK_ERSETZT + "*") if not p.name.endswith(("-wal", "-shm"))]
+    assert len(aufgehoben) == 1 and aufgehoben[0].read_bytes() == b"kaputt" * 1000
+    z = client.get("/api/zustand").json()
+    assert "rettung" not in z["archiv"] and "fehler" not in z["archiv"]
 
 
 def test_ohne_sicherung_wird_das_ziel_neu_eingelesen(ob, quelle, ziel, archiv_basis, nachschauen):

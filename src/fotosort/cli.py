@@ -1267,18 +1267,28 @@ def befehl_wiederherstellen(args, konsole) -> int:
         konsole.print(meldungen.wiederherstellen_keine_sicherung(sicherung, ort.ziel))
         return FEHLER
     lokal = db.datenbank_pfad(ort.ordner)
-    lokal_da = lokal.exists()
-    # Erst pruefen, dann ersetzen: Ein kaputter Stand veraendert nichts.
-    stand = db.sicherung_holen(sicherung, ort.ordner)
-    if lokal_da and not args.ersetzen:
-        (ort.ordner / db.DATENBANK_NEU).unlink()
-        konsole.print(meldungen.wiederherstellen_lokale_da(lokal, db.lokaler_stand(ort.ordner), sicherung, stand.letzter_lauf))
-        return FEHLER
-    exiftool_pruefen(args.befehl, ort.konf, konsole)
-    beiseite = db.datenbank_beiseite(ort.ordner) if lokal_da else None
-    db.sicherung_einsetzen(ort.ordner)
-    begonnen = time.monotonic()
-    datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=True)
+    # Zuerst sperren: Solange ein anderer Lauf an diesem Archiv arbeitet,
+    # darf seine Datenbank nicht beiseitegelegt werden.
+    sperre = db.Archivsperre(db.sperr_pfad(ort.ordner))
+    if not sperre.nehmen():
+        raise FotosortFehler(meldungen.archiv_belegt(ort.ordner))
+    try:
+        lokal_da = lokal.exists()
+        # Erst pruefen, dann ersetzen: Ein kaputter Stand veraendert nichts.
+        stand = db.sicherung_holen(sicherung, ort.ordner)
+        if lokal_da and not args.ersetzen:
+            (ort.ordner / db.DATENBANK_NEU).unlink()
+            konsole.print(meldungen.wiederherstellen_lokale_da(lokal, db.lokaler_stand(ort.ordner), sicherung, stand.letzter_lauf))
+            return FEHLER
+        exiftool_pruefen(args.befehl, ort.konf, konsole)
+        beiseite = db.datenbank_beiseite(ort.ordner) if lokal_da else None
+        db.sicherung_einsetzen(ort.ordner)
+        begonnen = time.monotonic()
+        datenbank = db.Datenbank.oeffnen(ort.ordner, gehaltene_sperre=sperre)
+        sperre = None   # gehoert jetzt der Datenbank
+    finally:
+        if sperre is not None:
+            sperre.freigeben()
     _anhebung_melden(datenbank, konsole)
     try:
         lauf = datenbank.lauf_beginnen(_befehlszeile())
@@ -1535,6 +1545,9 @@ def main(argv: list[str] | None = None) -> int:
             konsole.print(meldungen.datenbank_belegt(args.ziel))
             return FEHLER
         konsole.print(meldungen.system_fehler(args.ziel, str(fehler)))
+        return FEHLER
+    except sqlite3.DatabaseError as fehler:
+        konsole.print(meldungen.datenbank_fehler_unterwegs(str(fehler)))
         return FEHLER
     except OSError as fehler:
         # Fehlende Rechte, "--ziel zeigt auf eine Datei", ein Netzlaufwerk

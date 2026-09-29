@@ -1,6 +1,8 @@
 """Ein nachgebautes ExifTool fuer Tests: antwortet wie -stay_open, bleibt aber
-an jeder Datei haengen, deren Name "haengt" enthaelt. Nur fuer den Test des
-Zeitlimits (tests/test_metadaten.py); liest nie eine echte Datei."""
+an jeder Datei haengen, deren Name "haengt" enthaelt, und stuerzt bei jeder
+Datei ab, deren Name "stirbt" enthaelt. Mit --stirbt-sofort endet es gleich
+nach dem Start. Nur fuer die Tests von Zeitlimit und Absturz
+(tests/test_metadaten.py); liest nie eine echte Datei."""
 
 from __future__ import annotations
 
@@ -14,6 +16,8 @@ def main() -> int:
     if argumente == ["-ver"]:
         print("13.00")
         return 0
+    if "--stirbt-sofort" in argumente:
+        return 3
     if "-stay_open" not in argumente:
         return 0
     zeilen: list[str] = []
@@ -24,6 +28,8 @@ def main() -> int:
             pfade = [z for z in zeilen if not z.startswith("-")]
             if any("haengt" in p for p in pfade):
                 time.sleep(3600)
+            if any("stirbt" in p for p in pfade):
+                return 3
             antwort = [{"SourceFile": p, "DateTimeOriginal": "2026:01:01 12:30:00", "Make": "FAKE", "Model": "Nachbau"}
                        for p in pfade]
             sys.stdout.buffer.write((json.dumps(antwort) + f"\n{{ready{nummer}}}\n").encode("utf-8", "surrogateescape"))

@@ -494,6 +494,35 @@ def _entsperren(griff) -> None:
         pass
 
 
+def _ist_beschaedigt(fehler: sqlite3.DatabaseError) -> bool:
+    """Keine Datenbank oder zerstoert - nicht bloss belegt oder nicht erreichbar."""
+    name = getattr(fehler, "sqlite_errorname", "")
+    if name:
+        return name.startswith(("SQLITE_NOTADB", "SQLITE_CORRUPT"))
+    return type(fehler) is sqlite3.DatabaseError
+
+
+def datenbank_beschaedigt(ordner: Path) -> bool:
+    """Liegt lokal eine Datenbankdatei, die sich nicht als Datenbank lesen
+    laesst? Nur lesend; eine fehlende Datei ist nicht beschaedigt."""
+    pfad = datenbank_pfad(ordner)
+    if not pfad.is_file():
+        return False
+    try:
+        verbindung = sqlite3.connect(str(pfade.lang(pfad)), timeout=BUSY_TIMEOUT_MS / 1000.0)
+    except sqlite3.DatabaseError as fehler:
+        return _ist_beschaedigt(fehler)
+    try:
+        verbindung.execute("PRAGMA query_only = 1")
+        verbindung.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+        zeile = verbindung.execute("PRAGMA quick_check(1)").fetchone()
+        return not zeile or zeile[0] != "ok"
+    except sqlite3.DatabaseError as fehler:
+        return _ist_beschaedigt(fehler)
+    finally:
+        verbindung.close()
+
+
 def sperr_pfad(ordner: Path) -> Path:
     return Path(ordner) / SPERRDATEI
 
@@ -587,12 +616,16 @@ class Datenbank:
     # -- oeffnen und schliessen ------------------------------------------
 
     @classmethod
-    def oeffnen(cls, archiv_ordner: Path, sperren: bool = False) -> "Datenbank":
+    def oeffnen(cls, archiv_ordner: Path, sperren: bool = False,
+                gehaltene_sperre: "Archivsperre | None" = None) -> "Datenbank":
         """Die Archiv-Datenbank oeffnen.
 
         Mit sperren=True wird das Archiv fuer diesen Lauf belegt; ein
         zweiter Lauf bricht dann mit einer Meldung ab, statt dass sich
-        beide gegenseitig die Datenbank wegsperren.
+        beide gegenseitig die Datenbank wegsperren. Eine schon genommene
+        Sperre (gehaltene_sperre) geht an die Datenbank ueber und wird mit
+        ihr freigegeben - fuer "wiederherstellen", das sperren muss, bevor
+        es die bisherige Datei beiseitelegt.
         """
         ordner = Path(archiv_ordner)
         typ = pfade.dateisystem_typ(ordner)
@@ -600,8 +633,8 @@ class Datenbank:
             raise FotosortFehler(meldungen.datenbank_auf_netzlaufwerk(ordner, typ))
         ordner.mkdir(parents=True, exist_ok=True)
 
-        sperre = None
-        if sperren:
+        sperre = gehaltene_sperre
+        if sperren and sperre is None:
             sperre = Archivsperre(sperr_pfad(ordner))
             if not sperre.nehmen():
                 raise FotosortFehler(meldungen.archiv_belegt(ordner))
@@ -624,6 +657,12 @@ class Datenbank:
             angehoben_von = _schema_pruefen(verbindung, pfad)
             verbindung.executescript(SCHEMA)
             verbindung.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        except sqlite3.DatabaseError as fehler:
+            if sperre is not None:
+                sperre.freigeben()
+            if _ist_beschaedigt(fehler):
+                raise FotosortFehler(meldungen.datenbank_beschaedigt(pfad, fehler)) from fehler
+            raise
         except BaseException:
             if sperre is not None:
                 sperre.freigeben()
