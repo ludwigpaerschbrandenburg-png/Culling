@@ -382,13 +382,16 @@ def test_ordner_mit_unterordnern_liest_jede_datei_genau_einmal(ziel, archiv_basi
 
 
 def test_geaenderte_hauptdatei_zieht_die_gruppe_mit(vorbereitet, ziel, konf, quelle, baum):
-    """SPEC §3: Mitglieder wandern gemeinsam - auch nach einer Korrektur der RAW."""
+    """SPEC §3: Mitglieder wandern gemeinsam - auch nach einer Korrektur des
+    Datums. Seit v0.8 wird dabei jedes Mitglied selbst gelesen: Korrigiert der
+    Nutzer RAW und JPG, gehen beide mit; korrigiert er nur eines, sind es nach
+    der Aufnahmezeit zwei Aufnahmen (test_neu_begonnener_zaehler_wird_getrennt)."""
     dbank, lauf, _ = vorbereitet
     _analyse(dbank, lauf, ziel, konf)
-    testbaum._exiftool([["-overwrite_original", "-EXIF:DateTimeOriginal=2025:07:07 07:07:07", str(baum["raw"])]])
-    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)  # RAW faellt auf gefunden zurueck
+    testbaum._exiftool([["-overwrite_original", "-EXIF:DateTimeOriginal=2025:07:07 07:07:07", str(baum[k])]
+                        for k in ("raw", "jpg")])
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)  # beide fallen auf gefunden zurueck
     assert _zeile(dbank, baum["raw"])["status"] == "gefunden"
-    assert _zeile(dbank, baum["jpg"])["status"] == "analysiert"
     _analyse(dbank, lauf, ziel, konf)
     for schluessel in ("raw", "jpg", "sidecar_form1", "sidecar_form2"):
         z = _zeile(dbank, baum[schluessel])
@@ -509,3 +512,149 @@ def test_stapelfehler_nennt_den_grund(vorbereitet, ziel, konf, monkeypatch):
     e = _analyse(dbank, lauf, ziel, konf)
     assert e.erneut_versucht == len(zeilen)
     assert dbank.zaehler_je_status().get("fehler", 0) == 0
+
+
+# ------------------------------------ Runde 2 (v0.8): Gruppen und Datum -----
+
+
+def _anlegen(ordner: Path, dateien: dict) -> dict:
+    """name -> (Inhalt, ExifTool-Argumente) im Ordner anlegen; liefert name -> Pfad."""
+    wo, befehle = {}, []
+    for name, (inhalt, argumente) in dateien.items():
+        pfad = testbaum._schreiben(ordner / name, inhalt)
+        wo[name] = pfad
+        if argumente:
+            befehle.append(["-overwrite_original", *argumente, str(pfad)])
+    if befehle:
+        testbaum._exiftool(befehle)
+    return wo
+
+
+def _ereignisse(dbank, art):
+    return [dict(e) for e in dbank.ereignisse_liste(art)]
+
+
+def test_neu_begonnener_zaehler_wird_getrennt(vorbereitet, ziel, konf, quelle):
+    """Entscheidung 2: IMG_0001.JPG von 2016 und IMG_0001.MOV von 2021 haben nur
+    den Namen gemeinsam - jede in ihr eigenes Jahr, das Sidecar zum Foto."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Handy", {
+        "IMG_0001.JPG": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2016:05:05 10:00:00"]),
+        "IMG_0001.MOV": (testbaum._mp4(b"qt  "), ["-QuickTime:CreationDate=2021:06:06 10:00:00+02:00"]),
+        "IMG_0001.AAE": (b"<plist/>", None),
+    })
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    e = _analyse(dbank, lauf, ziel, konf)
+    jpg, mov, aae = (_zeile(dbank, wo[n]) for n in ("IMG_0001.JPG", "IMG_0001.MOV", "IMG_0001.AAE"))
+    assert "/2016-05-05/" in jpg["zielpfad"].replace("\\", "/")
+    assert "/2021-06-06/" in mov["zielpfad"].replace("\\", "/")
+    assert jpg["gruppe"] == jpg["quellpfad"] and mov["gruppe"] == mov["quellpfad"]
+    assert aae["gruppe"] == jpg["quellpfad"] and Path(aae["zielpfad"]).parent == Path(jpg["zielpfad"]).parent
+    getrennt = _ereignisse(dbank, analyse.ART_GRUPPE_GETRENNT)
+    assert len(getrennt) == 1 and getrennt[0]["pfad"] == mov["quellpfad"] and "2016" in getrennt[0]["text"]
+    assert e.getrennt == 1
+
+
+def test_raw_ohne_datum_folgt_dem_jpg_mit_datum(vorbereitet, ziel, konf, quelle):
+    """Entscheidung 3 (zweiter Fall): Die RAW hat kein Datum, das JPG schon -
+    beide gehen in den Tagesordner, nicht nach _Ohne_Datum."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Paar", {
+        "DSC0100.ARW": (testbaum._tiff(), ["-EXIF:Model=ILCE-7C"]),
+        "DSC0100.JPG": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2019:04:04 04:04:04", "-EXIF:Model=ILCE-7C"]),
+    })
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    raw, jpg = _zeile(dbank, wo["DSC0100.ARW"]), _zeile(dbank, wo["DSC0100.JPG"])
+    assert raw["gruppe"] == raw["quellpfad"] == jpg["gruppe"]            # RAW bleibt Hauptdatei
+    assert raw["aufnahme_zeit"] == jpg["aufnahme_zeit"] == "2019-04-04T04:04:04"
+    assert "/2019-04-04/" in raw["zielpfad"].replace("\\", "/") and raw["datum_sicher"] == 1
+
+
+def test_kaputte_hauptdatei_reisst_das_jpg_nicht_mit(vorbereitet, ziel, konf, quelle):
+    """Entscheidung 3: Eine leere ARW bekommt fehler - das JPG wird Hauptdatei,
+    das Sidecar geht mit ihm."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Kaputt", {
+        "DSC0200.ARW": (b"", None),
+        "DSC0200.JPG": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2020:02:02 02:02:02"]),
+        "DSC0200.xmp": (b'<?xpacket?><x:xmpmeta xmlns:x="adobe:ns:meta/"/>\n', None),
+    })
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    raw, jpg, xmp = (_zeile(dbank, wo[n]) for n in ("DSC0200.ARW", "DSC0200.JPG", "DSC0200.xmp"))
+    assert raw["status"] == "fehler" and "Metadaten nicht lesbar" in raw["fehlergrund"]
+    assert jpg["status"] == "analysiert" and jpg["gruppe"] == jpg["quellpfad"]
+    assert "/2020-02-02/" in jpg["zielpfad"].replace("\\", "/")
+    assert xmp["status"] == "analysiert" and xmp["gruppe"] == jpg["quellpfad"]
+
+
+_XMP_DATUM = (
+    b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
+    b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+    b'<rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"'
+    b' photoshop:DateCreated="2018-08-08T08:08:08"/></rdf:RDF></x:xmpmeta>\n<?xpacket end="w"?>\n'
+)
+
+
+def test_datum_aus_dem_xmp_sidecar(vorbereitet, ziel, konf, quelle):
+    """Entscheidung 5: Ein Scan ohne Datum, dessen Datum nur Lightroom kennt."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Scans", {"scan_0001.tif": (testbaum._tiff(), None), "scan_0001.xmp": (_XMP_DATUM, None)})
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    z = _zeile(dbank, wo["scan_0001.tif"])
+    assert z["aufnahme_zeit"] == "2018-08-08T08:08:08" and z["datum_quelle"] == 4 and z["datum_sicher"] == 1
+
+
+def test_datecreated_in_der_datei(vorbereitet, ziel, konf, quelle):
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Scans", {"scan_0002.tif": (testbaum._tiff(), ["-XMP-photoshop:DateCreated=2017:07:07 07:07:07"])})
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    z = _zeile(dbank, wo["scan_0002.tif"])
+    assert z["aufnahme_zeit"] == "2017-07-07T07:07:07" and z["datum_quelle"] == 4
+
+
+def test_datum_auffaellig_und_nur_hersteller_werden_vermerkt(vorbereitet, ziel, konf, quelle):
+    """Entscheidungen 9 und 7: nur Hinweise - einsortiert wird wie immer."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Uhr", {
+        "IMG_20230405_101010.jpg": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2000:01:01 00:01:00", "-EXIF:Make=Canon"]),
+    })
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    e = _analyse(dbank, lauf, ziel, konf)
+    z = _zeile(dbank, wo["IMG_20230405_101010.jpg"])
+    assert "/2000-01-01/" in z["zielpfad"].replace("\\", "/") and z["kamera"] == konf.wert("kamera.unbekannt")
+    auff = _ereignisse(dbank, analyse.ART_DATUM_AUFFAELLIG)
+    assert [a["pfad"] for a in auff] == [z["quellpfad"]] and "Dateinamen" in auff[0]["text"]
+    hersteller = _ereignisse(dbank, analyse.ART_NUR_HERSTELLER)
+    assert [(h["pfad"], h["text"]) for h in hersteller] == [(z["quellpfad"], "Canon")]
+    assert e.auffaellig == 1 and e.nur_hersteller == 1
+
+
+def test_spaeter_hinzugekommenes_mitglied(vorbereitet, ziel, konf, quelle):
+    """Das JPG ist schon kopiert; spaeter taucht ein MOV mit demselben Namen
+    auf. Passt die Zeit, gehoert es dazu (Ordner und Gruppe des JPG), sonst
+    ist es eine eigene Aufnahme."""
+    dbank, lauf, _ = vorbereitet
+    wo = _anlegen(quelle / "Spaeter", {
+        "IMG_0500.JPG": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2016:05:05 10:00:00"]),
+        "IMG_0600.JPG": (testbaum._JPEG, ["-EXIF:DateTimeOriginal=2016:06:06 10:00:00"]),
+    })
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    for n in ("IMG_0500.JPG", "IMG_0600.JPG"):
+        dbank.verbindung.execute("UPDATE dateien SET status = 'kopiert' WHERE quellpfad = ?", (db.pfad_text(wo[n]),))
+    dbank.verbindung.commit()
+    wo.update(_anlegen(quelle / "Spaeter", {
+        "IMG_0500.MOV": (testbaum._mp4(b"qt  "), ["-QuickTime:CreationDate=2016:05:05 10:00:02+02:00"]),
+        "IMG_0600.MOV": (testbaum._mp4(b"qt  "), ["-QuickTime:CreationDate=2022:02:02 10:00:00+01:00"]),
+    }))
+    scan.ausfuehren(quelle, ziel, konf, dbank, lauf)
+    _analyse(dbank, lauf, ziel, konf)
+    jpg5, mov5 = _zeile(dbank, wo["IMG_0500.JPG"]), _zeile(dbank, wo["IMG_0500.MOV"])
+    assert mov5["gruppe"] == jpg5["quellpfad"] and Path(mov5["zielpfad"]).parent == Path(jpg5["zielpfad"]).parent
+    assert jpg5["status"] == "kopiert"                                  # bleibt, wo es ist
+    jpg6, mov6 = _zeile(dbank, wo["IMG_0600.JPG"]), _zeile(dbank, wo["IMG_0600.MOV"])
+    assert mov6["gruppe"] == mov6["quellpfad"] and "/2022-02-02/" in mov6["zielpfad"].replace("\\", "/")

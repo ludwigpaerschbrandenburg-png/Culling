@@ -15,12 +15,17 @@ Windows die Datei direkt richtig oeffnet.
 from __future__ import annotations
 
 import csv
+import gzip
 import json
+import os
+import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import db, meldungen, nachpruefen, pfade
-from .analyse import ART_ZIELORDNER_MEHRDEUTIG, GRUND_SIDECAR_OHNE_HAUPT
+from . import db, meldungen, nachpruefen, pfade, zuruecklegen
+from .analyse import (ART_DATUM_AUFFAELLIG, ART_GRUPPE_GETRENNT, ART_NUR_HERSTELLER, ART_ZIELORDNER_MEHRDEUTIG,
+                      GRUND_SIDECAR_OHNE_HAUPT)
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
                        ART_NACHTRAEGLICH_BESTAETIGT, ART_NAMENSKONFLIKT, ART_PART_AUFGERAEUMT)
@@ -44,6 +49,14 @@ DATEI_SPALTEN = (
     "gefunden_in_lauf", "zuletzt_gesehen_in_lauf",
 )
 EREIGNIS_SPALTEN = ("lauf_nummer", "art", "pfad", "anzahl", "text")
+
+#: Seit v0.8 (SPEC §10): so viele Berichte bleiben; aeltere werden entfernt.
+BEHALTEN = 10
+#: So viele Eintraege je Liste im Text; alle stehen in der CSV.
+LISTE_HOECHSTENS = 1000
+_BERICHT_DATEI = re.compile(
+    r"^(bericht_\d{4}-\d{2}-\d{2}_\d{6}(?:_lauf\d+)?)(\.txt|_dateien\.csv|_ereignisse\.csv)(\.gz)?$"
+)
 
 
 def berichte_ordner(ziel: Path) -> Path:
@@ -72,7 +85,50 @@ def schreiben(ziel: Path, dbank: db.Datenbank, lauf: int | None = None,
         w.writerow(EREIGNIS_SPALTEN)
         for z in dbank.ereignisse_zeiger():
             w.writerow([_csv_wert(z[s]) for s in EREIGNIS_SPALTEN])
+    begrenzen(ordner)
     return txt, csv_dateien, csv_ereignisse
+
+
+def begrenzen(ordner: Path, behalten: int = BEHALTEN) -> None:
+    """Nur die Berichte der letzten "behalten" Laeufe bleiben (SPEC §10, seit
+    v0.8); die CSV-Dateien aller ausser dem neuesten werden gepackt (.csv.gz).
+    Angefasst werden nur Dateien, deren Name genau das Muster der Berichte hat -
+    nie etwas anderes, das jemand in den Ordner gelegt hat."""
+    je_stamm: dict[str, list[Path]] = {}
+    try:
+        eintraege = list(os.scandir(pfade.lang(ordner)))
+    except OSError:
+        return
+    for e in eintraege:
+        m = _BERICHT_DATEI.match(e.name)
+        if m and e.is_file(follow_symlinks=False):
+            je_stamm.setdefault(m.group(1), []).append(Path(ordner) / e.name)
+    staemme = sorted(je_stamm)
+    for stamm in staemme[:-behalten] if len(staemme) > behalten else []:
+        for datei in je_stamm[stamm]:
+            try:
+                pfade.geduldig(os.unlink, pfade.lang(datei))
+            except OSError:
+                pass   # bleibt liegen; beim naechsten Mal wieder versucht
+    for stamm in staemme[-behalten:-1]:
+        for datei in je_stamm[stamm]:
+            if datei.name.endswith(".csv"):
+                _packen(datei)
+
+
+def _packen(datei: Path) -> None:
+    gepackt = datei.with_name(datei.name + ".gz")
+    neu = datei.with_name(datei.name + ".gz.neu")
+    try:
+        with open(pfade.lang(datei), "rb") as ein, gzip.open(pfade.lang(neu), "wb") as aus:
+            shutil.copyfileobj(ein, aus, 1024 * 1024)
+        pfade.geduldig(os.replace, pfade.lang(neu), pfade.lang(gepackt), fehlernummern=pfade.GESPERRT_ERSETZEN)
+        pfade.geduldig(os.unlink, pfade.lang(datei))
+    except OSError:
+        try:
+            os.unlink(pfade.lang(neu))
+        except OSError:
+            pass
 
 
 def _csv_wert(wert):
@@ -188,6 +244,21 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
     ohne_uhrzeit = dbank.dateien_zaehlen("datum_hinweis = ?", (HINWEIS_OHNE_UHRZEIT,))
     z.append(f"Datum aus dem Dateinamen ohne Uhrzeit (Tagesgrenze nicht angewendet): {meldungen.anzahl(ohne_uhrzeit)}")
     z.append("")
+    # Hinweise der Analyse (SPEC §3, seit v0.8): je Datei der letzte Stand.
+    auffaellig: dict[str, str] = {}
+    for e in dbank.ereignisse_zeiger(ART_DATUM_AUFFAELLIG):
+        auffaellig[e["pfad"]] = e["text"]
+    _liste(z, "Datum auffaellig (bitte ansehen - einsortiert wurde nach der Regel)", sorted(auffaellig.items()),
+           lambda t: f"{t[0]}  —  {t[1]}")
+    _ereignis_liste(z, "Gruppen nach Aufnahmezeit getrennt (gleicher Name, andere Aufnahme)",
+                    dbank.ereignisse_zeiger(ART_GRUPPE_GETRENNT), lambda e: f"{e['pfad']}  —  {e['text']}")
+    hersteller: dict[str, set[str]] = {}
+    for e in dbank.ereignisse_zeiger(ART_NUR_HERSTELLER):
+        hersteller.setdefault(e["text"], set()).add(e["pfad"])
+    if hersteller:
+        teile = [f"{h} {meldungen.anzahl(len(p))}" for h, p in sorted(hersteller.items(), key=lambda t: (-len(t[1]), t[0]))]
+        z.append(f"Hersteller ohne Modell (Ordner {meldungen.KAMERA_UNBEKANNT_HINWEIS}): {', '.join(teile)}")
+        z.append("")
 
     # Listen aus den Ereignissen
     _ereignis_liste(z, "QUELLE SEIT DEM KOPIEREN GEAENDERT - nicht geloescht, wird neu kopiert",
@@ -204,6 +275,13 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
                     dbank.ereignisse_zeiger(ART_QUELLE_GELOESCHT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "In den Ordner _geloescht_ verschobene Quelldateien",
                     dbank.ereignisse_zeiger(ART_QUELLE_IN_PAPIERKORB), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  ->  {e['text']}")
+    _ereignis_liste(z, "Aus dem Ordner _geloescht_ zurueckgelegt",
+                    dbank.ereignisse_zeiger(zuruecklegen.ART_ZURUECKGELEGT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
+    _ereignis_liste(z, "Zurueckgelegt als Kopie - das Original liegt weiter im Ordner _geloescht_",
+                    dbank.ereignisse_zeiger(zuruecklegen.ART_KOPIERT), lambda e: f"{e['pfad']}  <-  {e['text']}")
+    _ereignis_liste(z, "Nicht zurueckgelegt: alter Ort belegt oder Fehler",
+                    [*dbank.ereignisse_zeiger(zuruecklegen.ART_BELEGT), *dbank.ereignisse_zeiger(zuruecklegen.ART_FEHLER)],
+                    lambda e: f"{e['pfad']}  —  {e['text']}")
     _ereignis_liste(z, "Loeschungen aus abgebrochenem Lauf nachgetragen (nichts erneut geloescht)",
                     dbank.ereignisse_zeiger(ART_LOESCHUNG_NACHGETRAGEN), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}")
     _ereignis_liste(z, "Entfernte leere Ordner",
@@ -251,11 +329,20 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
 
 
 def _liste(z: list[str], titel: str, zeilen, form) -> None:
-    eintraege = [form(r) for r in zeilen]
-    z.append(f"{titel}: {meldungen.anzahl(len(eintraege))}")
+    """Titel mit Anzahl, dann hoechstens LISTE_HOECHSTENS Eintraege (SPEC §10
+    seit v0.8: vollstaendig steht alles in der CSV)."""
+    anzahl = 0
+    eintraege: list[str] = []
+    for r in zeilen:
+        anzahl += 1
+        if anzahl <= LISTE_HOECHSTENS:
+            eintraege.append(str(form(r)))
+    z.append(f"{titel}: {meldungen.anzahl(anzahl)}")
     for e in eintraege:
         # Ein Zeilenumbruch im Pfad darf die Zeile des Berichts nicht zerreissen.
-        z.append("  " + str(e).replace("\r", "\\r").replace("\n", "\\n"))
+        z.append("  " + e.replace("\r", "\\r").replace("\n", "\\n"))
+    if anzahl > LISTE_HOECHSTENS:
+        z.append(f"  ... und {meldungen.anzahl(anzahl - LISTE_HOECHSTENS)} weitere (vollstaendig in der CSV)")
     z.append("")
 
 

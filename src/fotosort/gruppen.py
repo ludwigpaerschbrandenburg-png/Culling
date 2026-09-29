@@ -4,11 +4,18 @@ Dateien mit gleichem Stammnamen im selben Quellordner wandern gemeinsam
 und bekommen Datum und Kamera der Hauptdatei. Prioritaet der Hauptdatei:
 RAW > Foto > Video. Sidecars gehoeren nach den drei Formen aus
 dateitypen.sidecar_gehoert_zu dazu.
+
+Seit v0.8 (Entscheidungen des Nutzers) wird eine solche Namensgruppe nach der
+Aufnahmezeit aufgeteilt (aufteilen): IMG_0001.JPG von 2016 und IMG_0001.MOV von
+2021 gehoeren nicht zusammen, nur weil der Zaehler der Kamera neu begann; und
+ein Mitglied, das sich nicht lesen laesst, faellt heraus, statt die anderen
+mitzureissen.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from . import dateitypen
 
@@ -87,3 +94,62 @@ def bilden(namen: list[str], konf) -> tuple[list[Gruppe], list[str]]:
 
     gruppen.sort(key=lambda g: g.haupt.lower())
     return gruppen, ohne_haupt
+
+
+# ------------------------------------------------ Aufteilen nach Zeit -----
+
+
+@dataclass
+class Mitglied:
+    """Ein Mitglied vom Typ Foto, RAW oder Video fuer aufteilen()."""
+    name: str
+    typ: str
+    zeit: datetime | None = None   # Datum aus den Metadaten (Quellen 1-4); None: keins
+    kaputt: bool = False           # nicht lesbar (ExifTool-Fehler, leere Datei)
+    daten: object = None           # beliebige Nutzlast des Aufrufers
+
+
+def _rang(m: Mitglied) -> tuple:
+    return (_PRIORITAET.get(m.typ, 9), m.name.lower())
+
+
+def aufteilen(mitglieder: list[Mitglied], toleranz_sekunden: float) -> tuple[list[list[Mitglied]], list[Mitglied]]:
+    """(Teilgruppen, kaputte Mitglieder) - SPEC §3, seit v0.8.
+
+    In der Reihenfolge der Prioritaet kommt jedes lesbare Mitglied mit
+    Metadaten-Datum zur ersten Teilgruppe, deren Zeit (die des ersten Mitglieds
+    mit Datum) hoechstens toleranz_sekunden entfernt liegt - oder die noch gar
+    keine Zeit hat; sonst beginnt es eine neue. Ein Mitglied ohne Datum kommt
+    zur ersten Teilgruppe. Jede Teilgruppe ist nach Prioritaet sortiert, ihr
+    erstes Mitglied ist ihre Hauptdatei."""
+    lesbar = sorted((m for m in mitglieder if not m.kaputt), key=_rang)
+    kaputt = sorted((m for m in mitglieder if m.kaputt), key=_rang)
+    teile: list[list[Mitglied]] = []
+    anker: list[datetime | None] = []
+    ohne_zeit: list[Mitglied] = []
+    for m in lesbar:
+        if m.zeit is None:
+            if teile:
+                teile[0].append(m)
+            else:
+                ohne_zeit.append(m)
+            continue
+        for i, a in enumerate(anker):
+            if a is None or abs((m.zeit - a).total_seconds()) <= toleranz_sekunden:
+                teile[i].append(m)
+                if a is None:
+                    anker[i] = m.zeit
+                break
+        else:
+            if ohne_zeit and not teile:
+                teile.append(ohne_zeit + [m])
+                ohne_zeit = []
+            else:
+                teile.append([m])
+            anker.append(m.zeit)
+    if ohne_zeit:
+        if teile:
+            teile[0].extend(ohne_zeit)
+        else:
+            teile.append(ohne_zeit)
+    return [sorted(t, key=_rang) for t in teile], kaputt

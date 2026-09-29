@@ -33,13 +33,14 @@ def test_standardwerte_wortwoertlich():
     assert k.wert("datum.tagesgrenze") == "00:00"
     assert k.wert("datum.unsicheres_datum") == "ohne_datum"
     assert k.wert("kamera.unbekannt") == "Unbekannte_Kamera"
+    assert k.wert("datum.gruppe_toleranz_sekunden") == 5
     assert k.wert("dateitypen.foto") == [
-        "jpg", "jpeg", "heic", "hif", "png", "tif", "tiff", "webp"
+        "jpg", "jpeg", "heic", "heif", "hif", "avif", "png", "tif", "tiff", "webp", "insp"
     ]
     assert k.wert("dateitypen.raw") == [
-        "arw", "cr2", "cr3", "nef", "dng", "raf", "orf", "rw2", "srw"
+        "arw", "cr2", "cr3", "nef", "dng", "raf", "orf", "rw2", "srw", "gpr"
     ]
-    assert k.wert("dateitypen.video") == ["mp4", "mov", "mts", "m2ts", "avi", "mkv"]
+    assert k.wert("dateitypen.video") == ["mp4", "mov", "mts", "m2ts", "avi", "mkv", "3gp", "m4v", "insv"]
     assert k.wert("dateitypen.sidecar") == ["xmp", "dop", "pp3", "thm", "aae", "xml"]
     assert k.wert("dateitypen.sidecar_zusatzmuster") == ["M[0-9][0-9]"]
     assert k.wert("quelle.ausschlussmuster") == []

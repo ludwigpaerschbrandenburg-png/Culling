@@ -974,6 +974,9 @@ def analyse_abgebrochen() -> str:
     return "Abgebrochen. Das Bisherige ist gespeichert; der naechste Lauf macht dort weiter."
 
 
+KAMERA_UNBEKANNT_HINWEIS = "Unbekannte_Kamera"
+
+
 def analyse_ergebnis(e) -> str:
     """Zaehler dieses Laufs (ein analyse.Ergebnis)."""
     zeilen = [
@@ -992,6 +995,12 @@ def analyse_ergebnis(e) -> str:
         zeilen.append(f"  ExifTool nach Absturz neu gestartet:    {anzahl(e.abstuerze)}")
     if getattr(e, "erneut_versucht", 0):
         zeilen.append(f"  erneut versucht (Fehler beim letzten Mal): {anzahl(e.erneut_versucht)}")
+    if getattr(e, "getrennt", 0):
+        zeilen.append(f"  gleicher Name, andere Aufnahme (Gruppe getrennt): {anzahl(e.getrennt)}")
+    if getattr(e, "auffaellig", 0):
+        zeilen.append(f"  Datum auffaellig (siehe Bericht):  {anzahl(e.auffaellig)}")
+    if getattr(e, "nur_hersteller", 0):
+        zeilen.append(f"  nur Hersteller, kein Modell:       {anzahl(e.nur_hersteller)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
     if e.sekunden > 0:
         pro_sekunde = dezimal(e.bearbeitet / e.sekunden)
@@ -1278,6 +1287,13 @@ GRUND_PRUEFUNG_LESEN = f"{GRUND_PRUEFUNG}: Zieldatei nicht lesbar"
 # naechste "kopieren" solche Zeilen aus der Quelle neu kopiert.
 GRUND_NACHPRUEFUNG_VERAENDERT = f"{GRUND_PRUEFUNG}: Archivdatei hat sich seit der Pruefung veraendert"
 GRUND_NACHPRUEFUNG_FEHLT = f"{GRUND_PRUEFUNG}: Archivdatei fehlt seit der Pruefung"
+
+
+def ereignis_gruppe_getrennt(name: str, zeit, erster: str, erste_teilgruppe) -> str:
+    def z(t) -> str:
+        return t.strftime("%Y-%m-%d %H:%M:%S") if t is not None else "ohne Datum"
+    anker = next((m.zeit for m in erste_teilgruppe if m.zeit is not None), None)
+    return f"{name} ({z(zeit)}) gehoert nicht zu {erster} ({z(anker)}) - eigene Aufnahme, eigene Gruppe"
 
 
 def ereignis_nachpruefung(grund: str, neu_kopieren: int, fehlt: int, geloescht: int, papierkorb: list) -> str:

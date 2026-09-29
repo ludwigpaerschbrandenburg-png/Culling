@@ -54,6 +54,7 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
         "bericht",
         "ziel-index",
         "wiederherstellen",
+        "zuruecklegen",
         "config",
         "start",
         "messen",

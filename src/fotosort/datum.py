@@ -1,12 +1,14 @@
 """Aufnahmedatum bestimmen (SPEC Abschnitt 3, "Datum"). Reine Logik.
 
 Reihenfolge der Quellen, die erste gueltige gewinnt:
-  1  DateTimeOriginal
+  1  DateTimeOriginal ("Z" = Weltzeit: umgerechnet, Hinweis "zeitzone_angenommen")
   2  Video-Felder MIT Offset: aus der Datei (QuickTime CreationDate,
      Sony CreationDateValue), dann der Sony-XML-Sidecar
   3  nur Video: CreateDate / MediaCreateDate ohne Offset, als UTC in die
      Heimat-Zeitzone umgerechnet, Hinweis "zeitzone_angenommen"
-  4  nur Foto/RAW: CreateDate / DateTimeDigitized als Kamera-Ortszeit
+  4  nur Foto/RAW: CreateDate / DateTimeDigitized, dann XMP DateCreated und
+     PNG CreationTime als Kamera-Ortszeit; danach fuer alle Typen das Datum
+     aus dem .xmp-Sidecar (seit v0.8)
   5  Datum im Dateinamen (Tagesgrenze nur mit Uhrzeit)
   6  Aenderungsdatum - das einzige UNSICHERE Datum
 """
@@ -194,6 +196,25 @@ def aus_dateiname(name: str, jetzt=None) -> tuple[datetime | None, bool]:
 # --------------------------------------------------------- Bestimmen -----
 
 
+#: Quelle 4 aus der Datei selbst (nur Fotos/RAW), in dieser Reihenfolge.
+FELDER_QUELLE_4 = ("CreateDate", "DateTimeDigitized", "DateCreated", "CreationTime")
+#: Quelle 4 aus dem .xmp-Sidecar (alle Typen), in dieser Reihenfolge.
+FELDER_XMP = ("DateTimeOriginal", "DateCreated", "CreateDate")
+
+
+def _ortszeit(text, quelle: int, konf, jetzt) -> Datum | None:
+    """Ein Wert, der als Ortszeit gilt - ausser er traegt die Marke "Z": Dann
+    ist er Weltzeit und wird in die Heimat-Zeitzone umgerechnet (SPEC §3)."""
+    w = _gueltig(text, jetzt)
+    if w is None:
+        return None
+    if w.ist_utc_marke:
+        zeitzone = zeitzone_pruefen(konf.wert("datum.heimat_zeitzone"))
+        ort = w.zeit.replace(tzinfo=timezone.utc).astimezone(zeitzone).replace(tzinfo=None)
+        return Datum(ort, quelle, True, HINWEIS_ZEITZONE, uhrzeit_bekannt=w.hat_uhrzeit)
+    return Datum(w.zeit, quelle, True, uhrzeit_bekannt=w.hat_uhrzeit)
+
+
 def bestimmen(
     felder: dict | None,
     sidecar_felder: dict | None,
@@ -202,16 +223,20 @@ def bestimmen(
     mtime: float,
     konf,
     jetzt: datetime | None = None,
+    xmp_felder: dict | None = None,
 ) -> Datum:
-    """Das Aufnahmedatum einer Datei nach der Reihenfolge aus SPEC Abschnitt 3."""
+    """Das Aufnahmedatum einer Datei nach der Reihenfolge aus SPEC Abschnitt 3.
+
+    xmp_felder: die Felder aus dem .xmp-Sidecar der Datei (Quelle 4, nur wenn
+    die Datei selbst bis dahin nichts liefert)."""
     felder = felder or {}
     sidecar_felder = sidecar_felder or {}
     ist_video = dateityp == dateitypen.VIDEO
 
     # 1. DateTimeOriginal
-    w = _gueltig(felder.get("DateTimeOriginal"), jetzt)
-    if w is not None:
-        return Datum(w.zeit, 1, True, uhrzeit_bekannt=w.hat_uhrzeit)
+    d = _ortszeit(felder.get("DateTimeOriginal"), 1, konf, jetzt)
+    if d is not None:
+        return d
 
     if ist_video:
         # 2. Felder MIT Offset: aus der Datei, dann der Sony-XML-Sidecar
@@ -232,11 +257,18 @@ def bestimmen(
                              HINWEIS_ZEITZONE if umgerechnet else "",
                              uhrzeit_bekannt=w.hat_uhrzeit)
     else:
-        # 4. nur Fotos: CreateDate / DateTimeDigitized als Kamera-Ortszeit
-        for feld in ("CreateDate", "DateTimeDigitized"):
-            w = _gueltig(felder.get(feld), jetzt)
-            if w is not None:
-                return Datum(w.zeit, 4, True, uhrzeit_bekannt=w.hat_uhrzeit)
+        # 4. nur Fotos: CreateDate / DateTimeDigitized, dann XMP DateCreated
+        #    und PNG CreationTime - als Kamera-Ortszeit
+        for feld in FELDER_QUELLE_4:
+            d = _ortszeit(felder.get(feld), 4, konf, jetzt)
+            if d is not None:
+                return d
+
+    # 4, alle Typen: das Datum aus dem .xmp-Sidecar (Lightroom und Co.)
+    for feld in FELDER_XMP:
+        d = _ortszeit((xmp_felder or {}).get(feld), 4, konf, jetzt)
+        if d is not None:
+            return d
 
     # 5. Datum im Dateinamen
     zeit, mit_uhrzeit = aus_dateiname(name, jetzt)
@@ -253,6 +285,40 @@ def bestimmen(
         if zeit is not None and not ist_kaputt(zeit, jetzt):
             return Datum(zeit, 6, False)
     return Datum(None, 0, False)
+
+
+# --------------------------------------------------- Datum auffaellig -----
+
+#: So weit darf das Aufnahmedatum vor dem Aenderungsdatum liegen, ohne dass es
+#: auffaellt: ein altes Foto, Jahre spaeter bearbeitet. Mehr ist typisch fuer
+#: eine zurueckgesetzte Kamerauhr (2000-01-01).
+_AUFFAELLIG_VORHER = timedelta(days=3653)
+_AUFFAELLIG_SPIELRAUM = timedelta(days=1)
+
+
+def auffaellig(d: Datum, name: str, mtime: float, jetzt: datetime | None = None) -> str:
+    """Ein Hinweis fuer den Bericht (SPEC §3 "Datum auffaellig"), sonst "".
+
+    Nur fuer ein Datum aus den Metadaten (Quellen 1-4): Es weicht um mehr als
+    einen Tag vom Datum im Dateinamen ab, liegt mehr als einen Tag NACH dem
+    Aenderungsdatum (vor ihrer Aufnahme kann eine Datei nicht geaendert worden
+    sein) oder mehr als zehn Jahre davor. Einsortiert wird trotzdem."""
+    if d.zeit is None or not 1 <= d.quelle <= 4:
+        return ""
+    im_namen, _mit_uhrzeit = aus_dateiname(name, jetzt)
+    if im_namen is not None and abs(d.zeit.date() - im_namen.date()) > _AUFFAELLIG_SPIELRAUM:
+        return f"weicht vom Datum im Dateinamen ab ({im_namen.date().isoformat()})"
+    if mtime and mtime > 0:
+        try:
+            geaendert = datetime.fromtimestamp(float(mtime))
+        except (OverflowError, OSError, ValueError):
+            geaendert = None
+        if geaendert is not None and not ist_kaputt(geaendert, jetzt):
+            if d.zeit > geaendert + _AUFFAELLIG_SPIELRAUM:
+                return f"liegt nach dem Aenderungsdatum der Datei ({geaendert.date().isoformat()})"
+            if d.zeit < geaendert - _AUFFAELLIG_VORHER:
+                return f"liegt mehr als zehn Jahre vor dem Aenderungsdatum ({geaendert.date().isoformat()})"
+    return ""
 
 
 # ------------------------------------------------------- Tagesgrenze -----

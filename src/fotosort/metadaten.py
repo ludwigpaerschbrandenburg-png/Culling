@@ -32,6 +32,8 @@ FELDER_FOTO: tuple[str, ...] = (
     "DateTimeOriginal",
     "CreateDate",
     "DateTimeDigitized",
+    "DateCreated",           # XMP (Lightroom, Scans) - seit v0.8
+    "CreationTime",          # PNG - seit v0.8
     "Make",
     "Model",
 )
@@ -50,6 +52,13 @@ FELDER_SIDECAR_XML: tuple[str, ...] = (
     "Error",
     "NonRealTimeMetaCreationDateValue",  # Sony-XML-Sidecar C0001M01.XML
     "NonRealTimeMetaDeviceModelName",
+)
+#: .xmp-Sidecar (Lightroom und Co.): Datum, wenn die Datei selbst keins hat (v0.8).
+FELDER_SIDECAR_XMP: tuple[str, ...] = (
+    "Error",
+    "DateTimeOriginal",
+    "DateCreated",
+    "CreateDate",
 )
 
 STAPELGROESSE = 200
@@ -172,22 +181,23 @@ def prozesse_bestimmen(konf, profil: str | None = None) -> int:
 def argumente_fuer(pfad, dateityp: str) -> list[str]:
     """Argumente fuer einen Stapel, dessen erste Datei "pfad" ist (alle
     Dateien eines Stapels haben dieselbe Art, stapel_bilden)."""
-    return _argumente(dateityp, schnell_erlaubt=Path(str(pfad)).suffix.lower() not in OHNE_FAST2)
+    endung = Path(str(pfad)).suffix.lower()
+    return _argumente(dateityp, schnell_erlaubt=endung not in OHNE_FAST2, xmp=endung == ".xmp")
 
 
 def _art(pfad, typ: str) -> str:
     if typ == dateitypen.VIDEO:
         return "video"
     if typ == dateitypen.SIDECAR:
-        return "sidecar"
+        return "sidecar_xmp" if Path(str(pfad)).suffix.lower() == ".xmp" else "sidecar"
     return "foto_voll" if Path(str(pfad)).suffix.lower() in OHNE_FAST2 else "foto"
 
 
-def _argumente(dateityp: str, schnell_erlaubt: bool = True) -> list[str]:
+def _argumente(dateityp: str, schnell_erlaubt: bool = True, xmp: bool = False) -> list[str]:
     if dateityp == dateitypen.VIDEO:
         felder, schnell = FELDER_VIDEO, False
     elif dateityp == dateitypen.SIDECAR:
-        felder, schnell = FELDER_SIDECAR_XML, False
+        felder, schnell = (FELDER_SIDECAR_XMP if xmp else FELDER_SIDECAR_XML), False
     else:
         felder, schnell = FELDER_FOTO, True
     # LargeFileSupport: Ohne diese Option bricht ExifTool bei Videos ueber 2 GB

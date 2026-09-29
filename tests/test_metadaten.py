@@ -53,8 +53,8 @@ def test_fast2_wuerde_das_eingebettete_xml_verlieren(pool, baum, monkeypatch):
     pfad = str(baum["video_sony_eingebettet"])
     original = metadaten._argumente
 
-    def mit_fast2(typ, schnell_erlaubt=True):
-        args = original(typ, schnell_erlaubt)
+    def mit_fast2(typ, schnell_erlaubt=True, **k):
+        args = original(typ, schnell_erlaubt, **k)
         return args if "-fast2" in args else [*args, "-fast2"]
 
     monkeypatch.setattr(metadaten, "_argumente", mit_fast2)

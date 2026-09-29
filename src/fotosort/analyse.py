@@ -18,6 +18,9 @@ from . import datum as datum_modul
 from . import ziel as ziel_modul
 
 ART_ZIELORDNER_MEHRDEUTIG = "zielordner_mehrdeutig"
+ART_GRUPPE_GETRENNT = "gruppe_getrennt"       # SPEC §3 seit v0.8
+ART_DATUM_AUFFAELLIG = "datum_auffaellig"
+ART_NUR_HERSTELLER = "nur_hersteller"
 GRUND_SIDECAR_OHNE_HAUPT = meldungen.GRUND_SIDECAR_OHNE_HAUPT
 GRUND_METADATEN = meldungen.GRUND_METADATEN
 GRUND_ZEILENUMBRUCH = meldungen.GRUND_ZEILENUMBRUCH
@@ -43,6 +46,9 @@ class Ergebnis:
     zeitlimits: int = 0
     abstuerze: int = 0
     erneut_versucht: int = 0         # voruebergehende Fehler frueherer Laeufe
+    getrennt: int = 0                # Gruppen, die nach Aufnahmezeit getrennt wurden (v0.8)
+    auffaellig: int = 0              # "Datum auffaellig" (v0.8)
+    nur_hersteller: int = 0          # Hersteller ohne Modell (v0.8)
     sekunden: float = 0.0
     abgebrochen: bool = False
     mehrdeutig_gemeldet: set = field(default_factory=set)
@@ -134,6 +140,13 @@ def _seite_bearbeiten(ordner, trenner, struktur, konf, dbank, lauf, pool, ergebn
     _seite_abschliessen(seite, struktur, konf, dbank, lauf, ergebnis, anzeige)
 
 
+#: Status, in denen eine Datei schon im Ziel liegt oder gerade dorthin geht:
+#: Sie bleibt, wo sie ist; ihre gespeicherten Werte zaehlen fuer die Gruppe.
+_FEST = frozenset({"kopieren_laeuft", "kopiert", "geprueft", "verschoben", "duplikat",
+                   "duplikat_bestaetigt", "quelle_geloescht"})
+_OFFEN = ("gefunden", "analysiert")
+
+
 def _seite_vorbereiten(ordner, trenner, konf, dbank, pool, ergebnis) -> _Seite:
     # 1. Gruppen je Ordner bilden und die zu lesenden Dateien einsammeln.
     aufgaben: list[tuple[str, gruppen.Gruppe, dict]] = []   # (ordner_text, gruppe, zeilen nach Name)
@@ -152,17 +165,20 @@ def _seite_vorbereiten(ordner, trenner, konf, dbank, pool, ergebnis) -> _Seite:
             if not any(_leer(nach_name[n]) for n in g.alle):
                 continue  # alles schon analysiert
             aufgaben.append((o, g, nach_name))
-            haupt = nach_name[g.haupt]
-            if _leer(haupt):
-                haupt_pfad = db.text_pfad(haupt["quellpfad"])
-                if metadaten.unzulaessig_fuer_exiftool(haupt_pfad):
-                    continue  # bekommt unten Status fehler, geht nie an ExifTool
-                zu_lesen.append((haupt_pfad, haupt["dateityp"]))
-                if haupt["dateityp"] == dateitypen.VIDEO:
-                    for s in g.sidecars:
-                        s_pfad = db.text_pfad(nach_name[s]["quellpfad"])
-                        if s.lower().endswith(".xml") and not metadaten.unzulaessig_fuer_exiftool(s_pfad):
-                            zu_lesen.append((s_pfad, dateitypen.SIDECAR))
+            if not any(_leer(nach_name[n]) for n in (g.haupt, *g.mitglieder)):
+                continue  # nur neue Sidecars: Sie erben, gelesen wird nichts
+            # Die Gruppe wird neu bestimmt: Jedes offene Mitglied wird selbst
+            # gelesen (SPEC §3 seit v0.8: nach Aufnahmezeit aufteilen), dazu die
+            # Sidecars, die ein Datum tragen koennen (Sony-XML, .xmp).
+            for n in (g.haupt, *g.mitglieder):
+                z = nach_name[n]
+                pfad = db.text_pfad(z["quellpfad"])
+                if z["status"] in _OFFEN and not metadaten.unzulaessig_fuer_exiftool(pfad):
+                    zu_lesen.append((pfad, z["dateityp"]))
+            for s in g.sidecars:
+                s_pfad = db.text_pfad(nach_name[s]["quellpfad"])
+                if s.lower().endswith((".xml", ".xmp")) and not metadaten.unzulaessig_fuer_exiftool(s_pfad):
+                    zu_lesen.append((s_pfad, dateitypen.SIDECAR))
 
     # 2. Metadaten in Stapeln lesen, parallel ueber die ExifTool-Prozesse.
     stapel = metadaten.stapel_bilden(zu_lesen)
@@ -193,83 +209,216 @@ def _seite_abschliessen(seite: _Seite, struktur, konf, dbank, lauf, ergebnis, an
         ergebnis.bearbeitet += 1
         anzeige.weiter(1)
 
-    for o, g, nach_name in aufgaben:
-        haupt = nach_name[g.haupt]
-        haupt_pfad = db.text_pfad(haupt["quellpfad"])
-        haupt_neu = _leer(haupt)
-        if haupt_neu:
-            if metadaten.unzulaessig_fuer_exiftool(haupt_pfad):
-                _gruppe_fehler(g, nach_name, dbank, GRUND_ZEILENUMBRUCH, ergebnis, anzeige)
-                continue
-            felder = felder_von.get(metadaten.schluessel(haupt_pfad))
-            if felder is None:
-                _gruppe_fehler(g, nach_name, dbank, GRUND_METADATEN, ergebnis, anzeige)
-                continue
-            if felder.get("Error"):
-                _gruppe_fehler(g, nach_name, dbank, f"{GRUND_METADATEN}: {felder['Error']}", ergebnis, anzeige)
-                continue
-            sidecar_felder = None
-            for s in g.sidecars:
-                if s.lower().endswith(".xml"):
-                    sidecar_felder = felder_von.get(
-                        metadaten.schluessel(db.text_pfad(nach_name[s]["quellpfad"]))
-                    )
-                    if sidecar_felder and not sidecar_felder.get("Error"):
-                        break
-                    sidecar_felder = None
-            if sidecar_felder and not kamera.rohmodell(felder):
-                # Sony-Sidecar kennt das Modell, die Videodatei nicht.
-                felder = dict(felder, Model=sidecar_felder.get("NonRealTimeMetaDeviceModelName", ""))
-            d = datum_modul.bestimmen(
-                felder, sidecar_felder, g.haupt, haupt["dateityp"], haupt["mtime"] or 0.0, konf
-            )
-            kam, roh = kamera.ordnername(felder, konf)
-            _, ort = ziel_modul.zielpfad(struktur, d, kam, g.haupt, konf)
-            werte = dict(
-                kamera=kam, kamera_modell=roh, aufnahme_zeit=ziel_modul.zeit_text(d.zeit, d.uhrzeit_bekannt),
-                datum_quelle=d.quelle, datum_sicher=1 if d.sicher else 0, datum_hinweis=d.hinweis,
-            )
-            if ort.mehrdeutig:
-                ergebnis.mehrdeutig += 1
-                if ort.ordner not in ergebnis.mehrdeutig_gemeldet:
-                    ergebnis.mehrdeutig_gemeldet.add(ort.ordner)
-                    dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1, meldungen.EREIGNIS_ORDNER_MEHRDEUTIG)
-            if ort.wiederverwendet:
-                ergebnis.wiederverwendet += 1
-            zielordner = ort.ordner
-        elif haupt["zielpfad"]:
-            # Hauptdatei schon analysiert: neue Mitglieder erben ihre Werte.
-            werte = dict(
-                kamera=haupt["kamera"], kamera_modell=haupt["kamera_modell"],
-                aufnahme_zeit=haupt["aufnahme_zeit"], datum_quelle=haupt["datum_quelle"] or 0,
-                datum_sicher=haupt["datum_sicher"] or 0, datum_hinweis=haupt["datum_hinweis"],
-            )
-            zielordner = Path(db.text_pfad(haupt["zielpfad"])).parent
+    for _o, g, nach_name in aufgaben:
+        if any(_leer(nach_name[n]) for n in (g.haupt, *g.mitglieder)):
+            _gruppe_bestimmen(g, nach_name, felder_von, struktur, konf, dbank, lauf, ergebnis, anzeige)
         else:
-            # Hauptdatei hat keinen Zielpfad (Status fehler): Ein neues
-            # Mitglied darf nicht "analysiert" ohne Ziel werden.
-            grund = f"{GRUND_HAUPTDATEI}: {haupt['fehlergrund'] or haupt['status']}"
-            _gruppe_fehler(g, nach_name, dbank, grund, ergebnis, anzeige)
-            continue
+            _sidecars_erben(g, nach_name, konf, dbank, ergebnis, anzeige)
 
-        ergebnis.gruppen += 1
-        offen = 0
-        for n in g.alle:
-            z = nach_name[n]
-            # Wird die Hauptdatei neu analysiert, ziehen bereits analysierte,
-            # noch nicht kopierte Mitglieder mit (SPEC §3: wandern gemeinsam).
-            mitziehen = haupt_neu and z["status"] == "analysiert"
-            if not (_leer(z) or mitziehen):
-                continue
-            dbank.analyse_setzen(
-                z["quellpfad"], gruppe=haupt["quellpfad"],
-                zielpfad=(zielordner / n) if zielordner is not None else "",
-                **werte,
-            )
+
+def _felder(nach_name, name, felder_von) -> dict | None:
+    return felder_von.get(metadaten.schluessel(db.text_pfad(nach_name[name]["quellpfad"])))
+
+
+def _sidecar_felder(g, nach_name, felder_von, fuer: str, endung: str, konf) -> dict | None:
+    """Felder des ersten gelesenen Sidecars mit dieser Endung, das zu "fuer" gehoert."""
+    for s in g.sidecars:
+        if s.lower().endswith(endung) and dateitypen.sidecar_gehoert_zu(s, fuer, konf):
+            f = _felder(nach_name, s, felder_von)
+            if f and not f.get("Error"):
+                return f
+    return None
+
+
+def _gruppe_bestimmen(g, nach_name, felder_von, struktur, konf, dbank, lauf, ergebnis, anzeige) -> None:
+    """Eine Namensgruppe mit neuen Mitgliedern: jedes Mitglied fuer sich lesen,
+    kaputte heraus, nach Aufnahmezeit aufteilen (SPEC §3 seit v0.8), dann je
+    Teilgruppe Datum, Kamera und Zielordner bestimmen und schreiben."""
+    toleranz = float(konf.wert("datum.gruppe_toleranz_sekunden"))
+    mitglieder: list[gruppen.Mitglied] = []
+    grund_von: dict[str, str] = {}
+    for n in (g.haupt, *g.mitglieder):
+        z = nach_name[n]
+        if z["status"] in _FEST:
+            zeit = None
+            if 1 <= int(z["datum_quelle"] or 0) <= 4:
+                zeit, _ = ziel_modul.zeit_aus_text(z["aufnahme_zeit"])
+            mitglieder.append(gruppen.Mitglied(n, z["dateityp"], zeit, daten=("fest", z)))
+            continue
+        if z["status"] not in _OFFEN:
+            continue  # fehler oder uebersprungen: gehoert nicht mehr dazu
+        pfad = db.text_pfad(z["quellpfad"])
+        if metadaten.unzulaessig_fuer_exiftool(pfad):
+            grund_von[n] = GRUND_ZEILENUMBRUCH
+        else:
+            felder = _felder(nach_name, n, felder_von)
+            if felder is None:
+                grund_von[n] = GRUND_METADATEN
+            elif felder.get("Error"):
+                grund_von[n] = f"{GRUND_METADATEN}: {felder['Error']}"
+        if n in grund_von:
+            mitglieder.append(gruppen.Mitglied(n, z["dateityp"], kaputt=True, daten=("kaputt", z)))
+            continue
+        xml = _sidecar_felder(g, nach_name, felder_von, n, ".xml", konf) if z["dateityp"] == dateitypen.VIDEO else None
+        if xml and not kamera.rohmodell(felder):
+            # Sony-Sidecar kennt das Modell, die Videodatei nicht.
+            felder = dict(felder, Model=xml.get("NonRealTimeMetaDeviceModelName", ""))
+        xmp = _sidecar_felder(g, nach_name, felder_von, n, ".xmp", konf)
+        d = datum_modul.bestimmen(felder, xml, n, z["dateityp"], z["mtime"] or 0.0, konf, xmp_felder=xmp)
+        zeit = d.zeit if 1 <= d.quelle <= 4 else None
+        mitglieder.append(gruppen.Mitglied(n, z["dateityp"], zeit, daten=("neu", z, d, felder)))
+        _hinweise(n, z, d, felder, dbank, lauf, ergebnis)
+
+    teile, kaputte = gruppen.aufteilen(mitglieder, toleranz)
+    for m in kaputte:
+        z = nach_name[m.name]
+        _fehler_setzen(dbank, z["quellpfad"], grund_von[m.name], z["quellpfad"])
+        ergebnis.fehler += 1
+        ergebnis.bearbeitet += 1
+        if _leer(z):
+            anzeige.weiter(1)
+
+    # Sidecars zur Teilgruppe ihres besten lesbaren Mitglieds (SPEC §3).
+    teil_von = {m.name: i for i, t in enumerate(teile) for m in t}
+    sidecars_je_teil: dict[int, list[str]] = {}
+    for s in g.sidecars:
+        passende = [m for t in teile for m in t if dateitypen.sidecar_gehoert_zu(s, m.name, konf)]
+        if passende:
+            beste = min(passende, key=gruppen._rang)
+            sidecars_je_teil.setdefault(teil_von[beste.name], []).append(s)
+            continue
+        z = nach_name[s]
+        if z["status"] in _OFFEN:
+            # Alle Mitglieder, zu denen es gehoert, sind nicht lesbar.
+            kaputt = next((m.name for m in kaputte if dateitypen.sidecar_gehoert_zu(s, m.name, konf)), g.haupt)
+            grund = grund_von.get(kaputt) or nach_name[kaputt]["fehlergrund"] or nach_name[kaputt]["status"]
+            _fehler_setzen(dbank, z["quellpfad"], f"{GRUND_HAUPTDATEI}: {grund}", nach_name[kaputt]["quellpfad"])
+            ergebnis.fehler += 1
             ergebnis.bearbeitet += 1
             if _leer(z):
-                offen += 1
-        anzeige.weiter(offen)
+                anzeige.weiter(1)
+
+    for i, teil in enumerate(teile):
+        _teil_schreiben(teil, sidecars_je_teil.get(i, []), nach_name, struktur, konf, dbank, lauf, ergebnis, anzeige)
+        if i > 0:
+            erste, diese = teile[0][0], teil[0]
+            ergebnis.getrennt += 1
+            dbank.ereignis(lauf, ART_GRUPPE_GETRENNT, nach_name[diese.name]["quellpfad"], len(teil),
+                           meldungen.ereignis_gruppe_getrennt(diese.name, diese.zeit, erste.name, teile[0]))
+
+
+def _hinweise(name, z, d, felder, dbank, lauf, ergebnis) -> None:
+    """Datum auffaellig (SPEC §3) und Hersteller ohne Modell - nur Hinweise."""
+    grund = datum_modul.auffaellig(d, name, z["mtime"] or 0.0)
+    if grund:
+        ergebnis.auffaellig += 1
+        dbank.ereignis(lauf, ART_DATUM_AUFFAELLIG, z["quellpfad"], 1, grund)
+    hersteller = str((felder or {}).get("Make") or "").strip()
+    if hersteller and not kamera.rohmodell(felder):
+        ergebnis.nur_hersteller += 1
+        dbank.ereignis(lauf, ART_NUR_HERSTELLER, z["quellpfad"], 1, hersteller)
+
+
+def _teil_schreiben(teil, sidecars, nach_name, struktur, konf, dbank, lauf, ergebnis, anzeige) -> None:
+    """Eine Teilgruppe: Liegt schon ein Mitglied im Ziel, kommen die anderen
+    dazu (Ordner, Gruppe, Anhang). Sonst Datum vom ersten Mitglied mit
+    Metadaten-Datum, Kamera von der Hauptdatei oder dem ersten mit Modell."""
+    from .kopieren import _anhang_aus_namen, mit_anhang
+
+    fest = [m for m in teil if m.daten[0] == "fest"]
+    if fest:
+        ref = nach_name[fest[0].name]
+        werte = dict(
+            kamera=ref["kamera"], kamera_modell=ref["kamera_modell"], aufnahme_zeit=ref["aufnahme_zeit"],
+            datum_quelle=ref["datum_quelle"] or 0, datum_sicher=ref["datum_sicher"] or 0,
+            datum_hinweis=ref["datum_hinweis"],
+        )
+        gruppe = ref["gruppe"] or ref["quellpfad"]
+        ziel_ref = Path(db.text_pfad(ref["zielpfad"])) if ref["zielpfad"] else None
+        stamm = Path(db.text_pfad(gruppe)).stem
+        anhang = _anhang_aus_namen(Path(db.text_pfad(ref["quellpfad"])).name, ziel_ref.name, stamm) if ziel_ref else None
+        zielordner = ziel_ref.parent if ziel_ref else None
+
+        def zielpfad_von(n: str):
+            if zielordner is None:
+                return ""
+            return mit_anhang(zielordner / n, anhang or 0, stamm)
+    else:
+        haupt = teil[0]
+        anker = next((m for m in teil if m.zeit is not None), haupt)
+        d = anker.daten[2]
+        kam, roh = kamera.ordnername(haupt.daten[3], konf)
+        if not roh:
+            for m in teil:
+                k2, r2 = kamera.ordnername(m.daten[3], konf)
+                if r2:
+                    kam, roh = k2, r2
+                    break
+        _, ort = ziel_modul.zielpfad(struktur, d, kam, haupt.name, konf)
+        werte = dict(
+            kamera=kam, kamera_modell=roh, aufnahme_zeit=ziel_modul.zeit_text(d.zeit, d.uhrzeit_bekannt),
+            datum_quelle=d.quelle, datum_sicher=1 if d.sicher else 0, datum_hinweis=d.hinweis,
+        )
+        if ort.mehrdeutig:
+            ergebnis.mehrdeutig += 1
+            if ort.ordner not in ergebnis.mehrdeutig_gemeldet:
+                ergebnis.mehrdeutig_gemeldet.add(ort.ordner)
+                dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1, meldungen.EREIGNIS_ORDNER_MEHRDEUTIG)
+        if ort.wiederverwendet:
+            ergebnis.wiederverwendet += 1
+        gruppe = nach_name[haupt.name]["quellpfad"]
+        zielordner = ort.ordner
+
+        def zielpfad_von(n: str):
+            return zielordner / n
+
+    ergebnis.gruppen += 1
+    offen = 0
+    for n in [m.name for m in teil if m.daten[0] == "neu"] + list(sidecars):
+        z = nach_name[n]
+        if z["status"] not in _OFFEN:
+            continue
+        dbank.analyse_setzen(z["quellpfad"], gruppe=gruppe, zielpfad=zielpfad_von(n), **werte)
+        ergebnis.bearbeitet += 1
+        if _leer(z):
+            offen += 1
+    anzeige.weiter(offen)
+
+
+def _sidecars_erben(g, nach_name, konf, dbank, ergebnis, anzeige) -> None:
+    """Nur neue Sidecars: Sie gehen zu ihrem besten Mitglied, das schon einen
+    Platz hat, und uebernehmen dessen Werte (Ordner, Gruppe, Anhang)."""
+    from .kopieren import _anhang_aus_namen, mit_anhang
+
+    kandidaten = [n for n in (g.haupt, *g.mitglieder)
+                  if nach_name[n]["status"] not in ("gefunden", "fehler", "uebersprungen") and nach_name[n]["zielpfad"]]
+    for s in g.sidecars:
+        z = nach_name[s]
+        if not _leer(z):
+            continue
+        passende = [n for n in kandidaten if dateitypen.sidecar_gehoert_zu(s, n, konf)]
+        if not passende:
+            haupt = nach_name[g.haupt]
+            grund = f"{GRUND_HAUPTDATEI}: {haupt['fehlergrund'] or haupt['status']}"
+            _fehler_setzen(dbank, z["quellpfad"], grund, haupt["quellpfad"])
+            ergebnis.fehler += 1
+            ergebnis.bearbeitet += 1
+            anzeige.weiter(1)
+            continue
+        ref = nach_name[min(passende, key=lambda n: gruppen._rang(gruppen.Mitglied(n, nach_name[n]["dateityp"])))]
+        gruppe = ref["gruppe"] or ref["quellpfad"]
+        stamm = Path(db.text_pfad(gruppe)).stem
+        ziel_ref = Path(db.text_pfad(ref["zielpfad"]))
+        anhang = _anhang_aus_namen(Path(db.text_pfad(ref["quellpfad"])).name, ziel_ref.name, stamm) or 0
+        dbank.analyse_setzen(
+            z["quellpfad"], gruppe=gruppe, zielpfad=mit_anhang(ziel_ref.parent / s, anhang, stamm),
+            kamera=ref["kamera"], kamera_modell=ref["kamera_modell"], aufnahme_zeit=ref["aufnahme_zeit"],
+            datum_quelle=ref["datum_quelle"] or 0, datum_sicher=ref["datum_sicher"] or 0,
+            datum_hinweis=ref["datum_hinweis"],
+        )
+        ergebnis.gruppen += 1
+        ergebnis.bearbeitet += 1
+        anzeige.weiter(1)
 
 
 def zielpfad_aus_zeile(struktur, zeile, konf) -> Path:

@@ -220,8 +220,10 @@ def test_bericht_wird_nach_jeder_phase_geschrieben(baum, quelle, ziel):
     ordner = bericht.berichte_ordner(ziel)
     txts = sorted(ordner.glob("*.txt"))
     assert len(txts) == 3   # scan, analyse, kopieren
-    assert all(p.with_name(p.stem + "_dateien.csv").exists() for p in txts)
-    assert all(p.with_name(p.stem + "_ereignisse.csv").exists() for p in txts)
+    # Der neueste lesbar, die aelteren gepackt (SPEC §10 seit v0.8).
+    for p, endung in [(t, ".csv.gz") for t in txts[:-1]] + [(txts[-1], ".csv")]:
+        assert p.with_name(p.stem + "_dateien" + endung).exists()
+        assert p.with_name(p.stem + "_ereignisse" + endung).exists()
 
 
 def test_bericht_inhalt(baum, quelle, ziel, konf, nachschauen, capsys):
@@ -353,3 +355,59 @@ def test_dateien_csv_hat_alle_spalten_der_tabelle(tmp_path):
     finally:
         d.schliessen()
     assert sorted(bericht.DATEI_SPALTEN) == sorted(spalten)
+
+
+# ------------------------------------------- Runde 2 (v0.8): Bericht -----
+
+
+def test_bericht_nennt_die_hinweise_der_analyse(baum, quelle, ziel, nachschauen, capsys):
+    """Entscheidungen 7 und 9: "Datum auffaellig" (je Datei einmal, auch wenn sie
+    zweimal analysiert wurde), getrennte Gruppen, Hersteller ohne Modell."""
+    from fotosort import analyse
+    _vorbereiten(ziel, quelle)
+    with nachschauen(ziel) as d:
+        lauf = d.lauf_beginnen("test")
+        for _ in range(2):
+            d.ereignis(lauf, analyse.ART_DATUM_AUFFAELLIG, "/q/uhr.jpg", 1, "weicht vom Datum im Dateinamen ab (2023-04-05)")
+        d.ereignis(lauf, analyse.ART_GRUPPE_GETRENNT, "/q/IMG_0001.MOV", 1, "IMG_0001.MOV gehoert nicht zu IMG_0001.JPG")
+        for pfad, hersteller in (("/q/b.jpg", "Canon"), ("/q/c.jpg", "Canon"), ("/q/d.jpg", "Nikon")):
+            d.ereignis(lauf, analyse.ART_NUR_HERSTELLER, pfad, 1, hersteller)
+        d.lauf_beenden(lauf)
+        d.stapel_schreiben()
+    capsys.readouterr()
+    assert _cli("bericht", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "Datum auffaellig" in aus and aus.count("/q/uhr.jpg") == 1
+    assert "Gruppen nach Aufnahmezeit getrennt (gleicher Name, andere Aufnahme): 1" in aus
+    assert "Canon 2" in aus and "Nikon 1" in aus
+
+
+def test_nur_die_letzten_zehn_berichte_bleiben(baum, quelle, ziel, nachschauen):
+    """Entscheidung 10: Bei einer Million Dateien waeren das Hunderte MB je Lauf.
+    Die letzten zehn bleiben, die CSV aelterer gepackt; fremde Dateien bleiben."""
+    import gzip
+    from datetime import datetime
+    _vorbereiten(ziel, quelle)
+    ordner = bericht.berichte_ordner(ziel)
+    fremd = ordner / "notiz.txt"
+    fremd.write_text("vom Nutzer", encoding="utf-8")
+    with nachschauen(ziel) as d:
+        for i in range(15):
+            bericht.schreiben(ziel, d, lauf=100 + i, jetzt=datetime(2030, 1, 1, 0, 0, i))
+    staemme = sorted(p.name[:-4] for p in ordner.glob("bericht_*.txt"))
+    assert len(staemme) == 10 and staemme[-1].endswith("lauf114")
+    assert (ordner / (staemme[-1] + "_dateien.csv")).exists()           # der neueste bleibt lesbar
+    alt = ordner / (staemme[0] + "_dateien.csv.gz")
+    assert alt.exists() and not (ordner / (staemme[0] + "_dateien.csv")).exists()
+    with gzip.open(alt, "rt", encoding="utf-8-sig") as f:
+        assert f.readline().startswith("quellwurzel")
+    assert fremd.read_text(encoding="utf-8") == "vom Nutzer"
+    assert len(list(ordner.glob("bericht_*"))) == 30
+
+
+def test_lange_listen_werden_im_text_gekuerzt():
+    z: list[str] = []
+    bericht._liste(z, "Titel", range(1500), str)
+    assert z[0] == "Titel: 1.500"
+    eintraege = [x for x in z if x.startswith("  ")]
+    assert len(eintraege) == 1001 and "500 weitere" in eintraege[-1] and "CSV" in eintraege[-1]

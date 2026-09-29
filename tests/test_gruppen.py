@@ -71,3 +71,64 @@ def test_leere_liste(konf):
 def test_alle_liefert_hauptdatei_zuerst(konf):
     g, _ = gruppen.bilden(["a.xmp", "a.jpg", "a.arw"], konf)
     assert g[0].alle == ["a.arw", "a.jpg", "a.xmp"]
+
+
+# --------------------------------------- Aufteilen nach Aufnahmezeit (v0.8) -----
+
+from datetime import datetime  # noqa: E402
+
+from fotosort.dateitypen import FOTO, RAW, VIDEO  # noqa: E402
+
+
+def _m(name, typ, zeit=None, kaputt=False):
+    return gruppen.Mitglied(name, typ, zeit, kaputt)
+
+
+def _namen(teile):
+    return [[m.name for m in t] for t in teile]
+
+
+def test_raw_und_jpg_derselben_aufnahme_bleiben_zusammen():
+    teile, kaputt = gruppen.aufteilen([
+        _m("DSC1.JPG", FOTO, datetime(2016, 5, 5, 10, 0, 1)),
+        _m("DSC1.ARW", RAW, datetime(2016, 5, 5, 10, 0, 0)),
+    ], 5)
+    assert _namen(teile) == [["DSC1.ARW", "DSC1.JPG"]] and kaputt == []
+
+
+def test_neu_begonnener_zaehler_wird_getrennt():
+    """Entscheidung 2: IMG_0001.JPG von 2016 und IMG_0001.MOV von 2021."""
+    teile, _ = gruppen.aufteilen([
+        _m("IMG_0001.MOV", VIDEO, datetime(2021, 6, 6, 10)),
+        _m("IMG_0001.JPG", FOTO, datetime(2016, 5, 5, 10)),
+    ], 5)
+    assert _namen(teile) == [["IMG_0001.JPG"], ["IMG_0001.MOV"]]
+
+
+def test_ohne_datum_bleibt_bei_der_ersten_teilgruppe():
+    teile, _ = gruppen.aufteilen([
+        _m("A.ARW", RAW, None),
+        _m("A.JPG", FOTO, datetime(2016, 1, 1)),
+        _m("A.MOV", VIDEO, datetime(2021, 1, 1)),
+    ], 5)
+    assert _namen(teile) == [["A.ARW", "A.JPG"], ["A.MOV"]]
+
+
+def test_grenze_der_toleranz_und_live_photo():
+    t = datetime(2024, 7, 1, 12, 0, 0)
+    from datetime import timedelta
+    teile, _ = gruppen.aufteilen([_m("L.HEIC", FOTO, t), _m("L.MOV", VIDEO, t - timedelta(seconds=5))], 5)
+    assert len(teile) == 1
+    teile, _ = gruppen.aufteilen([_m("L.HEIC", FOTO, t), _m("L.MOV", VIDEO, t - timedelta(seconds=6))], 5)
+    assert len(teile) == 2
+
+
+def test_kaputte_mitglieder_fallen_heraus():
+    """Entscheidung 3: Eine 0-Byte-ARW zieht das gesunde JPG nicht mehr mit."""
+    teile, kaputt = gruppen.aufteilen([
+        _m("D.ARW", RAW, None, kaputt=True),
+        _m("D.JPG", FOTO, datetime(2016, 1, 1)),
+    ], 5)
+    assert _namen(teile) == [["D.JPG"]] and [m.name for m in kaputt] == ["D.ARW"]
+    teile, kaputt = gruppen.aufteilen([_m("E.ARW", RAW, None, kaputt=True)], 5)
+    assert teile == [] and len(kaputt) == 1

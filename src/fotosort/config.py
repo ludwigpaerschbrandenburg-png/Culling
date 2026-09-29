@@ -95,6 +95,13 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
                 '# Datei). Erlaubt: "ohne_datum" oder "mtime".',
                 "ohne_datum",
             ),
+            (
+                "gruppe_toleranz_sekunden",
+                "Wie weit die Aufnahmezeiten von Dateien mit gleichem Namen (IMG_0001.JPG,\n"
+                "# IMG_0001.MOV) auseinanderliegen duerfen, damit sie noch zusammengehoeren.\n"
+                "# Weiter auseinander: eigene Gruppen (neu begonnener Zaehler der Kamera).",
+                5,
+            ),
         ],
     ),
     (
@@ -115,17 +122,17 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             (
                 "foto",
                 "Endungen, die als Foto gelten.",
-                ["jpg", "jpeg", "heic", "hif", "png", "tif", "tiff", "webp"],
+                ["jpg", "jpeg", "heic", "heif", "hif", "avif", "png", "tif", "tiff", "webp", "insp"],
             ),
             (
                 "raw",
                 "Endungen, die als RAW gelten.",
-                ["arw", "cr2", "cr3", "nef", "dng", "raf", "orf", "rw2", "srw"],
+                ["arw", "cr2", "cr3", "nef", "dng", "raf", "orf", "rw2", "srw", "gpr"],
             ),
             (
                 "video",
                 "Endungen, die als Video gelten.",
-                ["mp4", "mov", "mts", "m2ts", "avi", "mkv"],
+                ["mp4", "mov", "mts", "m2ts", "avi", "mkv", "3gp", "m4v", "insv"],
             ),
             (
                 "sidecar",

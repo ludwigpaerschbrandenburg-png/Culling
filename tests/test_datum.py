@@ -275,3 +275,85 @@ def test_dateiname_mit_uhrzeit_aus_signal_und_macos(name, erwartet):
 def test_kein_falsches_uhrzeit_muster_aus_bildgroessen():
     zeit, mit_uhrzeit = datum.aus_dateiname("2026-01-01-1200x800.jpg")
     assert zeit == datetime(2026, 1, 1) and not mit_uhrzeit
+
+
+# ------------------------------------------- Runde 2 (v0.8), Entscheidungen -----
+
+
+@pytest.mark.parametrize("typ", [FOTO, RAW, VIDEO])
+def test_z_in_datetimeoriginal_ist_weltzeit(konf, typ):
+    """Entscheidung 6: "Z" heisst immer UTC, nie Ortszeit - umrechnen und kennzeichnen."""
+    d = bestimmen({"DateTimeOriginal": "2026:07:01 22:30:00Z"}, typ=typ, konf=konf)
+    assert d.zeit == datetime(2026, 7, 2, 0, 30)          # Berlin, Sommerzeit
+    assert d.quelle == 1 and d.sicher and d.hinweis == datum.HINWEIS_ZEITZONE
+
+
+def test_datetimeoriginal_mit_offset_bleibt_ortszeit(konf):
+    d = bestimmen({"DateTimeOriginal": "2026:07:01 22:30:00+02:00"}, konf=konf)
+    assert d.zeit == datetime(2026, 7, 1, 22, 30) and d.hinweis == ""
+
+
+@pytest.mark.parametrize("feld", ["DateCreated", "CreationTime"])
+def test_quelle_4_xmp_datecreated_und_png_creationtime(konf, feld):
+    """Entscheidung 5: Scan-TIFF mit Lightroom-Datum, PNG mit Erstellzeit."""
+    d = bestimmen({feld: "2019:05:04 10:11:12"}, konf=konf)
+    assert d.zeit == datetime(2019, 5, 4, 10, 11, 12) and d.quelle == 4 and d.sicher and d.hinweis == ""
+
+
+def test_quelle_4_createdate_vor_datecreated(konf):
+    d = bestimmen({"CreateDate": "2019:05:04 10:00:00", "DateCreated": "2001:01:01 00:00:00"}, konf=konf)
+    assert d.zeit == datetime(2019, 5, 4, 10)
+
+
+def test_datecreated_mit_z_wird_umgerechnet(konf):
+    d = bestimmen({"DateCreated": "2019:01:04 10:00:00Z"}, konf=konf)
+    assert d.zeit == datetime(2019, 1, 4, 11) and d.hinweis == datum.HINWEIS_ZEITZONE
+
+
+@pytest.mark.parametrize("typ", [FOTO, RAW, VIDEO])
+def test_xmp_sidecar_nur_wenn_die_datei_nichts_liefert(konf, typ):
+    xmp = {"DateTimeOriginal": "2018:08:08 08:08:08"}
+    d = datum.bestimmen({}, None, "scan.tif", typ, 0.0, konf, jetzt=JETZT, xmp_felder=xmp)
+    assert d.zeit == datetime(2018, 8, 8, 8, 8, 8) and d.quelle == 4 and d.sicher
+    # Liefert die Datei selbst etwas, bleibt es dabei.
+    d = datum.bestimmen({"DateTimeOriginal": "2020:02:02 02:02:02"}, None, "scan.tif", typ, 0.0, konf,
+                        jetzt=JETZT, xmp_felder=xmp)
+    assert d.zeit == datetime(2020, 2, 2, 2, 2, 2) and d.quelle == 1
+    # Das xmp kommt vor dem Dateinamen.
+    d = datum.bestimmen({}, None, "IMG_20200101_120000.tif", typ, 0.0, konf, jetzt=JETZT, xmp_felder=xmp)
+    assert d.quelle == 4
+
+
+def test_xmp_sidecar_felder_der_reihe_nach(konf):
+    d = datum.bestimmen({}, None, "a.tif", FOTO, 0.0, konf, jetzt=JETZT,
+                        xmp_felder={"CreateDate": "2017:01:01 10:00:00", "DateCreated": "2016:01:01 10:00:00"})
+    assert d.zeit == datetime(2016, 1, 1, 10)
+
+
+def _auffaellig(d_zeit, name="x.jpg", mtime=None, quelle=1):
+    d = datum.Datum(d_zeit, quelle, True)
+    return datum.auffaellig(d, name, mtime.timestamp() if mtime else 0.0, jetzt=JETZT)
+
+
+def test_datum_auffaellig_gegen_dateiname():
+    """Entscheidung 9: Hinweis im Bericht, einsortiert wird trotzdem."""
+    assert _auffaellig(datetime(2000, 1, 1, 0, 1), name="IMG_20230405_101010.jpg")
+    assert not _auffaellig(datetime(2023, 4, 5, 10, 10), name="IMG_20230405_101010.jpg")
+    assert not _auffaellig(datetime(2023, 4, 6, 1, 0), name="2023-04-05 Urlaub.jpg")   # ein Tag Spielraum
+
+
+def test_datum_auffaellig_gegen_aenderungsdatum():
+    # Aufnahme NACH der letzten Aenderung: die Uhr ging falsch.
+    assert _auffaellig(datetime(2025, 6, 1), mtime=datetime(2024, 6, 1))
+    # Mehr als zehn Jahre vor der Aenderung: typisch zurueckgesetzte Kamerauhr.
+    assert _auffaellig(datetime(2000, 1, 1), mtime=datetime(2023, 6, 1))
+    # Normal: kurz vor der Aenderung, oder ein altes Foto, spaeter bearbeitet (< 10 Jahre).
+    assert not _auffaellig(datetime(2023, 5, 31, 18), mtime=datetime(2023, 6, 1))
+    assert not _auffaellig(datetime(2018, 1, 1), mtime=datetime(2023, 6, 1))
+    # Kaputtes Aenderungsdatum (FAT-Anfang 1980) zaehlt nicht.
+    assert not _auffaellig(datetime(2023, 1, 1), mtime=datetime(1980, 1, 1))
+
+
+def test_datum_auffaellig_nur_fuer_metadaten():
+    assert not _auffaellig(datetime(2000, 1, 1), name="IMG_20230405.jpg", quelle=5)
+    assert not _auffaellig(datetime(2000, 1, 1), mtime=datetime(2023, 6, 1), quelle=6)
