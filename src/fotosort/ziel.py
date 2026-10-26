@@ -16,7 +16,10 @@ from pathlib import Path
 
 from . import datum as datum_modul
 from . import kamera as kamera_modul
-from . import pfade
+from . import pfade, strukturen
+
+#: Dateien, die nicht als "hier liegen schon Bilder" zaehlen.
+_KEINE_BILDER = frozenset({"thumbs.db", "desktop.ini", ".ds_store"})
 
 MONATSNAMEN = (
     "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -97,16 +100,32 @@ class Zielstruktur:
     def __init__(self, ziel: Path) -> None:
         self.ziel = pfade.aufloesen(Path(ziel))
         self._inhalt: dict[Path, list[str]] = {}
+        self._mit_dateien: dict[Path, bool] = {}
 
     def _ordner_in(self, eltern: Path) -> list[str]:
         if eltern not in self._inhalt:
+            namen: list[str] = []
+            dateien = False
             try:
                 with os.scandir(pfade.lang(eltern)) as es:
-                    namen = sorted(e.name for e in es if e.is_dir(follow_symlinks=True))
+                    for e in es:
+                        try:
+                            if e.is_dir(follow_symlinks=True):
+                                namen.append(e.name)
+                            elif not e.name.startswith(".") and e.name.casefold() not in _KEINE_BILDER:
+                                dateien = True
+                        except OSError:
+                            continue
             except OSError:
-                namen = []
-            self._inhalt[eltern] = namen
+                pass
+            self._inhalt[eltern] = sorted(namen)
+            self._mit_dateien[eltern] = dateien
         return self._inhalt[eltern]
+
+    def hat_dateien(self, ordner: Path) -> bool:
+        """Liegen in diesem Ordner schon Dateien direkt drin (nicht nur Unterordner)?"""
+        self._ordner_in(ordner)
+        return self._mit_dateien.get(ordner, False)
 
     def vermerken(self, eltern: Path, name: str) -> None:
         """Einen (spaeter) angelegten Ordner in den Cache aufnehmen."""
@@ -137,42 +156,94 @@ class Zielstruktur:
                     return True
         return False
 
-    def finden(self, teile: list[str], zusatz_erlaubt: list[bool] | None = None) -> Zielort:
+    def finden(self, teile: list[str], zusatz_erlaubt: list[bool] | None = None,
+               tag: date | None = None) -> Zielort:
         """Den Zielordner bestimmen; vorhandene Ordner mit Zusatz vorziehen.
 
         zusatz_erlaubt: je Ebene, ob ein Ordner mit Zusatz benutzt werden
         darf (Datumsebenen). Ohne Angabe gilt es fuer alle Ebenen.
+
+        tag (seit v0.9): das Datum der Datei. Damit werden auch vorhandene
+        Ordner in anderer Schreibweise benutzt ("2021.01", "01.2021",
+        "Januar 2021", "01" unter "2021"; strukturen.py) - auch ein feinerer
+        Ordner direkt auf dieser Ebene ("20210115 Hochzeit" im Archiv selbst).
+        Danach entfallen Datumsebenen der Vorlage, die er schon abdeckt; und
+        liegen in ihm schon Bilder direkt drin, ist das das Schema dieses
+        Archivs: Die Datei kommt dazu, ohne weitere Unterordner.
         """
         aktuell = self.ziel
         mehrdeutig = False
         wiederverwendet = False
-        for i, gewuenscht in enumerate(teile):
+        erlaubt_je = [True if zusatz_erlaubt is None or i >= len(zusatz_erlaubt) else zusatz_erlaubt[i]
+                      for i in range(len(teile))]
+        # Der Zeitraum, den jede Datumsebene der Vorlage meint (im Zusammenhang).
+        soll: list[strukturen.Zeitraum | None] = []
+        z_vorher: strukturen.Zeitraum | None = None
+        for i, teil in enumerate(teile):
+            z = strukturen.zeitraum(teil, z_vorher) if erlaubt_je[i] else None
+            soll.append(z)
+            if z is not None:
+                z_vorher = z
+        z_aktuell: strukturen.Zeitraum | None = None   # Zeitraum des Ordners, in dem wir stehen
+        i = 0
+        while i < len(teile):
+            gewuenscht = teile[i]
+            erlaubt = erlaubt_je[i]
             vorhanden = self._ordner_in(aktuell)
             # Verglichen in einer Unicode-Form (NFC): macOS-Freigaben liefern
             # "März" zerlegt (NFD) - sonst entstuende ein zweiter, gleich
             # aussehender Ordner. Benutzt wird der vorhandene Name, wie er ist.
             gleich = _nfc(gewuenscht)
-            vorhanden_gleich = next((n for n in vorhanden if n == gewuenscht or _nfc(n) == gleich), None)
-            if vorhanden_gleich is None:
+            name = next((n for n in vorhanden if n == gewuenscht or _nfc(n) == gleich), None)
+            if name is None:
                 # Auch ohne Gross-/Kleinschreibung (seit v0.8, wie bei Dateinamen):
                 # "CANON EOS 5D" landet im vorhandenen "Canon EOS 5D" - zwei
                 # Ordner, die sich nur darin unterscheiden, waeren ueber SMB
                 # unter Windows nicht beide erreichbar.
-                vorhanden_gleich = next((n for n in sorted(vorhanden) if _nfc(n).casefold() == gleich.casefold()), None)
-            if vorhanden_gleich is not None:
-                aktuell = aktuell / vorhanden_gleich
-                continue
-            erlaubt = True if zusatz_erlaubt is None or i >= len(zusatz_erlaubt) else zusatz_erlaubt[i]
-            kandidaten = [n for n in vorhanden if self.passt(_nfc(n), gleich)] if erlaubt else []
-            if not kandidaten:
-                aktuell = aktuell / gewuenscht
-                continue
-            if len(kandidaten) > 1:
-                mehrdeutig = True
-            gewaehlt = sorted(kandidaten)[0]
-            wiederverwendet = True
-            aktuell = aktuell / gewaehlt
+                name = next((n for n in sorted(vorhanden) if _nfc(n).casefold() == gleich.casefold()), None)
+            vorhanden_genutzt = name is not None
+            if name is None and erlaubt:
+                kandidaten = [n for n in vorhanden if self.passt(_nfc(n), gleich)]
+                if kandidaten:
+                    if len(kandidaten) > 1:
+                        mehrdeutig = True
+                    name = sorted(kandidaten)[0]
+                    wiederverwendet = vorhanden_genutzt = True
+            if name is None and erlaubt and tag is not None and soll[i] is not None:
+                name, mehr = self._nach_datum(vorhanden, z_aktuell, soll[i], tag)
+                if name is not None:
+                    mehrdeutig = mehrdeutig or mehr
+                    wiederverwendet = vorhanden_genutzt = True
+            if name is None:
+                name = gewuenscht
+            aktuell = aktuell / name
+            if erlaubt:
+                z_neu = strukturen.zeitraum(name, z_aktuell)
+                if z_neu is not None:
+                    z_aktuell = z_neu
+            i += 1
+            if z_aktuell is not None and tag is not None and z_aktuell.umfasst(tag):
+                # Datumsebenen, die dieser Ordner schon abdeckt, entfallen.
+                while i < len(teile) and soll[i] is not None and soll[i].rang <= z_aktuell.rang:
+                    i += 1
+                if vorhanden_genutzt and self.hat_dateien(aktuell):
+                    break   # Schema dieses Archivs: Bilder direkt im Datumsordner
         return Zielort(aktuell, mehrdeutig=mehrdeutig, wiederverwendet=wiederverwendet)
+
+    def _nach_datum(self, vorhanden: list[str], eltern: "strukturen.Zeitraum | None",
+                    soll: "strukturen.Zeitraum", tag: date) -> tuple[str | None, bool]:
+        """Ein vorhandener Ordner, der das Datum der Datei nennt - in gleicher
+        Feinheit wie die Vorlagenebene (bevorzugt) oder feiner. (Name, mehrdeutig)."""
+        passende: list[tuple[int, str]] = []
+        for n in vorhanden:
+            z = strukturen.zeitraum(n, eltern)
+            if z is not None and z.umfasst(tag) and z.rang >= soll.rang:
+                passende.append((z.rang, n))
+        if not passende:
+            return None, False
+        bester = min(r for r, _n in passende)
+        namen = sorted(n for r, n in passende if r == bester)
+        return namen[0], len(namen) > 1
 
 
 def _nfc(text: str) -> str:
@@ -183,7 +254,7 @@ def zielpfad(struktur: Zielstruktur, d: datum_modul.Datum, kamera: str, name: st
     """Vollstaendiger Zielpfad einer Datei (Ordner plus Originalname)."""
     vorlage, tag = _vorlage_fuer(d, konf)
     teile = teile_aus_vorlage(vorlage, tag, kamera)
-    ort = struktur.finden(teile, zusatz_ebenen(vorlage))
+    ort = struktur.finden(teile, zusatz_ebenen(vorlage), tag)
     return ort.ordner / name, ort
 
 

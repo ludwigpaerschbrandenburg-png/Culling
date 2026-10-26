@@ -85,7 +85,7 @@ def _ist_verknuepfung(eintrag: os.DirEntry) -> bool:
     return bool(pruefen and pruefen())
 
 
-def dateien_im_ziel(ziel: Path, e: Ergebnis) -> list[_Datei]:
+def dateien_im_ziel(ziel: Path, e: Ergebnis, melden=None) -> list[_Datei]:
     """Alle Dateien unter dem Ziel, Ordner fuer Ordner, Namen sortiert.
 
     Ein Durchlauf mit os.scandir; die Groesse kommt aus dem Verzeichniseintrag
@@ -97,7 +97,10 @@ def dateien_im_ziel(ziel: Path, e: Ergebnis) -> list[_Datei]:
     while stapel:
         # Schon beim Durchsuchen melden: Fortschritt fuer das Fenster, und ein
         # Abbruchwunsch greift hier (KeyboardInterrupt), nicht erst danach.
-        steuerung.melden(len(gefunden), 0, 0, 0)
+        if melden is None:
+            steuerung.melden(len(gefunden), 0, 0, 0)
+        else:
+            melden()
         ordner = stapel.pop()
         try:
             with os.scandir(pfade.lang(ordner)) as eintraege:

@@ -1182,6 +1182,13 @@ class Ablauf:
                         zeilen.append(["Namenskonflikte", meldungen.anzahl(a["namenskonflikte"])])
                     if a["moegliche_duplikate"]:
                         zeilen.append(["mögliche Duplikate (Schätzung)", meldungen.anzahl(a["moegliche_duplikate"])])
+                    n = ereignis("ordner_datum_abweichend")
+                    if n:
+                        zeilen.append(["Quellordner nennt ein anderes Datum (siehe Bericht)", meldungen.anzahl(n)])
+                    # Schaetzung vor dem Kopieren (seit v0.9): schon im Archiv?
+                    for quelle, anzahl in sorted(d.vermutlich_importiert_je_quelle().items()):
+                        zeilen.append([f"vermutlich bereits importiert – {Path(db.text_pfad(quelle)).name}",
+                                       meldungen.anzahl(anzahl)])
                     zeilen.append(["Fehler", meldungen.anzahl(a["fehler"])])
                     if a["offen"]:
                         zeilen.append(["noch nicht analysiert", meldungen.anzahl(a["offen"])])
@@ -1195,6 +1202,9 @@ class Ablauf:
                     if s.get("verschoben", 0):
                         zeilen.append(["verschoben, Prüfung folgt", meldungen.anzahl(s.get("verschoben", 0))])
                     zeilen.append(["Duplikate (nicht kopiert)", meldungen.anzahl(s.get("duplikat", 0) + s.get("duplikat_bestaetigt", 0))])
+                    # Je Quelle (seit v0.9): was schon im Archiv lag, auch von Hand abgelegt.
+                    for quelle, anzahl in sorted(d.bereits_importiert_je_quelle().items()):
+                        zeilen.append([meldungen.ob_bereits_importiert(db.text_pfad(quelle)), meldungen.anzahl(anzahl)])
                     n = ereignis("namenskonflikt")
                     if n:
                         zeilen.append(["Namenskonflikte (Anhang _1, _2 …)", meldungen.anzahl(n)])

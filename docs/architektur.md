@@ -51,6 +51,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ loeschen.py            die einzige Löschstelle (SPEC §5), Papierkorb _geloescht_
 │  ├─ aufraeumen.py          Phase 5: Quelle aufräumen, leere Ordner
 │  ├─ zuruecklegen.py        fotosort zuruecklegen: Ordner _geloescht_ nicht überschreibend an die alten Orte (v0.8)
+│  ├─ strukturen.py          Datum aus Ordnernamen in jeder Schreibweise (2021.01, Januar 2021 …)   ← reine Logik (v0.9)
+│  ├─ bestand.py             Bestand des Archivs erfassen (Namen, Größen; nichts gelesen) für „bereits importiert“ (v0.9)
 │  ├─ sichten.py             Reiter „Sichten“: Ordner und Bilder des Archivs, Bewertungen in bewertungen.db (v0.8)
 │  ├─ vorschau.py            eingebettete Vorschau aus RAW/HEIC über einen ExifTool-Prozess, nur lesend (v0.8)
 │  ├─ fortschritt.py         laufende Anzeige (Analyse, Kopieren, Prüfen, Aufräumen, Neueinlesen)

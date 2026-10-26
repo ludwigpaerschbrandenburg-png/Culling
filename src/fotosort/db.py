@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS ziel_index (
 );
 
 CREATE INDEX IF NOT EXISTS ziel_index_hash ON ziel_index (hash);
+CREATE INDEX IF NOT EXISTS ziel_index_groesse ON ziel_index (groesse);
 
 CREATE TABLE IF NOT EXISTS laeufe (
     nummer          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1043,7 +1044,7 @@ class Datenbank:
         """
         anfang = ordner_text.rstrip(trenner) + trenner
         zeilen = self.verbindung.execute(
-            "SELECT quellpfad, dateityp, status, kamera, kamera_modell, aufnahme_zeit,"
+            "SELECT quellpfad, quellwurzel, dateityp, status, kamera, kamera_modell, aufnahme_zeit,"
             " datum_quelle, datum_sicher, datum_hinweis, zielpfad, gruppe, mtime, groesse,"
             " fehlergrund"
             " FROM dateien WHERE quellpfad > ? AND quellpfad < ?"
@@ -1318,6 +1319,53 @@ class Datenbank:
             (pfad_text(zielpfad), int(groesse), float(mtime), hash_, lauf),
         )
         self._vielleicht_schreiben()
+
+    def ziel_index_erfassen(self, zielpfad, groesse: int, mtime: float) -> bool:
+        """Bestand des Archivs (seit v0.9): eine Datei im Ziel vormerken, ohne
+        sie zu lesen (Hash leer). Ist sie schon bekannt und unveraendert, bleibt
+        ihr Hash; hat sie sich veraendert, wird er geleert. True, wenn neu."""
+        self._beginnen()
+        alt = self.verbindung.execute(
+            "SELECT groesse, mtime FROM ziel_index WHERE zielpfad = ?", (pfad_text(zielpfad),)
+        ).fetchone()
+        if alt is not None and int(alt["groesse"]) == int(groesse) and _gleiche_zeit(alt["mtime"], mtime):
+            return False
+        self.verbindung.execute(
+            "INSERT INTO ziel_index (zielpfad, groesse, mtime, hash, zuletzt_gelesen_in_lauf)"
+            " VALUES (?, ?, ?, '', NULL) ON CONFLICT(zielpfad) DO UPDATE SET groesse = excluded.groesse,"
+            " mtime = excluded.mtime, hash = '', zuletzt_gelesen_in_lauf = NULL",
+            (pfad_text(zielpfad), int(groesse), float(mtime)),
+        )
+        self._vielleicht_schreiben()
+        return alt is None
+
+    def ziel_index_ungelesen_nach_groesse(self, groesse: int) -> list[sqlite3.Row]:
+        """Archivdateien dieser Groesse, deren Inhalt noch nie gelesen wurde."""
+        return self.verbindung.execute(
+            "SELECT * FROM ziel_index WHERE groesse = ? AND hash = '' ORDER BY zielpfad", (int(groesse),)
+        ).fetchall()
+
+    def vermutlich_importiert_je_quelle(self) -> dict[str, int]:
+        """Je Quelle: Dateien, die noch nicht kopiert sind und genau so gross
+        sind wie eine Datei im Archiv - eine Schaetzung vor dem Kopieren."""
+        self.stapel_schreiben()
+        return {z[0]: int(z[1]) for z in self.verbindung.execute(
+            "SELECT quellwurzel, COUNT(*) FROM dateien WHERE status IN ('gefunden', 'analysiert')"
+            " AND dateityp IN ('foto', 'raw', 'video') AND groesse > 0"
+            " AND groesse IN (SELECT groesse FROM ziel_index) GROUP BY quellwurzel")}
+
+    def bereits_importiert_je_quelle(self) -> dict[str, int]:
+        """Je Quelle: Bilder und Videos, deren Inhalt schon im Archiv lag, bevor
+        der Durchgang sie sah (Duplikat - gleicher Inhalt, ueber die Pruefsumme
+        nachgewiesen). Nicht mitgezaehlt: Doppelte innerhalb der Quellen, deren
+        Partner im selben Lauf erst abgelegt wurde."""
+        self.stapel_schreiben()
+        return {z[0]: int(z[1]) for z in self.verbindung.execute(
+            "SELECT d.quellwurzel, COUNT(*) FROM dateien d"
+            " WHERE d.status IN ('duplikat', 'duplikat_bestaetigt') AND d.dateityp IN ('foto', 'raw', 'video')"
+            " AND NOT EXISTS (SELECT 1 FROM dateien p WHERE p.zielpfad = d.zielpfad AND p.quellpfad != d.quellpfad"
+            "   AND p.status NOT IN ('duplikat', 'duplikat_bestaetigt') AND p.kopiert_in_lauf = d.kopiert_in_lauf)"
+            " GROUP BY d.quellwurzel")}
 
     def ziel_index_nach_hash(self, hash_: str) -> list[sqlite3.Row]:
         # Kein Sammelschreiben noetig: Dieselbe Verbindung sieht ihre eigenen,

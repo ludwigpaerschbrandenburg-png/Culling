@@ -8,18 +8,21 @@ Gruppe und Zielpfad. Fortsetzbar: bearbeitet werden nur Zeilen mit Status
 
 from __future__ import annotations
 
+import calendar
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 
-from . import FotosortFehler, dateitypen, db, fortschritt, gruppen, kamera, meldungen, metadaten, pfade, steuerung
+from . import FotosortFehler, dateitypen, db, fortschritt, gruppen, kamera, meldungen, metadaten, pfade, steuerung, strukturen
 from . import datum as datum_modul
 from . import ziel as ziel_modul
 
 ART_ZIELORDNER_MEHRDEUTIG = "zielordner_mehrdeutig"
 ART_GRUPPE_GETRENNT = "gruppe_getrennt"       # SPEC §3 seit v0.8
 ART_DATUM_AUFFAELLIG = "datum_auffaellig"
+ART_ORDNER_DATUM = "ordner_datum_abweichend"
 ART_NUR_HERSTELLER = "nur_hersteller"
 GRUND_SIDECAR_OHNE_HAUPT = meldungen.GRUND_SIDECAR_OHNE_HAUPT
 GRUND_METADATEN = meldungen.GRUND_METADATEN
@@ -49,6 +52,7 @@ class Ergebnis:
     getrennt: int = 0                # Gruppen, die nach Aufnahmezeit getrennt wurden (v0.8)
     auffaellig: int = 0              # "Datum auffaellig" (v0.8)
     nur_hersteller: int = 0          # Hersteller ohne Modell (v0.8)
+    ordner_abweichend: int = 0       # Quellordner nennt ein anderes Datum (v0.9)
     sekunden: float = 0.0
     abgebrochen: bool = False
     mehrdeutig_gemeldet: set = field(default_factory=set)
@@ -307,8 +311,42 @@ def _gruppe_bestimmen(g, nach_name, felder_von, struktur, konf, dbank, lauf, erg
                            meldungen.ereignis_gruppe_getrennt(diese.name, diese.zeit, erste.name, teile[0]))
 
 
+def ordner_widerspricht(quellpfad, quellwurzel, d) -> str:
+    """Nennt der Ordner der Quelldatei ein Datum, das nicht zur Aufnahme passt
+    (Ordner "2021.03", Aufnahme im Mai)? Liefert den Hinweistext oder "".
+    Nachsichtig, damit Ereignisse nicht stoeren: ein Tag Spielraum an den
+    Grenzen, und ein Tagesordner ("2021-04-28 Italien") gilt fuer bis zu 31
+    Tage danach - Reisen dauern."""
+    if d.zeit is None or not d.sicher:
+        return ""
+    try:
+        teile = Path(db.text_pfad(quellpfad)).relative_to(Path(db.text_pfad(quellwurzel))).parent.parts
+    except ValueError:
+        return ""
+    z = strukturen.zeitraum_im_pfad(teile)
+    if z is None:
+        return ""
+    tag = d.zeit.date()
+    if z.art == "jahr":
+        von, bis = date(z.jahr, 1, 1), date(z.jahr, 12, 31)
+    elif z.art == "monat":
+        von = date(z.jahr, z.monat, 1)
+        bis = date(z.jahr, z.monat, calendar.monthrange(z.jahr, z.monat)[1])
+    else:
+        von = date(z.jahr, z.monat, z.tag)
+        bis = von + timedelta(days=31)
+    if von - timedelta(days=1) <= tag <= bis + timedelta(days=1):
+        return ""
+    return meldungen.ereignis_ordner_datum(z, tag)
+
+
 def _hinweise(name, z, d, felder, dbank, lauf, ergebnis) -> None:
-    """Datum auffaellig (SPEC §3) und Hersteller ohne Modell - nur Hinweise."""
+    """Datum auffaellig (SPEC §3), Hersteller ohne Modell und ein Quellordner,
+    der ein anderes Datum nennt (seit v0.9) - nur Hinweise."""
+    abweichend = ordner_widerspricht(z["quellpfad"], z["quellwurzel"], d)
+    if abweichend:
+        ergebnis.ordner_abweichend += 1
+        dbank.ereignis(lauf, ART_ORDNER_DATUM, z["quellpfad"], 1, abweichend)
     grund = datum_modul.auffaellig(d, name, z["mtime"] or 0.0)
     if grund:
         ergebnis.auffaellig += 1

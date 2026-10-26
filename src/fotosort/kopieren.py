@@ -1070,6 +1070,20 @@ class _Lauf:
                 continue
             if st.st_size == a.ergebnis.bytes:
                 return p
+        # c) Bestand, den noch niemand gelesen hat (seit v0.9: von Hand
+        #    angelegtes Archiv, bestand.py): nur Dateien genau dieser Groesse
+        #    werden jetzt gelesen; ihr Hash bleibt fuer spaeter im Index.
+        for eintrag in self.dbank.ziel_index_ungelesen_nach_groesse(a.ergebnis.bytes):
+            p = Path(db.text_pfad(eintrag["zielpfad"]))
+            if db.pfad_text(p) == db.pfad_text(a.schreibziel):
+                continue
+            try:
+                vorhanden = self.hash_von_vorhandener(p).result()
+            except OSError:
+                continue
+            self.index_nachtragen(p, vorhanden)
+            if vorhanden == h:
+                return p
         return None
 
     def _endgueltig(self, a: _Auftrag, anhang: int, vorgemerkt: bool = False) -> None:

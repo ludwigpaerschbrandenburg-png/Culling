@@ -221,6 +221,16 @@ def melden(dateien: int, gesamt: int, bytes_: int, gesamt_bytes: int) -> None:
         AKTIV.melden(dateien, gesamt, bytes_, gesamt_bytes)
 
 
+def wuensche_pruefen() -> None:
+    """Abbruch und Pause beachten, ohne die Zahlen der Anzeige zu aendern
+    (fuer Nebenarbeiten wie das Erfassen des Archivbestands, seit v0.9)."""
+    if AKTIV is not None:
+        jetzt = time.monotonic()
+        if jetzt - AKTIV._zuletzt >= SCHREIB_ABSTAND:
+            AKTIV._wuensche_pruefen()
+            AKTIV.schreiben()
+
+
 def lauf_setzen(nummer: int) -> None:
     if AKTIV is not None:
         AKTIV.lauf = nummer

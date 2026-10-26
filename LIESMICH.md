@@ -201,6 +201,21 @@ und die betroffenen Dateien werden noch einmal analysiert. Im schwarzen Fenster 
 **Soll ein Kameramodell einen anderen Ordnernamen bekommen?** – Modell eintippen, dann den
 Ordnernamen; Enter allein heißt „nichts ändern".
 
+### Vorhandenes Archiv: was schon da ist
+
+Liegt im Zielordner schon ein Archiv, das Sie selbst angelegt haben, erkennt das Programm es:
+
+- **Ordner in jeder Schreibweise:** `2021.01`, `01.2021`, `Januar 2021`, `2021_01_15 Hochzeit`
+  oder `01` unter `2021` – das Programm sieht, welchen Monat oder Tag der Ordner meint, und legt
+  neue Bilder dort hinein, statt daneben einen zweiten Ordner anzulegen. Liegen in dem Ordner
+  schon Bilder direkt drin, kommen die neuen einfach dazu.
+- **Bereits importiert:** Beim Durchsuchen merkt sich das Programm, was im Archiv liegt (nur
+  Namen und Größen, das geht schnell). Beim Kopieren erkennt es Bilder, die schon im Archiv
+  liegen – auch unter anderem Namen – und legt sie nicht noch einmal ab. Danach steht da:
+  „N Bilder und Videos dieser Quelle sind bereits importiert“. Sonst geschieht mit ihnen nichts.
+- **Ordner mit falschem Datum:** Liegt in der Quelle ein Bild vom Mai in einem Ordner „2021.03“,
+  steht das als Hinweis im Bericht. Einsortiert wird nach dem Aufnahmedatum.
+
 ### Schritt 3: Kopieren
 
 Der Hauptknopf sagt, wie viele Dateien anstehen („Kopieren starten · 3.912 Dateien"); im

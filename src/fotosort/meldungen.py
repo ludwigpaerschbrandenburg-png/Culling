@@ -999,6 +999,8 @@ def analyse_ergebnis(e) -> str:
         zeilen.append(f"  gleicher Name, andere Aufnahme (Gruppe getrennt): {anzahl(e.getrennt)}")
     if getattr(e, "auffaellig", 0):
         zeilen.append(f"  Datum auffaellig (siehe Bericht):  {anzahl(e.auffaellig)}")
+    if getattr(e, "ordner_abweichend", 0):
+        zeilen.append(f"  Ordner nennt ein anderes Datum (siehe Bericht): {anzahl(e.ordner_abweichend)}")
     if getattr(e, "nur_hersteller", 0):
         zeilen.append(f"  nur Hersteller, kein Modell:       {anzahl(e.nur_hersteller)}")
     zeilen.append(f"  Dauer:           {dauer(e.sekunden)}")
@@ -2557,4 +2559,48 @@ def ob_beenden_frage(schritt: str) -> str:
         "alles Bisherige bleibt gespeichert, und beim nächsten Öffnen geht es genau dort weiter. "
         "Nichts geht verloren."
     )
+
+
+# ------------------------------------- Bestand des Archivs (v0.9) ----
+
+
+def bestand_erfasst(dateien: int, neu: int) -> str:
+    if not dateien:
+        return "Bestand des Archivs: noch leer."
+    zusatz = f", davon {anzahl(neu)} neu erfasst" if neu else ""
+    return (f"Bestand des Archivs: {anzahl(dateien)} Dateien bekannt{zusatz} "
+            "(nur Namen und Größen, gelesen wird erst beim Kopieren, wo nötig).")
+
+
+def vermutlich_importiert(je_quelle: dict) -> str:
+    zeilen = ["Schon im Archiv? Diese Dateien sind vermutlich bereits importiert (genau so groß wie eine"
+              " Datei im Archiv; sicher weiß es das Programm nach dem Kopieren):"]
+    for quelle, n in sorted(je_quelle.items(), key=lambda x: str(x[0])):
+        zeilen.append(f"  {quelle}: {anzahl(n)} Dateien")
+    return "\n".join(zeilen)
+
+
+def bereits_importiert(je_quelle: dict) -> str:
+    zeilen = ["Bereits importiert (lag schon im Archiv, nicht noch einmal abgelegt):"]
+    for quelle, n in sorted(je_quelle.items(), key=lambda x: str(x[0])):
+        zeilen.append(f"  {anzahl(n)} Bilder und Videos dieser Quelle sind bereits importiert: {quelle}")
+    return "\n".join(zeilen)
+
+
+def ob_bereits_importiert(quelle) -> str:
+    return f"bereits importiert – {Path(str(quelle)).name or quelle}"
+
+
+def ereignis_ordner_datum(zeitraum, tag) -> str:
+    if zeitraum.art == "jahr":
+        genannt = f"{zeitraum.jahr}"
+    elif zeitraum.art == "monat":
+        genannt = f"{MONATSNAMEN_TEXT[zeitraum.monat - 1]} {zeitraum.jahr}"
+    else:
+        genannt = f"{zeitraum.tag:02d}.{zeitraum.monat:02d}.{zeitraum.jahr}"
+    return f"Ordner nennt {genannt}, Aufnahme vom {tag.day:02d}.{tag.month:02d}.{tag.year}"
+
+
+MONATSNAMEN_TEXT = ("Januar", "Februar", "März", "April", "Mai", "Juni",
+                    "Juli", "August", "September", "Oktober", "November", "Dezember")
 

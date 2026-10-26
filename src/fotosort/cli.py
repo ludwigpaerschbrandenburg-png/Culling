@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, zuruecklegen, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, bestand, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, zuruecklegen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -389,6 +389,19 @@ def befehl_scan(args, konsole) -> int:
         if text:
             konsole.print("")
             konsole.print(text)
+        # Bestand des Archivs (seit v0.9): was schon im Ziel liegt, auch in einem
+        # von Hand angelegten Archiv - nur Namen und Groessen, nichts wird gelesen.
+        try:
+            bestand_e = bestand.erfassen(archiv.ziel, datenbank)
+        except OSError:
+            bestand_e = None
+        if bestand_e is not None:
+            konsole.print("")
+            konsole.print(meldungen.bestand_erfasst(bestand_e.dateien, bestand_e.neu))
+            vermutlich = datenbank.vermutlich_importiert_je_quelle()
+            if vermutlich:
+                konsole.print(meldungen.vermutlich_importiert(
+                    {db.text_pfad(q): n for q, n in vermutlich.items()}))
         if ergebnis.ordner_nicht_lesbar:
             konsole.print(
                 meldungen.scan_ordner_nicht_lesbar(
@@ -636,6 +649,10 @@ def befehl_kopieren(args, konsole) -> int:
                 konsole.print(meldungen.verschieben_ergebnis(ergebnis))
         konsole.print("")
         konsole.print(meldungen.kopieren_zusammenfassung(datenbank.kopier_zusammenfassung()))
+        schon = datenbank.bereits_importiert_je_quelle()
+        if schon:
+            konsole.print("")
+            konsole.print(meldungen.bereits_importiert({db.text_pfad(q): n for q, n in schon.items()}))
         if ergebnis.abgebrochen:
             konsole.print("")
             konsole.print(meldungen.kopieren_abgebrochen())

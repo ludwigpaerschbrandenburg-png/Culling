@@ -813,15 +813,16 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 - [x] Schließen = aus (mit Rückfrage), Fortsetzen beim nächsten Start.
 - [x] Nur eine Instanz; ein zweiter Start holt das Fenster nach vorn.
 - [x] Alle Kerne für Rechenarbeit (Prüfsummen), Plattenzugriffe je Laufwerk dosiert.
-- [ ] Datum aus Ordnernamen in jeder Schreibweise; vorhandene Ordner anderer Schreibweise weiterbenutzen.
-- [ ] Meldung „bereits importiert“ je Quelle; falsch datierte Ordner melden.
+- [x] Datum aus Ordnernamen in jeder Schreibweise; vorhandene Ordner anderer Schreibweise weiterbenutzen.
+- [x] Meldung „bereits importiert“ je Quelle; falsch datierte Ordner melden.
 - [ ] Prüfer, volle Tests, CI, Release v0.9.
 
 ### Später
 
 - Runde 3b: Sichten wie ein Profi (Vergleich, Lupe, Farbmarken, Kameradaten, XMP, Video, Stapel).
 - Runde 3c: Doppelte und Ähnliche (Wahrnehmungs-Prüfsumme, Serien, Kopien aus Downloads).
-- Runde 3d: Struktur umbauen mit Vorschau, Protokoll und Rückgängig; Ausschuss verschieben.
+- Runde 3d: Struktur umbauen mit Vorschau, Protokoll und Rückgängig; Ausschuss verschieben;
+  Schema des Archivs erkennen und als Vorlage vorschlagen (aus Runde 3a verschoben).
 - Runde 3e: Bildanalyse lokal.
 - Runde 3f: Import und Ausgabe (Karte erkennen, zwei Ziele, Umbenennen, Export).
 

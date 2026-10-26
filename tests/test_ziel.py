@@ -210,3 +210,67 @@ def test_vorhandener_ordner_in_anderer_schreibweise_wird_benutzt(tmp_path, konf)
     s = ziel.Zielstruktur(tmp_path)
     pfad, _ort = ziel.zielpfad(s, _d(2026, 1, 1, 12, 30), "CANON EOS 5D", "IMG_0001.JPG", konf)
     assert pfad == tmp_path / "2026" / "2026-01 Januar" / "2026-01-01" / "Canon EOS 5D" / "IMG_0001.JPG"
+
+
+# --- Runde 3a: vorhandene Ordner in jeder Datumsschreibweise --------------------
+
+
+def _bild(ordner, name="ALT_0001.JPG"):
+    ordner.mkdir(parents=True, exist_ok=True)
+    (ordner / name).write_bytes(b"x")
+
+
+def test_monatsordner_anderer_schreibweise_wird_benutzt(tmp_path, konf):
+    """„2021.01“ ist der Januar 2021 - kein zweiter Ordner „2021-01 Januar“ daneben."""
+    (tmp_path / "2021" / "2021.01" / "Hochzeit").mkdir(parents=True)     # nur Unterordner
+    pfad, ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021.01" / "2021-01-15" / "A7C2" / "IMG_1.JPG"
+    assert ort.wiederverwendet
+
+
+def test_ordner_mit_bildern_darin_bekommt_die_neuen_direkt(tmp_path, konf):
+    """Liegen im passenden Ordner schon Bilder direkt drin, ist das das Schema
+    dieses Archivs: Die neuen kommen dazu, ohne weitere Unterordner."""
+    _bild(tmp_path / "2021" / "2021.01")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021.01" / "IMG_1.JPG"
+
+
+@pytest.mark.parametrize("vorhanden", ["2021.01", "01.2021", "Januar 2021", "2021_01"])
+def test_flaches_archiv_ohne_jahresordner(tmp_path, konf, vorhanden):
+    _bild(tmp_path / vorhanden)
+    (tmp_path / "2021.02").mkdir()
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / vorhanden / "IMG_1.JPG"
+
+
+def test_tagesordner_mit_ereignis_direkt_im_archiv(tmp_path, konf):
+    _bild(tmp_path / "20210115 Hochzeit Anna")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "20210115 Hochzeit Anna" / "IMG_1.JPG"
+    # Ein anderer Tag desselben Monats landet nicht dort.
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 16, 12), "A7C2", "IMG_2.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021-01 Januar" / "2021-01-16" / "A7C2" / "IMG_2.JPG"
+
+
+def test_monat_als_zahl_unter_dem_jahr(tmp_path, konf):
+    (tmp_path / "2021" / "01" / "x").mkdir(parents=True)
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "01" / "2021-01-15" / "A7C2" / "IMG_1.JPG"
+
+
+def test_anderer_monat_wird_nicht_benutzt_und_ohne_datum_bleibt_wie_es_war(tmp_path, konf):
+    _bild(tmp_path / "2021" / "2021.02")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "A7C2" / "IMG_1.JPG"
+    _bild(tmp_path / "_Ohne_Datum")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12, sicher=False), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "_Ohne_Datum" / "A7C2" / "IMG_1.JPG"
+
+
+def test_eigenes_archiv_bleibt_wie_es_ist(tmp_path, konf):
+    """Ein Archiv, das das Programm selbst angelegt hat (Kameraordner unter dem
+    Tag), wird genauso weitergefuehrt wie bisher."""
+    _bild(tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "A7C2", "DSC1.ARW")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "iPhone 15", "IMG_1.HEIC", konf)
+    assert pfad == tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "iPhone 15" / "IMG_1.HEIC"

@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import db, meldungen, nachpruefen, pfade, zuruecklegen
-from .analyse import (ART_DATUM_AUFFAELLIG, ART_GRUPPE_GETRENNT, ART_NUR_HERSTELLER, ART_ZIELORDNER_MEHRDEUTIG,
+from .analyse import (ART_DATUM_AUFFAELLIG, ART_ORDNER_DATUM, ART_GRUPPE_GETRENNT, ART_NUR_HERSTELLER, ART_ZIELORDNER_MEHRDEUTIG,
                       GRUND_SIDECAR_OHNE_HAUPT)
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
@@ -211,6 +211,9 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
             f"{meldungen.anzahl(n['fehler']):>8}{meldungen.anzahl(n['geloescht']):>11}"
             f"   ({meldungen.groesse(n['bytes'])})"
         )
+    schon = dbank.bereits_importiert_je_quelle()
+    if schon:
+        z.append("  " + meldungen.bereits_importiert({db.text_pfad(q): n for q, n in schon.items()}).replace("\n", "\n  "))
     sonstiges = zahlen["gesamt"]["sonstiges"]
     z.append(f"  Uebersprungen nach Dateityp (sonstiges, SPEC Abschnitt 3): {meldungen.anzahl(sonstiges)}")
     if sonstiges:
@@ -270,6 +273,11 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
         auffaellig[e["pfad"]] = e["text"]
     _liste(z, "Datum auffaellig (bitte ansehen - einsortiert wurde nach der Regel)", sorted(auffaellig.items()),
            lambda t: f"{t[0]}  —  {t[1]}")
+    abweichend: dict[str, str] = {}
+    for e in dbank.ereignisse_zeiger(ART_ORDNER_DATUM):
+        abweichend[e["pfad"]] = e["text"]
+    _liste(z, "Quellordner nennt ein anderes Datum (einsortiert wurde nach dem Aufnahmedatum)",
+           sorted(abweichend.items()), lambda t: f"{t[0]}  —  {t[1]}")
     _ereignis_liste(z, "Gruppen nach Aufnahmezeit getrennt (gleicher Name, andere Aufnahme)",
                     dbank.ereignisse_zeiger(ART_GRUPPE_GETRENNT), lambda e: f"{e['pfad']}  —  {e['text']}")
     hersteller: dict[str, set[str]] = {}
