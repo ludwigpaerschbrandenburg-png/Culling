@@ -3,7 +3,7 @@
 ExifTool wird nicht je Datei gestartet, sondern laeuft mit -stay_open
 weiter und bekommt Stapel von Dateien. Je Strang ein Prozess; die Anzahl
 ist einstellbar (leistung.metadaten_prozesse), sonst richtet sie sich nach
-dem Profil: Festplatte und Netzlaufwerk 4, SSD Anzahl Kerne, hoechstens 16.
+dem Profil: Festplatte und Netzlaufwerk 4, SSD alle Kerne (seit v0.9 ohne Obergrenze).
 Die Prozesse starten gestaffelt (STARTABSTAND), nicht alle auf einmal.
 
 Fotos und RAW werden mit -fast2 gelesen. Videos ohne: Sony legt seine
@@ -74,7 +74,6 @@ OHNE_FAST2 = frozenset({".png", ".heic", ".heif", ".hif", ".cr3", ".avif"})
 # Eine Festplatte liest mit 32 Lesern auf einmal nur noch mit springendem
 # Kopf (im ersten echten Testlauf: 8 Dateien/s); 0 heisst Anzahl Kerne.
 PROZESSE_JE_PROFIL: dict[str, int] = {"hdd": 4, "netzwerk": 4, "ssd": 0}
-PROZESSE_HOECHSTENS = 16
 # Abstand zwischen zwei Prozessstarts: 16 Perl-Starts im selben Augenblick
 # bremsen sich gegenseitig und lassen Virenscanner anschlagen.
 STARTABSTAND = 0.2
@@ -175,7 +174,7 @@ def prozesse_bestimmen(konf, profil: str | None = None) -> int:
     fest = PROZESSE_JE_PROFIL.get(profil, PROZESSE_JE_PROFIL["hdd"])
     if fest > 0:
         return fest
-    return max(1, min(os.cpu_count() or 1, PROZESSE_HOECHSTENS))
+    return max(1, os.cpu_count() or 1)      # SSD: alle Kerne (seit v0.9 ohne Obergrenze)
 
 
 def argumente_fuer(pfad, dateityp: str) -> list[str]:

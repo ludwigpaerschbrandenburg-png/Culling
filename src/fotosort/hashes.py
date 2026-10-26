@@ -12,7 +12,17 @@ from pathlib import Path
 
 import blake3
 
-BLOCK = 1024 * 1024
+# 4 MB je Block: gross genug, dass BLOCK auf mehrere Kerne verteilt gerechnet
+# wird (seit v0.9, siehe _neuer_hash), klein genug fuer schnelles Anhalten.
+BLOCK = 4 * 1024 * 1024
+
+
+def _neuer_hash():
+    """BLAKE3 auf allen Kernen (seit v0.9): Grosse Bloecke werden in Teilen
+    gleichzeitig gerechnet - das Ergebnis ist dasselbe wie auf einem Kern.
+    Die Bibliothek teilt sich einen Vorrat an Rechenstraengen; mehrere
+    gleichzeitige Leser ueberbuchen den Prozessor also nicht."""
+    return blake3.blake3(max_threads=blake3.blake3.AUTO)
 
 
 class Abgebrochen(Exception):
@@ -25,7 +35,7 @@ def blake3_datei(pfad: Path, stop: threading.Event | None = None) -> str:
     Ist "stop" gesetzt, wird nach dem laufenden Block mit Abgebrochen
     beendet (Strg+C waehrend des Pruefens).
     """
-    h = blake3.blake3()
+    h = _neuer_hash()
     with open(pfad, "rb", buffering=0) as f:
         while True:
             if stop is not None and stop.is_set():
@@ -59,7 +69,7 @@ def kopieren_mit_hash(
     Ist "stop" gesetzt, wird nach dem laufenden Block abgebrochen; die
     halbfertige Zieldatei wird dann entfernt und Abgebrochen geworfen.
     """
-    h = blake3.blake3()
+    h = _neuer_hash()
     bytes_gesamt = 0
     if fd is None:
         fd = exklusiv_anlegen(ziel)

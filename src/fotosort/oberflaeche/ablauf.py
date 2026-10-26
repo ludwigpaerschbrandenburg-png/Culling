@@ -923,7 +923,8 @@ class Ablauf:
             except FotosortFehler as fehler:
                 return {"text": str(fehler)}
             exiftool, _wo = cli.exiftool_finden(konf)
-            return {"ziel": ziel, "archiv_ordner": lokal, "konf": konf, "exiftool": exiftool or ""}
+            return {"ziel": ziel, "archiv_ordner": lokal, "konf": konf, "exiftool": exiftool or "",
+                    "laufwerksart": self._laufwerksart(str(ziel), quelle=False) or ""}
 
     def archiv_verwerfen(self, wort: str = "") -> dict:
         """Die Merkliste zu diesem Ziel entfernen: den lokalen Archiv-Ordner

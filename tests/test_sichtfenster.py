@@ -193,3 +193,13 @@ def test_reiter_verlassen_haelt_das_laden_an_und_zurueck_geht_es_weiter(app, tmp
     _fertig_laden(app, s)
     assert all(nr in s.vorschau for nr in s.gezeigt if s.alle[nr].art != "video")   # fehlende nachgeladen
     f.close()
+
+
+def test_vorschau_auf_ssd_mit_allen_kernen(monkeypatch):
+    """Seit v0.9: Auf einer SSD rechnet jeder Kern ein Vorschaubild, auf einer
+    Festplatte bleiben es drei Leser."""
+    monkeypatch.setattr(sichtfenster.os, "cpu_count", lambda: 24)
+    assert sichtfenster.leser_fuer("ssd") == 24
+    assert sichtfenster.leser_fuer("hdd") == sichtfenster.LESER == sichtfenster.leser_fuer("")
+    monkeypatch.setattr(sichtfenster.os, "cpu_count", lambda: 2)
+    assert sichtfenster.leser_fuer("ssd") == sichtfenster.LESER

@@ -103,3 +103,18 @@ def test_kurze_schreibvorgaenge_werden_fortgesetzt():
 
     with pytest.raises(OSError):
         hashes._ganz_schreiben(Stockt(), b"abc")
+
+
+def test_pruefsumme_auf_allen_kernen_ist_dieselbe(tmp_path):
+    """Seit v0.9 rechnet BLAKE3 auf allen Kernen (mehrere Blöcke zugleich). Das
+    Ergebnis muss Byte für Byte dasselbe sein wie mit einem Kern - auch über
+    Blockgrenzen hinweg und beim Kopieren."""
+    import os
+    daten = os.urandom(3 * hashes.BLOCK + 12345)
+    p = tmp_path / "gross.bin"
+    p.write_bytes(daten)
+    einzeln = blake3.blake3(daten, max_threads=1).hexdigest()
+    assert hashes.blake3_datei(p) == einzeln
+    h, n = hashes.kopieren_mit_hash(p, tmp_path / "kopie.bin")
+    assert h == einzeln and n == len(daten) and (tmp_path / "kopie.bin").read_bytes() == daten
+    assert hashes.BLOCK >= 4 * 1024 * 1024         # gross genug, dass sich mehrere Kerne lohnen

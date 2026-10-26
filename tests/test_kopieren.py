@@ -451,7 +451,7 @@ def test_zu_wenig_platz_bricht_vorher_ab(baum, quelle, ziel, nachschauen, monkey
 def test_worker_zahlen(konf):
     """Entscheidung 1 (v0.8): Auch die gleichzeitig gelesenen Dateien richten
     sich nach dem Profil - eine Festplatte liest mit vielen Leser nur langsamer."""
-    kerne = min(max(1, os.cpu_count() or 1), 16)
+    kerne = max(1, os.cpu_count() or 1)          # seit v0.9 ohne Obergrenze: alle Kerne
     assert kopieren.worker_zahlen(konf, "hdd") == (2, 2, "hdd")
     assert kopieren.worker_zahlen(konf, "ssd")[:2] == (8, kerne)
     assert kopieren.worker_zahlen(konf, "netzwerk")[:2] == (4, 4)

@@ -67,7 +67,6 @@ PROFIL_WAHL = (PROFIL_AUTO, "hdd", "netzwerk", "ssd")
 #: Gleichzeitig gelesene Dateien beim Pruefen und Aufraeumen, wenn
 #: leistung.hash_worker = 0 ist (SPEC §9 seit v0.8); 0 = Anzahl Kerne.
 HASH_JE_PROFIL: dict[str, int] = {"hdd": 2, "netzwerk": 4, "ssd": 0}
-HASH_HOECHSTENS = 16
 SEITE = 2000
 
 
@@ -134,7 +133,7 @@ def worker_zahlen(konf, profil=None, kopier=None, hash_=None) -> tuple[int, int,
         raise FotosortFehler(meldungen.profil_ungueltig(profil, list(PROFIL_WAHL)))
     k = int(kopier or 0) or int(konf.wert("leistung.kopier_worker") or 0) or PROFILE[profil]
     h = int(hash_ or 0) or int(konf.wert("leistung.hash_worker") or 0) or HASH_JE_PROFIL[profil] \
-        or min(max(1, os.cpu_count() or 1), HASH_HOECHSTENS)
+        or max(1, os.cpu_count() or 1)
     return max(1, k), max(1, h), profil
 
 

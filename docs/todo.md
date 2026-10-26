@@ -812,7 +812,7 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 
 - [x] Schließen = aus (mit Rückfrage), Fortsetzen beim nächsten Start.
 - [x] Nur eine Instanz; ein zweiter Start holt das Fenster nach vorn.
-- [ ] Alle Kerne für Rechenarbeit (Prüfsummen), Plattenzugriffe je Laufwerk dosiert.
+- [x] Alle Kerne für Rechenarbeit (Prüfsummen), Plattenzugriffe je Laufwerk dosiert.
 - [ ] Datum aus Ordnernamen in jeder Schreibweise; vorhandene Ordner anderer Schreibweise weiterbenutzen.
 - [ ] Meldung „bereits importiert“ je Quelle; falsch datierte Ordner melden.
 - [ ] Prüfer, volle Tests, CI, Release v0.9.

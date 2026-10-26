@@ -132,7 +132,7 @@ def test_prozesse_bestimmen(konf, monkeypatch):
     assert metadaten.prozesse_bestimmen(konf) == 4                    # Standardprofil hdd
     assert metadaten.prozesse_bestimmen(konf, "hdd") == 4
     assert metadaten.prozesse_bestimmen(konf, "netzwerk") == 4
-    assert metadaten.prozesse_bestimmen(konf, "ssd") == 16            # Kerne, hoechstens 16
+    assert metadaten.prozesse_bestimmen(konf, "ssd") == 32            # alle Kerne (seit v0.9 ohne Obergrenze)
     monkeypatch.setattr(metadaten.os, "cpu_count", lambda: 6)
     assert metadaten.prozesse_bestimmen(konf, "ssd") == 6
     konf.alle()["leistung"]["profil"] = "ssd"

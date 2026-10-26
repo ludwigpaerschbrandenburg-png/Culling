@@ -369,8 +369,8 @@ Ein Netzlaufwerk wird genauso angegeben, etwa `--ziel \\truenas\Daten\Archiv` od
 - `--profil auto|hdd|ssd|netzwerk` bestimmt beim Kopieren, wie viele Dateien gleichzeitig kopiert
   werden, bei der Analyse die Zahl der ExifTool-Programme und beim Prüfen, Aufräumen und Neueinlesen,
   wie viele Dateien gleichzeitig gelesen werden (Festplatte 2, Netzlaufwerk 4, SSD so viele wie
-  der Prozessor Kerne hat, höchstens 16). `auto` (der Standard) sieht nach, worauf Ziel und
-  Quellen liegen, und sagt, was es erkannt hat. `--hash-worker N` legt die Zahl der Leser selbst
+  der Prozessor Kerne hat). Gerechnet wird dabei immer auf allen Kernen. `auto` (der Standard)
+  sieht nach, worauf Ziel und Quellen liegen, und sagt, was es erkannt hat. `--hash-worker N` legt die Zahl der Leser selbst
   fest. Was auf Ihrem Rechner am besten ist, sagt `fotosort.bat messen`.
 - `pruefen --alles` liest nach dem normalen Prüfen das ganze Archiv erneut (siehe Schritt 4,
   „Archiv nachprüfen"). Rückgabewert 1, wenn eine Archivdatei verändert ist, fehlt oder sich
@@ -531,10 +531,11 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   2 gleichzeitige Kopien), `"ssd"` (8) oder `"netzwerk"` (4). Eine `config.toml` aus einer
   älteren Version behält ihren Wert.
 - `metadaten_prozesse` – wie viele ExifTool-Programme gleichzeitig laufen. `0` = nach Profil:
-  Festplatte und Netzlaufwerk 4, SSD Anzahl der Prozessorkerne (höchstens 16). Auf einer
+  Festplatte und Netzlaufwerk 4, SSD so viele wie der Prozessor Kerne hat. Auf einer
   Festplatte bremsen viele gleichzeitige Leser, weil der Lesekopf springt.
 - `kopier_worker` / `hash_worker` – gleichzeitige Kopier- bzw. Lesevorgänge; `0` = nach Profil
-  (Lesen: Festplatte 2, Netzlaufwerk 4, SSD Anzahl der Kerne, höchstens 16).
+  (Lesen: Festplatte 2, Netzlaufwerk 4, SSD Anzahl der Kerne). Die Prüfsummen selbst rechnen
+  immer auf allen Kernen; begrenzt wird nur, wie viele Dateien die Platte zugleich lesen muss.
   `fotosort.bat messen` schlägt passende Werte vor.
 - `exiftool_pfad` – Pfad zu `exiftool.exe`, falls ein anderes ExifTool benutzt werden soll.
   Liegt daneben der Ordner `exiftool_files`, startet das Programm dort `perl.exe` mit

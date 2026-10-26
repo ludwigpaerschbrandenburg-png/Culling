@@ -14,6 +14,7 @@ mit vielen Lesern nur langsamer), die Oberflaeche bleibt bedienbar.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QRunnable, QSize, Qt, QThreadPool, Signal
@@ -28,7 +29,15 @@ from . import stil
 
 KACHEL = 180          # Kantenlaenge der Vorschaubilder in Pixeln
 GROSS = 2560          # groesste Kante in der grossen Ansicht
-LESER = 3             # gleichzeitig gelesene Dateien
+LESER = 3             # gleichzeitig gelesene Dateien auf Festplatte und Netzlaufwerk
+
+
+def leser_fuer(laufwerksart: str) -> int:
+    """Auf einer SSD liest und rechnet jeder Kern ein Vorschaubild (seit v0.9);
+    eine Festplatte liest mit vielen Lesern nur langsamer."""
+    if laufwerksart == "ssd":
+        return max(LESER, os.cpu_count() or 1)
+    return LESER
 ROLLE_NR = Qt.ItemDataRole.UserRole
 ROLLE_PFAD = Qt.ItemDataRole.UserRole + 1
 
@@ -303,6 +312,7 @@ class SichtenSeite(QWidget):
             self.ziel = Path(info["ziel"])
             self.bew = sichten.Bewertungen(Path(info["archiv_ordner"]))
             self.leser = vorschau.Vorschauleser(info["exiftool"]) if info.get("exiftool") else None
+            self.pool.setMaxThreadCount(leser_fuer(str(info.get("laufwerksart") or "")))
             self.neu_einlesen()
         else:
             self._fehlende_laden()

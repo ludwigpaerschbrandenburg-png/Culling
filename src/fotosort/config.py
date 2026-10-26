@@ -219,7 +219,7 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             (
                 "metadaten_prozesse",
                 "Anzahl dauerhaft laufender ExifTool-Prozesse. 0 = nach Profil:\n"
-                "# hdd und netzwerk 4, ssd Anzahl Kerne (hoechstens 16).",
+                "# hdd und netzwerk 4, ssd alle Kerne.",
                 0,
             ),
             (
@@ -231,7 +231,8 @@ _VORLAGE: list[tuple[str, str, list[tuple[str, str, Any]]]] = [
             (
                 "hash_worker",
                 "Anzahl gleichzeitiger Hash-Berechnungen. 0 = nach Profil\n"
-                "# (hdd 2, netzwerk 4, ssd Anzahl Kerne, hoechstens 16).",
+                "# (hdd 2, netzwerk 4, ssd alle Kerne). Die Pruefsummen selbst rechnen\n"
+                "# immer auf allen Kernen.",
                 0,
             ),
             (
