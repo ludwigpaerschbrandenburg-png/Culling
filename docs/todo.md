@@ -791,6 +791,42 @@ nebeneinander vergleichen. Die RAW-Vorschau über das eingebettete Vorschaubild 
 
 ---
 
+## Phase 10 — Wie professionelle Culling-Software (Runde 3, ab Version 0.9)
+
+Auftrag vom 26.10.2026: alles, was professionelle Culling-Software kann. Vollständige
+Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
+
+**Entschieden am 26.10.2026:**
+
+1. Fenster schließen während eines Schritts: kurze Rückfrage, bei Ja sauber anhalten (aktuelle
+   Datei fertig, alles gespeichert), dann ist das Programm aus. Nächster Start setzt fort.
+   Ersetzt SPEC §8 „Fenster schließen hält nichts an“.
+2. Bilder einer Quelle, die schon im Archiv liegen (egal in welchem Ordner, in welcher
+   Schreibweise): nur melden „N Bilder dieser Quelle sind bereits importiert“ – sonst nichts.
+   Neue Bilder kommen in einen vorhandenen Ordner passender Schreibweise (`2021.01`).
+3. Bildanalyse (unscharf, Augen zu, bestes Bild, Gesichter): ja, als eigene spätere Runde.
+4. Ausschuss: auf Knopfdruck mit Bestätigungswort nach `_Ausschuss` im Archiv verschieben,
+   nie überschreiben, rückgängig machbar, nie löschen. Neue Regel in CLAUDE.md in Runde 3d.
+
+### Runde 3a: Grundwünsche (Version 0.9)
+
+- [x] Schließen = aus (mit Rückfrage), Fortsetzen beim nächsten Start.
+- [x] Nur eine Instanz; ein zweiter Start holt das Fenster nach vorn.
+- [ ] Alle Kerne für Rechenarbeit (Prüfsummen), Plattenzugriffe je Laufwerk dosiert.
+- [ ] Datum aus Ordnernamen in jeder Schreibweise; vorhandene Ordner anderer Schreibweise weiterbenutzen.
+- [ ] Meldung „bereits importiert“ je Quelle; falsch datierte Ordner melden.
+- [ ] Prüfer, volle Tests, CI, Release v0.9.
+
+### Später
+
+- Runde 3b: Sichten wie ein Profi (Vergleich, Lupe, Farbmarken, Kameradaten, XMP, Video, Stapel).
+- Runde 3c: Doppelte und Ähnliche (Wahrnehmungs-Prüfsumme, Serien, Kopien aus Downloads).
+- Runde 3d: Struktur umbauen mit Vorschau, Protokoll und Rückgängig; Ausschuss verschieben.
+- Runde 3e: Bildanalyse lokal.
+- Runde 3f: Import und Ausgabe (Karte erkennen, zwei Ziele, Umbenennen, Export).
+
+---
+
 ## Ohne feste Phase
 
 - [ ] Nichts offen.

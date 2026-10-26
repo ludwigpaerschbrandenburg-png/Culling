@@ -143,8 +143,10 @@ die Zähler des letzten Schritts, rechts die Karten **Aufräumen**, **Leere Ordn
 Bericht**. Unten stehen die Knöpfe: Der umrandete Hauptknopf ist immer der nächste sinnvolle
 Schritt („Analyse starten", „Kopieren starten · 3.912 Dateien", „Prüfen starten"); solange ein
 Schritt läuft, ist er gesperrt, und daneben stehen **Pause** und **Abbrechen**. Nichts läuft
-ohne Ihren Klick. Alles Bisherige bleibt gespeichert; wer das Fenster schließt, hält den
-laufenden Schritt nicht an, und beim nächsten `start.bat` zeigt die Startseite den Stand.
+ohne Ihren Klick. Alles Bisherige bleibt gespeichert. **Fenster zu heißt Programm aus:** Läuft
+gerade ein Schritt, fragt das Fenster kurz nach; bei „Beenden“ wird die aktuelle Datei noch
+fertig, dann ist alles aus. Beim nächsten `start.bat` geht es genau dort weiter. Das Programm
+ist immer nur einmal offen – ein zweiter Doppelklick holt das offene Fenster nach vorn.
 
 ### Schritt 1: Quellen durchsuchen (Scan)
 
@@ -568,7 +570,7 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
 
 **Sie schließen das Fenster, drücken Abbrechen oder Strg+C, der Rechner geht aus, das
 Netzlaufwerk fällt weg:** Nichts ist verloren. Alles bis dahin Erledigte ist gespeichert.
-Ein geschlossenes Fenster hält den laufenden Schritt nicht einmal an. Starten Sie einfach
+Ein geschlossenes Fenster hält den laufenden Schritt sauber an. Starten Sie einfach
 `start.bat` (oder denselben Befehl) noch einmal – das Programm zeigt den Stand und macht
 genau dort weiter. Meldet das Fenster „unerwartet beendet", ist der Arbeitsprozess abgestürzt
 oder wurde beendet; die letzten Zeilen seiner Ausgabe stehen dann im Fenster.

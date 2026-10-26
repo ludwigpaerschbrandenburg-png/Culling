@@ -2544,3 +2544,17 @@ def sichten_ordner_zahlen(gezeigt: int, alle: int, bewertet: int, auswahl: int, 
     teile.append(f"{anzahl(ausschuss)} Ausschuss")
     return " · ".join(teile)
 
+
+# ------------------------------------------- Programm beenden (v0.9) ----
+
+OB_BEENDEN_TITEL = "Programm beenden?"
+OB_WIRD_BEENDET = "Wird beendet … die aktuelle Datei wird noch fertig, dann ist alles gespeichert."
+
+
+def ob_beenden_frage(schritt: str) -> str:
+    return (
+        f"Es läuft gerade ein Schritt ({schritt}). Beim Beenden wird die aktuelle Datei noch fertig, "
+        "alles Bisherige bleibt gespeichert, und beim nächsten Öffnen geht es genau dort weiter. "
+        "Nichts geht verloren."
+    )
+

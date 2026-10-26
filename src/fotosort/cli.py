@@ -1218,7 +1218,8 @@ def befehl_arbeit(args, konsole) -> int:
         konsole.print(meldungen.arbeit_auftrag_fehlt(args.auftrag))
         return FEHLENDE_ANGABE
     schritt = str(auftrag.get("schritt", ""))
-    st = steuerung.Steuerung(Path(auftrag["status_datei"]), Path(auftrag["steuer_datei"]), schritt)
+    fenster = (int(auftrag["fenster_pid"]), auftrag.get("fenster_start")) if auftrag.get("fenster_pid") else None
+    st = steuerung.Steuerung(Path(auftrag["status_datei"]), Path(auftrag["steuer_datei"]), schritt, fenster=fenster)
     steuerung.AKTIV = st
     st.schreiben()
     st.herzschlag_starten()

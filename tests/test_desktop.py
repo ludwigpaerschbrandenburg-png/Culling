@@ -143,11 +143,13 @@ def _bis_im_fenster(app, bedingung, sekunden: float = 240.0) -> None:
     raise AssertionError("im Fenster nicht eingetreten")
 
 
-def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle, ziel, referenz, nachschauen):
-    """Teil 3 im Fenster: Fenster waehrend des Scans schliessen, neu oeffnen (zeigt
-    den Lauf), Analyse und Kopieren per Knopf, harter Abschuss mitten im Kopieren
-    (Anzeige: unerwartet beendet, Protokoll sichtbar, Knopf zum Weitermachen),
-    noch einmal neu oeffnen, "Weitermachen" - am Ende wie der Referenzlauf."""
+def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle, ziel, referenz, nachschauen, monkeypatch):
+    """Teil 3 im Fenster: Fenster waehrend des Scans schliessen (seit v0.9 mit
+    Rueckfrage, danach ist alles aus), neu oeffnen, weiter, Analyse und Kopieren
+    per Knopf, harter Abschuss mitten im Kopieren (Anzeige: unerwartet beendet,
+    Protokoll sichtbar, Knopf zum Weitermachen), noch einmal neu oeffnen,
+    "Weitermachen" - am Ende wie der Referenzlauf."""
+    monkeypatch.setattr(desktop, "frage", lambda *a, **k: (True, ""))
     ordner = tmp_path / "ob"
     f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
     f.show()
@@ -156,13 +158,15 @@ def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle,
     f.quelle_hinzufuegen(str(grosse_quelle))
     f.los(False)
     assert f.ansicht == "haupt" and f.poll.isActive()
-    f.close()                                                   # Fenster zu, Scan laeuft weiter
+    f.close()                                                   # Fenster zu: Scan haelt an, alles aus
+    assert not f.ab.lauf_lebt()
     _ereignisse(app, 0.2)
 
     f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
     f.show()
     _ereignisse(app, 0.6)
-    assert f.ansicht == "haupt" and "Quellen durchsuchen" in f.haupt.aktuell.text() or f.in_ruhe()
+    assert f.ansicht == "start"
+    f.los(False)                                                # noch einmal durchsuchen, dann weiter
     _bis_im_fenster(app, f.in_ruhe)
     assert f.primaer().text().startswith("Analyse starten")
     f.primaer().click()
@@ -548,3 +552,64 @@ def test_profil_vorschlag_im_fenster(app, tmp_path, quelle, ziel, monkeypatch):
     assert ab.profil == "netzwerk" and ab.profil_von_hand is True
     assert "Erkannt" not in f.start.profil_text.text()
     f.close()
+
+
+def test_schliessen_fragt_und_haelt_den_schritt_an(app, tmp_path, grosse_quelle, ziel, monkeypatch):
+    """Entscheidung vom 26.10.2026: Fenster zu = Programm aus. Laeuft ein
+    Schritt, fragt das Fenster kurz; „Weiterarbeiten“ laesst alles offen,
+    „Beenden“ haelt den Schritt sauber an und wartet, bis er aus ist."""
+    from test_unterbrechungen import _bis, _vorbereitet
+    antworten = [(False, ""), (True, "")]
+    gefragt: list = []
+
+    def frage_ersatz(_eltern, titel, text, **k):
+        gefragt.append((titel, text, k))
+        return antworten.pop(0)
+
+    monkeypatch.setattr(desktop, "frage", frage_ersatz)
+    ab = _vorbereitet(tmp_path, grosse_quelle, ziel)
+    f = desktop.Hauptfenster(ab)
+    assert ab.fenster_pid == os.getpid()                       # der Schritt gehoert zu diesem Fenster
+    f.show()
+    _ereignisse(app, 0.3)
+    assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+    assert ab.lauf.auftrag["fenster_pid"] == os.getpid()
+    _bis(lambda: _kopierte(ziel) >= 30)
+    f.close()
+    assert f.isVisible() and ab.lauf_lebt()                     # „Weiterarbeiten“
+    f.close()
+    assert not f.isVisible() and not ab.lauf_lebt()             # „Beenden“
+    assert ab.lauf_status()["zustand"] == "abgebrochen"
+    assert len(gefragt) == 2 and "Kopieren" in gefragt[0][1]
+
+
+def test_schliessen_ohne_lauf_fragt_nicht(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(desktop, "frage", lambda *a, **k: (_ for _ in ()).throw(AssertionError("gefragt")))
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    f.show()
+    _ereignisse(app, 0.3)
+    f.close()
+    assert not f.isVisible()
+
+
+
+def test_nur_eine_instanz(app, tmp_path):
+    """Ein zweiter Doppelklick oeffnet kein zweites Fenster, sondern holt das
+    offene nach vorn (seit v0.9)."""
+    ordner = tmp_path / "ob"
+    erste = desktop.Instanz(ordner)
+    assert erste.erste and not erste.geweckt()
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.instanz = erste
+    f.show()
+    _ereignisse(app, 0.2)
+    f.showMinimized()
+    _ereignisse(app, 0.2)
+    zweite = desktop.Instanz(ordner)
+    assert not zweite.erste                                    # bekommt die Sperre nicht
+    _ereignisse(app, 1.5)                                      # Waechter: jede Sekunde
+    assert not f.isMinimized() and not (ordner / desktop.WECKEN).exists()
+    f.close()                                                  # gibt die Sperre frei
+    dritte = desktop.Instanz(ordner)
+    assert dritte.erste
+    dritte.freigeben()

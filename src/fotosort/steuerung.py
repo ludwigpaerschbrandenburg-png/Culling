@@ -31,6 +31,7 @@ ZUSTAND_FEHLER = "fehler"
 
 SCHREIB_ABSTAND = 0.5      # Sekunden zwischen zwei Statusdateien
 HERZSCHLAG = 2.0           # spaetestens so oft wird der Stand geschrieben, auch ohne Fortschritt
+FENSTER_ABSTAND = 1.0      # so oft fragt der Arbeitsprozess, ob sein Fenster noch lebt (seit v0.9)
 
 
 #: Unter Windows ist eine Datei, die ein anderer Prozess gerade offen hat
@@ -78,8 +79,14 @@ _MEINE_STARTZEIT = prozesse.startzeit(os.getpid())
 class Steuerung:
     """Stand schreiben, Wuensche lesen. Lebt nur im Arbeitsprozess."""
 
-    def __init__(self, status_datei: Path, steuer_datei: Path, schritt: str) -> None:
+    def __init__(self, status_datei: Path, steuer_datei: Path, schritt: str,
+                 fenster: tuple[int, float | None] | None = None) -> None:
         self.status_datei = Path(status_datei)
+        # Das Fenster, zu dem dieser Schritt gehoert (seit v0.9): Ist es weg -
+        # geschlossen, abgestuerzt, im Task-Manager beendet -, haelt der Schritt
+        # an wie bei "Abbrechen". Ohne Fenster (Befehlszeile, Server): None.
+        self.fenster = fenster
+        self._fenster_geprueft = 0.0
         self.steuer_datei = Path(steuer_datei)
         self.schritt = schritt
         self.begonnen = time.time()
@@ -169,9 +176,19 @@ class Steuerung:
             self._wuensche_pruefen()
             self.schreiben()
 
+    def fenster_weg(self) -> bool:
+        """Lebt das Fenster nicht mehr? Hoechstens alle FENSTER_ABSTAND Sekunden gefragt."""
+        if self.fenster is None:
+            return False
+        jetzt = time.monotonic()
+        if jetzt - self._fenster_geprueft < FENSTER_ABSTAND:
+            return False
+        self._fenster_geprueft = jetzt
+        return not prozesse.lebt(*self.fenster)
+
     def _wuensche_pruefen(self) -> None:
         wunsch = json_lesen(self.steuer_datei) or {}
-        if wunsch.get("abbrechen"):
+        if wunsch.get("abbrechen") or self.fenster_weg():
             raise KeyboardInterrupt
         if wunsch.get("pause"):
             self.zustand = ZUSTAND_PAUSE
@@ -182,7 +199,7 @@ class Steuerung:
                 while True:
                     time.sleep(0.5)
                     wunsch = json_lesen(self.steuer_datei) or {}
-                    if wunsch.get("abbrechen"):
+                    if wunsch.get("abbrechen") or self.fenster_weg():
                         self.zustand = ZUSTAND_LAEUFT
                         raise KeyboardInterrupt
                     if not wunsch.get("pause"):

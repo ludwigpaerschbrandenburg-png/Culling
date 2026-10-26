@@ -2,8 +2,8 @@
 
 Jeder Schritt (scan, analyse, kopieren, pruefen, aufraeumen, ziel-index) laeuft als
 eigener Prozess "fotosort arbeit --auftrag <datei>". Die Oberflaeche
-schreibt den Auftrag, startet den Prozess losgeloest (Fenster schliessen
-beendet ihn nicht) und liest waehrend des Laufs nur die kleine Statusdatei,
+schreibt den Auftrag, startet den Prozess und liest waehrend des Laufs nur
+die kleine Statusdatei,
 die der Prozess schreibt (steuerung.py). Erst wenn kein Prozess mehr laeuft,
 liest sie die Datenbank fuer Zusammenfassungen und Listen - nur lesend, und
 in diesem Prozess durch eine Sperre nacheinander (SPEC Abschnitt 6: die
@@ -127,35 +127,8 @@ def anleitung_pfad() -> Path | None:
 
 
 def pid_lebt(pid: int, start: float | None = None) -> bool:
-    """Lebt der Prozess - und ist es noch derselbe? Mit "start" (Startzeit aus
-    der Statusdatei) wird eine spaeter an einen fremden Prozess vergebene
-    Nummer erkannt; "Sofort beenden" darf nie einen Fremden treffen."""
-    if not pid:
-        return False
-    if start is not None:
-        jetzt = prozesse.startzeit(pid)
-        if jetzt is not None and abs(jetzt - float(start)) > 2.0:
-            return False
-    if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
-        import ctypes
-        k32 = ctypes.windll.kernel32
-        griff = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
-        if not griff:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            if not k32.GetExitCodeProcess(griff, ctypes.byref(code)):
-                return False
-            return code.value == 259   # STILL_ACTIVE
-        finally:
-            k32.CloseHandle(griff)
-    try:
-        os.kill(int(pid), 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """Lebt der Prozess - und ist es noch derselbe? (prozesse.lebt)"""
+    return prozesse.lebt(pid, start)
 
 
 def prozess_beenden(pid: int, start: float | None = None, nachsetzen: float = 5.0) -> None:
@@ -267,6 +240,10 @@ class Ablauf:
         self._konf_profil = ""                                   # ausdruecklich in der config.toml des Archivs
         self._arten: dict[str, tuple[str | None, float]] = {}   # Pfad -> (Laufwerksart, wann gefragt)
         self.fenster = False      # True, wenn ein pywebview-Fenster den Ordnerdialog anbieten kann
+        # Seit v0.9: Das Desktop-Fenster traegt hier seine Prozessnummer ein. Ein
+        # Schritt, den es startet, gehoert dann zu ihm und haelt an, sobald das
+        # Fenster weg ist (Schliessen = Programm aus). Ohne (Server): None.
+        self.fenster_pid: int | None = None
         self._laden()
 
     # -- gemerkter Zustand -------------------------------------------------
@@ -355,6 +332,9 @@ class Ablauf:
                 "status_datei": str(self.status_datei), "steuer_datei": str(self.steuer_datei),
                 **werte,
             }
+            if self.fenster_pid:
+                auftrag["fenster_pid"] = int(self.fenster_pid)
+                auftrag["fenster_start"] = prozesse.startzeit(int(self.fenster_pid))
             steuerung.json_schreiben(self.auftrag_datei, auftrag)
             steuerung.json_schreiben(self.steuer_datei, {"pause": False, "abbrechen": False, "zeit": time.time()})
             jetzt = time.time()
@@ -481,6 +461,35 @@ class Ablauf:
             else:
                 raise FotosortFehler(meldungen.ob_kein_lauf())
             return {"ok": True}
+
+    def beenden(self, warten: float = 60.0, takt=None) -> bool:
+        """Programm schliessen (seit v0.9): einen laufenden Schritt anhalten wie
+        mit "Abbrechen" - die aktuelle Datei wird fertig, alles gespeichert - und
+        warten, bis er aus ist. Dauert das laenger als "warten" Sekunden (etwa
+        ein haengendes Netzlaufwerk), wird er samt ExifTool beendet; auch das
+        uebersteht die Datenbank, Reste raeumt der naechste Lauf auf. takt():
+        wird beim Warten gerufen (das Fenster bleibt bedienbar). True, wenn
+        danach nichts mehr laeuft."""
+        if not self.lauf_lebt():
+            return True
+        try:
+            self.steuern("abbrechen")
+        except FotosortFehler:
+            return not self.lauf_lebt()
+        ende = time.monotonic() + max(0.0, warten)
+        while self.lauf_lebt() and time.monotonic() < ende:
+            if takt is not None:
+                takt()
+            time.sleep(0.1)
+        if self.lauf_lebt():
+            with self.sperre:
+                if self.lauf is not None:
+                    prozess_beenden(self.lauf.pid, self.lauf.start, nachsetzen=2.0)
+            ende = time.monotonic() + 10.0
+            while self.lauf_lebt() and time.monotonic() < ende:
+                time.sleep(0.1)
+        self.lauf_status()     # Endzustand festhalten (abgebrochen oder unerwartet beendet)
+        return not self.lauf_lebt()
 
     # -- Archiv lesen (nur ohne laufenden Prozess) -------------------------
 

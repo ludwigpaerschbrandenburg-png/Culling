@@ -751,7 +751,13 @@ class Hauptfenster(QMainWindow):
     def __init__(self, ab: ablauf_modul.Ablauf, konsole=None) -> None:
         super().__init__()
         self.ab = ab
+        # Schritte, die dieses Fenster startet, gehoeren zu ihm: Ist es weg,
+        # halten sie an (seit v0.9: Fenster zu = Programm aus).
+        self.ab.fenster_pid = os.getpid()
         self.konsole = konsole
+        self._schliessen_ohne_frage = False
+        self._beendet_gerade = False
+        self.instanz: Instanz | None = None
         self.zustand: dict = {}
         self.lauf: dict = {}
         self.naechster: dict | None = None
@@ -882,8 +888,33 @@ class Hauptfenster(QMainWindow):
             QTimer.singleShot(0, lambda: self.laden("start"))
 
     def closeEvent(self, ev) -> None:
+        """Fenster zu = Programm aus (Entscheidung vom 26.10.2026). Laeuft ein
+        Schritt, fragt das Fenster kurz; bei "Beenden" haelt es ihn sauber an
+        (aktuelle Datei fertig, alles gespeichert) und wartet, bis er aus ist.
+        Der naechste Start macht dort weiter."""
+        if self._beendet_gerade:
+            ev.ignore()
+            return
+        if self.ab.lauf_lebt():
+            if not self._schliessen_ohne_frage:
+                schritt = self.kurzname((self.ab.lauf.schritt if self.ab.lauf else "") or self.lauf.get("schritt", ""))
+                ja, _ = frage(self, meldungen.OB_BEENDEN_TITEL, meldungen.ob_beenden_frage(schritt),
+                              ja="Beenden", nein="Weiterarbeiten")
+                if not ja:
+                    ev.ignore()
+                    return
+            self._beendet_gerade = True
+            self.meldung(meldungen.OB_WIRD_BEENDET)
+            try:
+                with self.beschaeftigt():
+                    self.ab.beenden(warten=60.0, takt=QApplication.processEvents)
+            finally:
+                self._beendet_gerade = False
+        self.poll.stop()
         self.sichten.schliessen()
         self._marker_schreiben(False)
+        if self.instanz is not None:
+            self.instanz.freigeben()
         super().closeEvent(ev)
 
     def reiter_wechseln(self, name: str) -> None:
@@ -905,13 +936,17 @@ class Hauptfenster(QMainWindow):
             pass
 
     def _schliessen_pruefen(self) -> None:
-        """Eine Datei "schliessen" im Ordner der Oberflaeche beendet das Fenster (CI)."""
+        """Eine Datei "schliessen" im Ordner der Oberflaeche beendet das Fenster (CI);
+        ein zweiter Start (Datei "wecken") holt es nach vorn."""
+        if self.instanz is not None and self.instanz.geweckt():
+            nach_vorn(self)
         datei = self.ab.ordner / SCHLIESSEN
         if datei.exists():
             try:
                 datei.unlink()
             except OSError:
                 pass
+            self._schliessen_ohne_frage = True     # niemand da, der antworten koennte
             self.close()
 
     def _pulsieren(self) -> None:
@@ -1766,6 +1801,54 @@ def eigene_taskleiste() -> None:
         pass
 
 
+INSTANZ_SPERRE = "fenster.sperre"
+WECKEN = "wecken"
+
+
+class Instanz:
+    """Nur eine Instanz des Fensters je Benutzer (seit v0.9). Die erste haelt
+    eine Sperrdatei im Ordner der Oberflaeche (dieselbe Technik wie die
+    Archivsperre). Ein zweiter Start bekommt sie nicht, legt die Datei
+    "wecken" ab und endet; die erste sieht sie (Waechter, jede Sekunde) und
+    holt ihr Fenster nach vorn. Ohne Netzwerk-Modul, ohne Port."""
+
+    def __init__(self, ordner: Path) -> None:
+        from .. import db
+        self.ordner = Path(ordner)
+        self.sperre = db.Archivsperre(self.ordner / INSTANZ_SPERRE)
+        try:
+            self.erste = self.sperre.nehmen()
+        except FotosortFehler:
+            self.erste = True       # nicht sperrbar: lieber ein Fenster zu viel als keins
+        if not self.erste:
+            try:
+                (self.ordner / WECKEN).write_text(str(time.time()), encoding="utf-8")
+            except OSError:
+                pass
+
+    def geweckt(self) -> bool:
+        """Hat ein zweiter Start angeklopft? (Die Datei wird dabei entfernt.)"""
+        datei = self.ordner / WECKEN
+        if not datei.exists():
+            return False
+        try:
+            datei.unlink()
+        except OSError:
+            pass
+        return True
+
+    def freigeben(self) -> None:
+        self.sperre.freigeben()
+
+
+def nach_vorn(fenster: QMainWindow) -> None:
+    if fenster.isMinimized():
+        fenster.showNormal()
+    fenster.show()
+    fenster.raise_()
+    fenster.activateWindow()
+
+
 def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, str] | None = None,
             fotos: str | None = None, konsole=None, config: str | None = None) -> int:
     """Das Desktop-Fenster oeffnen. Rueckgabe wie ein Befehl (0 gut)."""
@@ -1789,8 +1872,16 @@ def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, st
 
     from . import fenster as fenster_modul
     ab = fenster_modul.ablauf_bauen(ziel, config)
+    # Nur eine Instanz (seit v0.9): Ein zweiter Start holt das offene Fenster
+    # nach vorn und endet. Selbsttest und Durchlauf (CI) laufen unabhaengig.
+    if not (selbsttest or durchlauf):
+        instanz = Instanz(ab.ordner)
+        if not instanz.erste:
+            return 0
     ab.fenster = True
     fenster = Hauptfenster(ab, konsole)
+    if not (selbsttest or durchlauf):
+        fenster.instanz = instanz
     fenster.show()
 
     if durchlauf:

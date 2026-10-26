@@ -266,3 +266,46 @@ def test_zweites_fenster_kann_nichts_doppelt_starten(tmp_path, grosse_quelle, zi
         zweites.archiv_verwerfen("verwerfen")
     assert _bis_ende(ab)["zustand"] == "fertig"
     assert zweites.lauf_status()["zustand"] == "fertig"
+
+
+# --- Runde 3a: Fenster schliessen = Programm aus (Entscheidung vom 26.10.2026) ---
+
+
+def test_arbeit_endet_sauber_wenn_das_fenster_verschwindet(tmp_path, grosse_quelle, ziel, referenz, nachschauen):
+    """Der Arbeitsprozess gehoert zu seinem Fenster. Verschwindet das Fenster
+    (geschlossen, abgestuerzt, im Task-Manager beendet), haelt er an wie bei
+    „Abbrechen“ - nichts halb kopiert, und der naechste Start macht weiter."""
+    import subprocess
+    fenster = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    try:
+        ab = _vorbereitet(tmp_path, grosse_quelle, ziel)
+        ab.fenster_pid = fenster.pid
+        assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+        _bis(lambda: _kopierte(ziel) >= 50)
+    finally:
+        fenster.kill()
+        fenster.wait()
+    l = _bis_ende(ab, 60)
+    assert l["zustand"] == "abgebrochen" and l["aktiv"] is False
+    assert 0 < _kopierte(ziel) < VIELE
+    ab = _neu(tmp_path)
+    assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+    assert _bis_ende(ab)["zustand"] == "fertig"
+    _pruefen_gleich(ab, ziel, referenz, nachschauen)
+
+
+def test_beenden_haelt_den_schritt_an_und_wartet(tmp_path, grosse_quelle, ziel, referenz, nachschauen):
+    ab = _vorbereitet(tmp_path, grosse_quelle, ziel)
+    assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+    _bis(lambda: _kopierte(ziel) >= 50)
+    assert ab.beenden(warten=60) is True
+    assert not ab.lauf_lebt()
+    assert ab.lauf_status()["zustand"] == "abgebrochen"
+    ab = _neu(tmp_path)
+    assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+    assert _bis_ende(ab)["zustand"] == "fertig"
+    _pruefen_gleich(ab, ziel, referenz, nachschauen)
+
+
+def test_beenden_ohne_lauf_tut_nichts(tmp_path):
+    assert _neu(tmp_path).beenden(warten=1) is True

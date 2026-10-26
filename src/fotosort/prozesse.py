@@ -10,6 +10,7 @@ gibt es nichts zu verstecken.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -197,3 +198,35 @@ def baum_beenden(prozess: subprocess.Popen) -> None:
         prozess.kill()
     except OSError:
         pass
+
+
+def lebt(pid: int, start: float | None = None) -> bool:
+    """Lebt der Prozess - und ist es noch derselbe? Mit "start" (Startzeit aus
+    der Statusdatei) wird eine spaeter an einen fremden Prozess vergebene
+    Nummer erkannt; "Sofort beenden" darf nie einen Fremden treffen."""
+    if not pid:
+        return False
+    if start is not None:
+        jetzt = startzeit(pid)
+        if jetzt is not None and abs(jetzt - float(start)) > 2.0:
+            return False
+    if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        griff = k32.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not griff:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not k32.GetExitCodeProcess(griff, ctypes.byref(code)):
+                return False
+            return code.value == 259   # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(griff)
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
