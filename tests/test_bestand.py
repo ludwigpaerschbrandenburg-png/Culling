@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from fotosort import cli, hashes
 from test_kopieren import _cli, _zeilen
 
@@ -105,3 +107,24 @@ def test_quellordner_mit_anderem_datum_wird_gemeldet(tmp_path, ziel, nachschauen
     assert "Ordner nennt ein anderes Datum" in aus
     gemeldet = {e["pfad"] for e in _ereignisse(nachschauen, ziel, analyse.ART_ORDNER_DATUM)}
     assert gemeldet == {str(falsch)}
+
+
+@pytest.mark.xfail(reason="Pruefer-Befund v0.9, Behebung folgt (Anfang/Ende vorab vergleichen)", strict=False)
+def test_viele_gleich_grosse_archivdateien_werden_nicht_ganz_gelesen(baum, quelle, ziel, nachschauen, monkeypatch):
+    """Pruefer-Befund (v0.9): Unkomprimierte RAWs sind alle gleich gross. Vor
+    dem vollstaendigen Lesen vergleicht das Programm Anfang und Ende der Datei;
+    nur wer dort gleich ist, wird ganz gelesen."""
+    analog = Path(baum["analog"])
+    groesse = analog.stat().st_size
+    ordner = ziel / "2019"
+    ordner.mkdir(parents=True)
+    for i in range(40):
+        (ordner / f"RAW_{i:04d}.JPG").write_bytes(bytes([i + 1]) * groesse)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.OK
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    gelesen: list = []
+    echt = hashes.blake3_datei
+    monkeypatch.setattr(hashes, "blake3_datei", lambda p, *a, **k: gelesen.append(str(p)) or echt(p, *a, **k))
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert not [p for p in gelesen if "RAW_" in p]
+    assert _zeilen(nachschauen, ziel)[str(analog)]["status"] == "kopiert"
