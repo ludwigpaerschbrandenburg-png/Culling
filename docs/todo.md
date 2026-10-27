@@ -824,7 +824,7 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 - [x] Alle Kerne für Rechenarbeit (Prüfsummen), Plattenzugriffe je Laufwerk dosiert.
 - [x] Datum aus Ordnernamen in jeder Schreibweise; vorhandene Ordner anderer Schreibweise weiterbenutzen.
 - [x] Meldung „bereits importiert“ je Quelle; falsch datierte Ordner melden.
-- [ ] Prüfer, volle Tests, CI, Release v0.9.
+- [x] Prüfer, volle Tests, CI, Release v0.9.
 
 ### Später
 
