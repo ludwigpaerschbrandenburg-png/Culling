@@ -36,6 +36,7 @@ class Zielort:
     ordner: Path            # der Zielordner (ohne Dateiname)
     mehrdeutig: bool = False  # mehrere passende Ordner mit Zusatz, alphabetisch gewaehlt
     wiederverwendet: bool = False  # ein vorhandener Ordner mit Zusatz wurde benutzt
+    flach: bool = False     # Bilder direkt in einen vorhandenen Datumsordner (Schema des Archivs, v0.9)
 
 
 def teile_aus_vorlage(vorlage: str, tag: date | None, kamera: str) -> list[str]:
@@ -101,11 +102,13 @@ class Zielstruktur:
         self.ziel = pfade.aufloesen(Path(ziel))
         self._inhalt: dict[Path, list[str]] = {}
         self._mit_dateien: dict[Path, bool] = {}
+        self._mit_bildern: dict[Path, bool] = {}
 
     def _ordner_in(self, eltern: Path) -> list[str]:
         if eltern not in self._inhalt:
             namen: list[str] = []
             dateien = False
+            bilder = False
             try:
                 with os.scandir(pfade.lang(eltern)) as es:
                     for e in es:
@@ -114,12 +117,15 @@ class Zielstruktur:
                                 namen.append(e.name)
                             elif not e.name.startswith(".") and e.name.casefold() not in _KEINE_BILDER:
                                 dateien = True
+                                if not bilder and _bildendung(e.name):
+                                    bilder = True
                         except OSError:
                             continue
             except OSError:
                 pass
             self._inhalt[eltern] = sorted(namen)
             self._mit_dateien[eltern] = dateien
+            self._mit_bildern[eltern] = bilder
         return self._inhalt[eltern]
 
     def hat_dateien(self, ordner: Path) -> bool:
@@ -185,6 +191,7 @@ class Zielstruktur:
             if z is not None:
                 z_vorher = z
         z_aktuell: strukturen.Zeitraum | None = None   # Zeitraum des Ordners, in dem wir stehen
+        flach = False
         i = 0
         while i < len(teile):
             gewuenscht = teile[i]
@@ -226,9 +233,20 @@ class Zielstruktur:
                 # Datumsebenen, die dieser Ordner schon abdeckt, entfallen.
                 while i < len(teile) and soll[i] is not None and soll[i].rang <= z_aktuell.rang:
                     i += 1
-                if vorhanden_genutzt and self.hat_dateien(aktuell):
-                    break   # Schema dieses Archivs: Bilder direkt im Datumsordner
-        return Zielort(aktuell, mehrdeutig=mehrdeutig, wiederverwendet=wiederverwendet)
+                if vorhanden_genutzt and z_aktuell.rang >= 2 and self.flach(aktuell, z_aktuell):
+                    flach = True
+                    break   # Schema dieses Archivs: Bilder direkt im Monats- oder Tagesordner
+        return Zielort(aktuell, mehrdeutig=mehrdeutig, wiederverwendet=wiederverwendet, flach=flach)
+
+    def flach(self, ordner: Path, z: "strukturen.Zeitraum") -> bool:
+        """Legt dieses Archiv Bilder direkt in den Datumsordner? Nur, wenn darin
+        Foto-, RAW- oder Videodateien liegen (nicht irgendeine Datei) und kein
+        Unterordner selbst ein Datum nennt (sonst gilt dessen Ordnung)."""
+        if not self.hat_dateien(ordner):
+            return False
+        if any(strukturen.zeitraum(n, z) is not None for n in self._ordner_in(ordner)):
+            return False
+        return self._mit_bildern.get(ordner, False)
 
     def _nach_datum(self, vorhanden: list[str], eltern: "strukturen.Zeitraum | None",
                     soll: "strukturen.Zeitraum", tag: date) -> tuple[str | None, bool]:
@@ -237,13 +255,32 @@ class Zielstruktur:
         passende: list[tuple[int, str]] = []
         for n in vorhanden:
             z = strukturen.zeitraum(n, eltern)
-            if z is not None and z.umfasst(tag) and z.rang >= soll.rang:
-                passende.append((z.rang, n))
+            if z is None or not z.umfasst(tag) or z.rang < soll.rang:
+                continue
+            if z.art == "jahr" and _nfc(n).strip() != f"{z.jahr:04d}":
+                continue   # "2001 Odyssee" ist kein anders geschriebener Jahresordner
+            passende.append((z.rang, n))
         if not passende:
             return None, False
         bester = min(r for r, _n in passende)
         namen = sorted(n for r, n in passende if r == bester)
         return namen[0], len(namen) > 1
+
+
+def _bildendung(name: str) -> bool:
+    """Foto, RAW oder Video nach der Standardliste (config.py) - nur fuer die
+    Frage, ob ein Ordner schon Bilder enthaelt."""
+    from . import config
+    global _ENDUNGEN
+    if _ENDUNGEN is None:
+        k = config.Konfiguration()
+        _ENDUNGEN = frozenset(str(e).lower().lstrip(".") for g in ("foto", "raw", "video")
+                              for e in k.wert(f"dateitypen.{g}"))
+    stelle = name.rfind(".")
+    return stelle > 0 and name[stelle + 1:].lower() in _ENDUNGEN
+
+
+_ENDUNGEN: frozenset[str] | None = None
 
 
 def _nfc(text: str) -> str:

@@ -268,6 +268,41 @@ def test_anderer_monat_wird_nicht_benutzt_und_ohne_datum_bleibt_wie_es_war(tmp_p
     assert pfad == tmp_path / "_Ohne_Datum" / "A7C2" / "IMG_1.JPG"
 
 
+def test_lose_datei_macht_kein_jahr_flach(tmp_path, konf):
+    """Pruefer-Befund (v0.9): Eine Notiz oder ein einzelnes Bild im Jahresordner
+    neben Monatsordnern aendert das Schema nicht."""
+    (tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "A7C2").mkdir(parents=True)
+    (tmp_path / "2021" / "Notizen.txt").write_text("x")
+    (tmp_path / "2021" / "LOSE.JPG").write_bytes(b"x")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 6, 3, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021-06 Juni" / "2021-06-03" / "A7C2" / "IMG_1.JPG"
+
+
+def test_nur_eine_notiz_macht_keinen_ordner_flach(tmp_path, konf):
+    (tmp_path / "2021" / "2021.01").mkdir(parents=True)
+    (tmp_path / "2021" / "2021.01" / "liesmich.txt").write_text("x")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad == tmp_path / "2021" / "2021.01" / "2021-01-15" / "A7C2" / "IMG_1.JPG"
+
+
+def test_jahr_mit_fremdem_text_wird_nicht_zum_flachen_ordner(tmp_path, konf):
+    """Ein Jahresordner wird nie „flach“ benutzt; ein Jahresbereich ist gar kein Datum."""
+    _bild(tmp_path / "2001 Odyssee")
+    _bild(tmp_path / "2020-2021 Schule")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2001, 3, 1, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad.parent.name == "A7C2"                       # nicht direkt in "2001 Odyssee"
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2020, 3, 1, 12), "A7C2", "IMG_1.JPG", konf)
+    assert "2020-2021 Schule" not in pfad.parts
+
+
+def test_monatswort_mit_text_unter_dem_jahr_wird_nicht_benutzt(tmp_path, konf):
+    _bild(tmp_path / "2021" / "3 Tage Rom")
+    _bild(tmp_path / "2021" / "Jan Geburtstag")
+    for monat in (1, 3):
+        pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, monat, 5, 12), "A7C2", "IMG_1.JPG", konf)
+        assert "3 Tage Rom" not in pfad.parts and "Jan Geburtstag" not in pfad.parts
+
+
 def test_eigenes_archiv_bleibt_wie_es_ist(tmp_path, konf):
     """Ein Archiv, das das Programm selbst angelegt hat (Kameraordner unter dem
     Tag), wird genauso weitergefuehrt wie bisher."""

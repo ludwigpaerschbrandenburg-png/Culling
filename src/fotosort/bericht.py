@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import db, meldungen, nachpruefen, pfade, zuruecklegen
-from .analyse import (ART_DATUM_AUFFAELLIG, ART_ORDNER_DATUM, ART_GRUPPE_GETRENNT, ART_NUR_HERSTELLER, ART_ZIELORDNER_MEHRDEUTIG,
+from .analyse import (ART_DATUM_AUFFAELLIG, ART_ORDNER_DATUM, ART_GRUPPE_GETRENNT, ART_NUR_HERSTELLER, ART_ZIELORDNER_FLACH, ART_ZIELORDNER_MEHRDEUTIG,
                       GRUND_SIDECAR_OHNE_HAUPT)
 from .datum import HINWEIS_OHNE_UHRZEIT, HINWEIS_ZEITZONE
 from .kopieren import (ART_ANGEFANGENE_ENTFERNT, ART_DUPLIKAT, ART_EXFAT_RUECKFALL,
@@ -332,6 +332,8 @@ def text(ziel: Path, dbank: db.Datenbank, jetzt: datetime | None = None) -> str:
                     dbank.ereignisse_zeiger(nachpruefen.ART_FEHLT), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
     _ereignis_liste(z, "Archivdatei beim Nachpruefen nicht lesbar",
                     dbank.ereignisse_zeiger(nachpruefen.ART_NICHT_LESBAR), lambda e: f"Lauf {e['lauf_nummer']}: {e['pfad']}  —  {e['text']}")
+    _ereignis_liste(z, "Vorhandene Datumsordner, in die Bilder direkt gelegt werden (Schema des Archivs)",
+                    dbank.ereignisse_zeiger(ART_ZIELORDNER_FLACH), lambda e: f"{e['pfad']}")
     _ereignis_liste(z, "Zielordner mehrdeutig (alphabetisch erster gewaehlt)",
                     dbank.ereignisse_zeiger(ART_ZIELORDNER_MEHRDEUTIG), lambda e: f"{e['pfad']}")
     _ereignis_liste(z, "Datenbank aus der Sicherungskopie zurueckgeholt (fotosort wiederherstellen)",

@@ -1083,6 +1083,7 @@ EREIGNIS_VERKNUEPFUNG = "Ordner-Verknuepfung nicht verfolgt"
 EREIGNIS_ZIEL_AUSGESCHLOSSEN = "Zielordner vom Scan ausgeschlossen"
 EREIGNIS_NICHT_MEHR_GEFUNDEN = "beim Scan nicht mehr gefunden"
 EREIGNIS_NICHT_ERREICHBAR = "nicht erreichbar"
+EREIGNIS_ORDNER_FLACH = "vorhandener Datumsordner mit Bildern direkt darin: neue Bilder kommen dazu"
 EREIGNIS_ORDNER_MEHRDEUTIG = "mehrere passende Ordner mit Zusatz, alphabetisch erster gewaehlt"
 EREIGNIS_SAUBER_ABGEBROCHEN = "sauber abgebrochen"
 

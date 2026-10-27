@@ -51,6 +51,7 @@ def test_schreibweisen(name, erwartet):
 @pytest.mark.parametrize("name", [
     "Urlaub", "D750", "100CANON", "DCIM", "1234 Kunden", "2021-13", "2021-02-30", "32.01.2021",
     "Hochzeit 2021", "IMG_2021", "_Ohne_Datum", "A7C2", "2021abc", "0000",
+    "2020-2021 Schule", "1999-2003", "2020_2021",          # Jahresbereiche sind kein Datum (Pruefer v0.9)
 ])
 def test_kein_datum(name):
     assert strukturen.zeitraum(name) is None
@@ -64,6 +65,9 @@ def test_mit_zusammenhang_des_elternordners():
     assert strukturen.zeitraum("15", JAN_2021) == TAG
     assert strukturen.zeitraum("15 Hochzeit", JAN_2021) == TAG
     assert strukturen.zeitraum("15", jahr) is None            # kein Monat 15
+    # Pruefer-Befund (v0.9): Zahl oder Abkuerzung mit weiterem Text ist ein Name, kein Monat.
+    for name in ("3 Tage Rom", "12 Apostel", "Jan Geburtstag", "Mai Feier", "1 Tag"):
+        assert strukturen.zeitraum(name, jahr) is None, name
     assert strukturen.zeitraum("01") is None                   # ohne Zusammenhang nichts
     assert strukturen.zeitraum("2021.01", jahr) == JAN_2021    # voll ausgeschrieben gilt auch so
     assert strukturen.zeitraum("2022.01", jahr) is None        # widerspricht dem Elternordner

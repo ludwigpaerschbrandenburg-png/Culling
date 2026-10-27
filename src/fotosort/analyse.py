@@ -20,6 +20,7 @@ from . import datum as datum_modul
 from . import ziel as ziel_modul
 
 ART_ZIELORDNER_MEHRDEUTIG = "zielordner_mehrdeutig"
+ART_ZIELORDNER_FLACH = "zielordner_flach"             # seit v0.9
 ART_GRUPPE_GETRENNT = "gruppe_getrennt"       # SPEC §3 seit v0.8
 ART_DATUM_AUFFAELLIG = "datum_auffaellig"
 ART_ORDNER_DATUM = "ordner_datum_abweichend"
@@ -404,6 +405,11 @@ def _teil_schreiben(teil, sidecars, nach_name, struktur, konf, dbank, lauf, erge
                 dbank.ereignis(lauf, ART_ZIELORDNER_MEHRDEUTIG, ort.ordner, 1, meldungen.EREIGNIS_ORDNER_MEHRDEUTIG)
         if ort.wiederverwendet:
             ergebnis.wiederverwendet += 1
+        if ort.flach and ort.ordner not in ergebnis.mehrdeutig_gemeldet:
+            # Ein Ordner je Lauf: Bilder kommen direkt in einen vorhandenen
+            # Datumsordner (Schema dieses Archivs, seit v0.9) - zum Nachsehen.
+            ergebnis.mehrdeutig_gemeldet.add(ort.ordner)
+            dbank.ereignis(lauf, ART_ZIELORDNER_FLACH, ort.ordner, 1, meldungen.EREIGNIS_ORDNER_FLACH)
         gruppe = nach_name[haupt.name]["quellpfad"]
         zielordner = ort.ordner
 

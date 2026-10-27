@@ -92,6 +92,8 @@ _ZAHLENMUSTER = (
     ("ym", re.compile(rf"^(\d{{4}}){_T}(\d{{1,2}}){_ENDE}")),
     ("my", re.compile(rf"^(\d{{1,2}}){_T}(\d{{4}}){_ENDE}")),
 )
+# "2020-2021 Schule", "1999-2003": ein Jahresbereich ist keine Ordnung nach Datum.
+_JAHRESBEREICH = re.compile(rf"^\d{{4}}\s*[-_–]\s*\d{{4}}{_ENDE}")
 _NAME_JAHR = re.compile(rf"^([A-Za-zÄÖÜäöüß]+)\.?(?:{_T})+(\d{{4}}){_ENDE}")
 _JAHR_NAME = re.compile(rf"^(\d{{4}})(?:{_T})+([A-Za-zÄÖÜäöüß]+)\.?{_ENDE}")
 _JAHR = re.compile(rf"^(\d{{4}}){_ENDE}")
@@ -115,6 +117,8 @@ def _bauen(art: str, j: int, m: int = 0, t: int = 0) -> Zeitraum | None:
 
 def _ohne_zusammenhang(name: str) -> tuple[bool, Zeitraum | None]:
     """(passt der Form nach, Zeitraum)."""
+    if _JAHRESBEREICH.match(name):
+        return True, None
     for form, muster in _ZAHLENMUSTER:
         m = muster.match(name)
         if not m:
@@ -155,12 +159,17 @@ def zeitraum(name: str, eltern: Zeitraum | None = None) -> Zeitraum | None:
     m = _ZAHL.match(name)
     if m:
         zahl = int(m.group(1))
+        rest = name[m.end():].strip(" _-.")
         if eltern.art == "jahr":
+            # Nur "01" oder "01 Januar" - "3 Tage Rom" und "12 Apostel" sind Namen.
+            if rest and _monat(rest) != zahl:
+                return None
             return _bauen("monat", eltern.jahr, zahl)
-        return _bauen("tag", eltern.jahr, eltern.monat, zahl)
+        return _bauen("tag", eltern.jahr, eltern.monat, zahl)   # "15 Hochzeit" unter dem Monat
     if eltern.art == "jahr":
         m = _WORT.match(name)
-        if m and _monat(m.group(1)):
+        # Nur der Monatsname allein - "Jan Geburtstag" ist ein Name.
+        if m and _monat(m.group(1)) and not name[m.end():].strip(" _-."):
             return _bauen("monat", eltern.jahr, _monat(m.group(1)))
     return None
 
