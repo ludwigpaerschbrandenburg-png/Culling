@@ -18,14 +18,13 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QRunnable, QSize, Qt, QThreadPool, Signal
-from PySide6.QtGui import QColor, QIcon, QImage, QImageReader, QPainter, QPixmap, QTransform
+from PySide6.QtGui import QColor, QIcon, QImage, QImageReader, QPainter, QPalette, QPixmap, QTransform
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QPushButton,
+    QAbstractItemView, QApplication, QComboBox, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QPushButton,
     QSizePolicy, QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import FotosortFehler, dateitypen, meldungen, pfade, sichten, vorschau
-from . import stil
 
 KACHEL = 180          # Kantenlaenge der Vorschaubilder in Pixeln
 GROSS = 2560          # groesste Kante in der grossen Ansicht
@@ -121,15 +120,17 @@ class _Laden(QRunnable):
 
 def _platzhalter(text: str) -> QIcon:
     pm = QPixmap(KACHEL, KACHEL)
-    pm.fill(QColor(stil.SURFACE))
+    pal = QApplication.palette()
+    pm.fill(pal.color(QPalette.ColorRole.Base))
     maler = QPainter(pm)
-    maler.setPen(QColor(stil.TEXT))
+    maler.setPen(pal.color(QPalette.ColorRole.Text))
     maler.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, text)
     maler.end()
     return QIcon(pm)
 
 
-FARBE_MARKIERUNG = {"auswahl": "#6fcf97", "ausschuss": "#eb7a7a"}
+# Gruen und Rot von Windows, lesbar auf hellem und dunklem Grund.
+FARBE_MARKIERUNG = {"auswahl": "#2e9e44", "ausschuss": "#d13438"}
 
 
 def _abgeblendet(pm: QPixmap) -> QPixmap:
@@ -255,6 +256,7 @@ class SichtenSeite(QWidget):
         links.addWidget(self.baum, 1)
         self.aktualisieren_knopf = QPushButton("Neu einlesen")
         self.aktualisieren_knopf.setProperty("klasse", "ghost")
+        self.aktualisieren_knopf.setFlat(True)
         self.aktualisieren_knopf.clicked.connect(self.neu_einlesen)
         links.addWidget(self.aktualisieren_knopf)
         lay.addLayout(links)
@@ -433,9 +435,10 @@ class SichtenSeite(QWidget):
         b = self.alle[nr]
         sterne, markierung = self.stand.get(b.schluessel, (0, ""))
         zusatz = meldungen.SICHTEN_MARKIERUNG[markierung]
-        eintrag.setText(f"{b.name}\n{_sterne(sterne)}" + (f" · {zusatz}" if zusatz else ""))
+        eintrag.setText(f"{b.name}\n{_sterne(sterne)}" + (f", {zusatz}" if zusatz else ""))
         eintrag.setToolTip("\n".join(str(p) for p in b.dateien))
-        eintrag.setForeground(QColor(FARBE_MARKIERUNG.get(markierung, stil.N300)))
+        eintrag.setForeground(QColor(FARBE_MARKIERUNG[markierung]) if markierung in FARBE_MARKIERUNG
+                              else QApplication.palette().color(QPalette.ColorRole.Text))
         pm = self.vorschau.get(nr)
         if pm is None:
             eintrag.setIcon(self._icon_video if b.art == dateitypen.VIDEO else self._icon_leer)
@@ -533,7 +536,7 @@ class SichtenSeite(QWidget):
         b = self.alle[self.gross_nr]
         sterne, markierung = self.stand.get(b.schluessel, (0, ""))
         zusatz = meldungen.SICHTEN_MARKIERUNG[markierung]
-        self.titel.setText(f"{b.name}   {_sterne(sterne)}" + (f" · {zusatz}" if zusatz else ""))
+        self.titel.setText(f"{b.name}   {_sterne(sterne)}" + (f", {zusatz}" if zusatz else ""))
 
     def blaettern(self, schritt: int) -> None:
         if self.gross_nr is None or self.gross_nr not in self.gezeigt:

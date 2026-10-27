@@ -108,8 +108,9 @@ bevor es um Ihre Bilder geht.
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
-3. `start.bat` doppelklicken. Es öffnet sich das Programmfenster (dunkel, oben die
-   Titelzeile mit dem Zielordner, unten eine Statusleiste). Bilder jeder Ansicht liegen im
+3. `start.bat` doppelklicken. Es öffnet sich das Programmfenster. Es sieht aus wie ein
+   normales Windows-Programm und ist hell oder dunkel, je nachdem, wie Windows eingestellt
+   ist. Oben stehen die Reiter „Archiv“ und „Sichten“, unten eine Statusleiste. Bilder jeder Ansicht liegen im
    Ordner `docs/oberflaeche` des Projekts.
 
 Auf der Startseite tragen Sie ein:
@@ -117,9 +118,9 @@ Auf der Startseite tragen Sie ein:
 | Feld | Was Sie tun |
 |---|---|
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
-| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als Schildchen; das × daran nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
-| **Modus** | „kopieren" lassen – die Quelle bleibt unverändert. |
-| **Quelle und Ziel liegen auf** | Das Programm sieht selbst nach, worauf Ziel und Quellen liegen (Festplatte, SSD oder Netzlaufwerk), wählt den passenden Knopf vor und schreibt darunter, was es erkannt hat. Der langsamste Teil entscheidet: Liegt eines auf einer Festplatte, heißt es „hdd"; nur wenn alles auf SSDs liegt, „ssd"; bei einem Netzlaufwerk „netzwerk". Lässt sich nichts feststellen, bleibt es beim sicheren „hdd". Sie können den Vorschlag jederzeit ändern – dann bleibt Ihre Wahl. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert, gelesen und geprüft werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
+| **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als eigene Zeile; „Entfernen“ daneben nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
+| **Modus** | „Kopieren" lassen – die Quelle bleibt unverändert. |
+| **Quelle und Ziel liegen auf** | Das Programm sieht selbst nach, worauf Ziel und Quellen liegen (Festplatte, SSD oder Netzlaufwerk), wählt den passenden Knopf vor und schreibt darunter, was es erkannt hat. Der langsamste Teil entscheidet: Liegt eines auf einer Festplatte, heißt es „Festplatte"; nur wenn alles auf SSDs liegt, „SSD"; bei einem Netzlaufwerk „Netzwerk". Lässt sich nichts feststellen, bleibt es bei der sicheren „Festplatte". Sie können den Vorschlag jederzeit ändern – dann bleibt Ihre Wahl. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert, gelesen und geprüft werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
 
 Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
 dessen Stand und die bekannten Quellen, und **„Weitermachen"** springt zum offenen Schritt, ohne
@@ -286,7 +287,7 @@ der Startseite **Verschieben** gewählt, verlangt das Fenster schon vor Schritt 
 Wörter.
 
 Am Ende sind alle fünf Phasen in der Leiste erledigt, der Hauptknopf heißt „Bericht öffnen",
-und die Karte „Letzter Bericht" öffnet den Bericht oder die CSV-Tabelle (Abschnitt 5 erklärt
+und die Karte „Letzter Bericht" öffnet den Bericht oder die Tabelle (CSV) (Abschnitt 5 erklärt
 die Statuswörter in den Zählern).
 
 **Zurücklegen:** War das Aufräumen voreilig, legt **„Zurücklegen…"** auf der Aufräumen-Karte

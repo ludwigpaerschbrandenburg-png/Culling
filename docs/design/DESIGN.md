@@ -1,5 +1,9 @@
 # fotosort – Hauptansicht (Design-Übergabe)
 
+> **Abgelöst für das Desktop-Fenster seit v0.10** (Entscheidung des Nutzers vom 27.10.2026: nicht wie von
+> einer KI, sondern wie ein Windows-11-Programm – siehe `docs/SPEC.md` §8). Gilt nur noch für die
+> Browser-Fassung (`static/`).
+
 Dateien: `index.html` (Struktur), `app.css` (Layout), `styles.css` (Design-Tokens + Komponenten, nicht ändern).
 Öffnen: `index.html` im Browser – so soll das Fenster aussehen.
 

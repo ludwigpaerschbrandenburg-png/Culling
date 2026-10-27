@@ -3,7 +3,8 @@
 Ein normales Fenster mit Taskleisten-Symbol, Ordnerwahl ueber den Dialog des
 Systems, nie ein getippter Pfad. Aufbau und Seiten wie die Browser-Fassung
 (static/): Startseite, Uebersicht mit Phasenleiste, Fortschritt, Zaehlern und
-Karten, geblaetterte Listen. Das Aussehen kommt aus stil.py (Nocturne).
+Karten, geblaetterte Listen. Das Aussehen kommt aus stil.py: Grundstil und
+Palette des Systems (wie ein Windows-11-Programm, seit v0.10).
 
 Die Arbeit tut weiterhin der Ablauf (ablauf.py) mit einem eigenen Prozess je
 Schritt; das Fenster fragt hoechstens zweimal je Sekunde die Statusdatei ab
@@ -24,12 +25,12 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QShortcut
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget,
-    QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
+    QAbstractButton, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
+    QScrollArea, QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from .. import FotosortFehler, __version__, meldungen
@@ -59,9 +60,15 @@ def label(text: str = "", klasse: str = "", wrap: bool = False) -> QLabel:
 
 
 def knopf(text: str, klasse: str = "secondary", klick=None) -> QPushButton:
+    """Ein normaler Windows-Knopf. "primary": der hervorgehobene Knopf in der
+    Akzentfarbe von Windows; "ghost": flach, wie ein Textknopf."""
     k = QPushButton(text)
     k.setProperty("klasse", klasse)
-    k.setCursor(Qt.CursorShape.PointingHandCursor)
+    k.setAutoDefault(False)
+    if klasse == "primary":
+        k.setDefault(True)
+    elif klasse == "ghost":
+        k.setFlat(True)
     if klick is not None:
         k.clicked.connect(klick)
     return k
@@ -73,7 +80,7 @@ def klasse_setzen(w: QWidget, klasse: str) -> None:
     w.style().polish(w)
 
 
-def tag(text: str, klasse: str = "tag-mono", breite: int = 0) -> QLabel:
+def tag(text: str, klasse: str = "tag", breite: int = 0) -> QLabel:
     l = label(text, klasse)
     l.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
     if breite:
@@ -89,45 +96,47 @@ def kuerzen(l: QLabel, text: str, breite: int) -> None:
 
 
 class TagZeile(QFrame):
-    """Ein Pfad als Schildchen mit x zum Entfernen."""
+    """Ein Pfad als Textzeile, wahlweise mit Knopf „Entfernen“."""
 
     def __init__(self, text: str, entfernen=None) -> None:
         super().__init__()
         self.setProperty("klasse", "tagzeile")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 3, 6, 3)
-        lay.setSpacing(6)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
         t = QLabel(text)
         kuerzen(t, text, 560)
         lay.addWidget(t)
         if entfernen is not None:
-            x = QPushButton("×")
-            x.setToolTip("Entfernen")
-            x.setCursor(Qt.CursorShape.PointingHandCursor)
-            x.clicked.connect(entfernen)
+            x = knopf("Entfernen", "ghost", entfernen)
+            x.setToolTip("Diese Quelle wieder entfernen")
             lay.addWidget(x)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
 
 class Seg(QFrame):
-    """Segmentierte Auswahl (.seg aus dem Entwurf)."""
+    """Auswahl aus wenigen Werten: Optionsfelder wie in Windows; als
+    "reiter" eine Leiste mit Unterstrich unter dem gewaehlten Eintrag."""
 
     geaendert = Signal(str)
 
-    def __init__(self, werte: list[tuple[str, str]]) -> None:
+    def __init__(self, werte: list[tuple[str, str]], reiter: bool = False, untereinander: bool = False) -> None:
         super().__init__()
         self.setProperty("klasse", "seg")
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(2, 2, 2, 2)
-        lay.setSpacing(0)
+        lay = QVBoxLayout(self) if untereinander else QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4 if reiter else (6 if untereinander else 18))
         self.gruppe = QButtonGroup(self)
         self.gruppe.setExclusive(True)
-        self.knoepfe: dict[str, QPushButton] = {}
+        self.knoepfe: dict[str, QAbstractButton] = {}
         for wert, text in werte:
-            k = QPushButton(text)
-            k.setProperty("klasse", "seg-opt")
+            if reiter:
+                k = QPushButton(text)
+                k.setProperty("klasse", "reiter")
+                k.setAutoDefault(False)
+            else:
+                k = QRadioButton(text)
             k.setCheckable(True)
-            k.setCursor(Qt.CursorShape.PointingHandCursor)
             self.gruppe.addButton(k)
             lay.addWidget(k)
             self.knoepfe[wert] = k
@@ -150,13 +159,15 @@ class Seg(QFrame):
 
 
 class Karte(QFrame):
+    """Ein Kasten mit Ueberschrift, wie die Karten in den Windows-Einstellungen."""
+
     def __init__(self, kicker: str, gedaempft: bool = False) -> None:
         super().__init__()
         self.setProperty("klasse", "card")
         self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(12, 10, 12, 12)
-        self.lay.setSpacing(6)
-        self.kicker = label(kicker.upper(), "kicker-gedaempft" if gedaempft else "kicker")
+        self.lay.setContentsMargins(14, 12, 14, 14)
+        self.lay.setSpacing(8)
+        self.kicker = label(kicker, "kicker-gedaempft" if gedaempft else "kicker")
         self.lay.addWidget(self.kicker)
 
     def inaktiv(self, ja: bool) -> None:
@@ -166,119 +177,73 @@ class Karte(QFrame):
             l.style().polish(l)
 
 
-class Regel(QWidget):
-    """Eine Linie, die an beiden Enden ausblendet (Nocturne-Merkmal)."""
+class Linie(QProgressBar):
+    """Fortschrittsbalken von Windows (ohne Prozentzahl daneben)."""
 
-    def __init__(self, farbe: str = stil.REGEL) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.farbe = QColor(farbe) if not farbe.startswith("rgba") else _rgba(farbe)
-        self.setFixedHeight(1)
-
-    def paintEvent(self, _ev) -> None:
-        p = QPainter(self)
-        g = QLinearGradient(0, 0, self.width(), 0)
-        g.setColorAt(0, Qt.GlobalColor.transparent)
-        g.setColorAt(min(0.49, 48 / max(1, self.width())), self.farbe)
-        g.setColorAt(max(0.51, 1 - 48 / max(1, self.width())), self.farbe)
-        g.setColorAt(1, Qt.GlobalColor.transparent)
-        p.fillRect(self.rect(), g)
-
-
-def _rgba(text: str) -> QColor:
-    teile = text[text.index("(") + 1:text.index(")")].split(",")
-    r, g, b, a = (int(t.strip()) for t in teile)
-    return QColor(r, g, b, a)
-
-
-class Linie(QWidget):
-    """2-px-Linie mit Akzentfuellung und Glanz: Fortschrittsbalken und Phasenlinie."""
-
-    def __init__(self, ausblenden: bool = False) -> None:
-        super().__init__()
+        self.setRange(0, 1000)
+        self.setValue(0)
+        self.setTextVisible(False)
+        self.setFixedHeight(8)
         self.anteil = 0.0
-        self.ausblenden = ausblenden
-        self.setFixedHeight(6)
 
     def setzen(self, anteil: float) -> None:
         self.anteil = max(0.0, min(1.0, float(anteil)))
-        self.update()
-
-    def paintEvent(self, _ev) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        y = 3
-        grund = QPen(_rgba(stil.DIVIDER) if self.ausblenden else QColor(stil.N800), 2)
-        if self.ausblenden:
-            g = QLinearGradient(0, 0, self.width(), 0)
-            g.setColorAt(0, Qt.GlobalColor.transparent)
-            g.setColorAt(min(0.49, 48 / max(1, self.width())), _rgba(stil.DIVIDER))
-            g.setColorAt(max(0.51, 1 - 48 / max(1, self.width())), _rgba(stil.DIVIDER))
-            g.setColorAt(1, Qt.GlobalColor.transparent)
-            p.fillRect(QRectF(0, y - 1, self.width(), 2), g)
-        else:
-            p.setPen(grund)
-            p.drawLine(0, y, self.width(), y)
-        breite = int(self.width() * self.anteil)
-        if breite > 0:
-            glanz = QColor(stil.AKZENT)
-            glanz.setAlpha(70)
-            p.setPen(QPen(glanz, 6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(2, y, max(2, breite - 2), y)
-            p.setPen(QPen(QColor(stil.AKZENT), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(0, y, breite, y)
+        self.setValue(round(self.anteil * 1000))
 
 
 class Phasenleiste(QWidget):
+    """Die fuenf Schritte nebeneinander: erledigte mit Haken, der aktuelle fett."""
+
+    NAMEN = ("Scan", "Analyse", "Kopieren", "Prüfen", "Aufräumen")
+
     def __init__(self) -> None:
         super().__init__()
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-        self.linie = Linie(ausblenden=True)
-        lay.addWidget(self.linie)
-        zeile = QHBoxLayout()
+        zeile = QHBoxLayout(self)
         zeile.setContentsMargins(0, 0, 0, 0)
+        zeile.setSpacing(28)
         self.namen: list[QLabel] = []
-        for name in ("Scan", "Analyse", "Kopieren", "Prüfen", "Aufräumen"):
+        for name in self.NAMEN:
             l = label(name, "phase")
-            zeile.addWidget(l, 1)
+            zeile.addWidget(l)
             self.namen.append(l)
-        lay.addLayout(zeile)
+        zeile.addStretch(1)
 
     def setzen(self, aktiv: str, anteil: float = 0.0, alles_fertig: bool = False) -> None:
         idx = SCHRITTE.index(aktiv) if aktiv in SCHRITTE else -1
-        for i, l in enumerate(self.namen):
+        for i, (l, name) in enumerate(zip(self.namen, self.NAMEN)):
             if alles_fertig or (idx >= 0 and i < idx):
+                l.setText("✓ " + name)
                 klasse_setzen(l, "phase-fertig")
             elif i == idx:
+                l.setText("● " + name)
                 klasse_setzen(l, "phase-aktiv")
             else:
+                l.setText(name)
                 klasse_setzen(l, "phase")
-        self.linie.setzen(1.0 if alles_fertig else (0.0 if idx < 0 else (idx + anteil) / len(SCHRITTE)))
 
 
 class Zaehler(QWidget):
-    """Zeilen Bezeichnung / Wert mit ausblendender Regel (dl.zaehler)."""
+    """Zeilen Bezeichnung / Wert, wie eine schlichte Tabelle."""
 
     def __init__(self) -> None:
         super().__init__()
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
-        self.lay.setSpacing(0)
-        self.setMaximumWidth(640)
+        self.lay.setSpacing(6)
+        self.setMaximumWidth(560)
 
     def setzen(self, zeilen: list) -> None:
         _leeren(self.lay)
-        for i, (name, wert) in enumerate(zeilen or []):
+        for name, wert in zeilen or []:
             z = QHBoxLayout()
-            z.setContentsMargins(0, 9, 0, 9)
+            z.setContentsMargins(0, 0, 0, 0)
             z.addWidget(label(str(name), "zaehler-name"))
             z.addStretch(1)
             wert = str(wert)
             z.addWidget(label(wert, "zaehler-null" if wert == "0" else "zaehler-wert"))
             self.lay.addLayout(z)
-            if i < len(zeilen) - 1:
-                self.lay.addWidget(Regel())
 
 
 class Dialog(QDialog):
@@ -295,7 +260,6 @@ class Dialog(QDialog):
         lay.addWidget(label(titel, "dialog-titel", wrap=True))
         lay.addWidget(label(text, "dialog-text", wrap=True))
         self.feld = QLineEdit()
-        self.feld.setProperty("klasse", "mono")
         self.feld.setVisible(eingabe)
         lay.addWidget(self.feld)
         knoepfe = QHBoxLayout()
@@ -329,10 +293,9 @@ class StartSeite(QWidget):
         form.setSpacing(22)
 
         # Ziel
-        form.addWidget(label("Zielordner · hier entsteht das sortierte Archiv", "feldname"))
+        form.addWidget(label("Zielordner – hier entsteht das sortierte Archiv", "feldname"))
         zeile = QHBoxLayout()
         self.ziel = QLineEdit()
-        self.ziel.setProperty("klasse", "mono")
         self.ziel.setReadOnly(True)
         self.ziel.setPlaceholderText("noch kein Ordner gewählt")
         zeile.addWidget(self.ziel, 1)
@@ -342,7 +305,7 @@ class StartSeite(QWidget):
         form.addWidget(self.ziel_hinweis)
 
         # Quellen
-        form.addWidget(label("Quellordner · hier liegen die unsortierten Fotos", "feldname"))
+        form.addWidget(label("Quellordner – hier liegen die unsortierten Fotos", "feldname"))
         self.quellen_box = QVBoxLayout()
         self.quellen_box.setSpacing(4)
         form.addLayout(self.quellen_box)
@@ -350,7 +313,7 @@ class StartSeite(QWidget):
         zeile.addWidget(knopf("Quelle hinzufügen…", "secondary", self.quelle_waehlen))
         zeile.addStretch(1)
         form.addLayout(zeile)
-        form.addWidget(label("Mehrere Quellen möglich · beim Kopieren bleibt die Quelle unverändert.", "hinweis"))
+        form.addWidget(label("Mehrere Quellen sind möglich. Beim Kopieren bleibt die Quelle unverändert.", "hinweis"))
 
         # Modus und Profil
         zeile = QHBoxLayout()
@@ -358,20 +321,22 @@ class StartSeite(QWidget):
         block = QVBoxLayout()
         block.setSpacing(6)
         block.addWidget(label("Modus", "feldname"))
-        self.modus = Seg([("kopieren", "kopieren"), ("verschieben", "verschieben")])
+        self.modus = Seg([("kopieren", "Kopieren"), ("verschieben", "Verschieben")])
         self.modus.geaendert.connect(lambda _w: self.f.einstellungen_senden())
         block.addWidget(self.modus)
         self.modus_text = label("", "hinweis", wrap=True)
         block.addWidget(self.modus_text)
+        block.addStretch(1)
         zeile.addLayout(block)
         block = QVBoxLayout()
         block.setSpacing(6)
         block.addWidget(label("Quelle und Ziel liegen auf", "feldname"))
-        self.profil = Seg([("hdd", "hdd"), ("ssd", "ssd"), ("netzwerk", "netzwerk")])
+        self.profil = Seg([("hdd", "Festplatte"), ("ssd", "SSD"), ("netzwerk", "Netzwerk")])
         self.profil.geaendert.connect(lambda _w: self.f.profil_gewaehlt())
         block.addWidget(self.profil)
         self.profil_text = label("", "hinweis", wrap=True)
         block.addWidget(self.profil_text)
+        block.addStretch(1)
         zeile.addLayout(block)
         zeile.addStretch(1)
         form.addLayout(zeile)
@@ -406,7 +371,7 @@ class StartSeite(QWidget):
         seite.addStretch(1)
         rechts = QWidget()
         rechts.setLayout(seite)
-        rechts.setFixedWidth(300)
+        rechts.setFixedWidth(320)
         aussen.addWidget(rechts)
 
     # -- Bedienung ---------------------------------------------------------
@@ -438,7 +403,7 @@ class StartSeite(QWidget):
     def texte(self, z: dict) -> None:
         self.modus_text.setText(
             "Jede Datei wird erst nach geprüfter Kopie in der Quelle gelöscht." if self.modus.wert() == "verschieben"
-            else "Die Quelle bleibt unverändert · aufräumen später.")
+            else "Die Quelle bleibt unverändert; aufgeräumt wird später.")
         p = next((p for p in z.get("profile", []) if p["name"] == self.profil.wert()), None)
         text = p["text"] if p else ""
         # Entscheidung 1 (v0.8): was die Laufwerkserkennung vorschlaegt
@@ -460,25 +425,25 @@ class StartSeite(QWidget):
         self.rettung.hide()
         self.verwerfen.setVisible(bool(self.ziel.text()) and bool(archiv.get("da")) and not archiv.get("laeuft"))
         if not self.ziel.text():
-            self.karte.kicker.setText("ZIELORDNER")
+            self.karte.kicker.setText("Zielordner")
             self.archiv_text.setText("Noch kein Zielordner gewählt.")
             return
         if not archiv.get("da"):
             if archiv.get("ziel_existiert") is False:
                 # Meist eine nicht angeschlossene Platte oder ein umbenannter
                 # Ordner - kein neues Archiv (SPEC §8, --ziel-anlegen).
-                self.karte.kicker.setText("ZIELORDNER NICHT GEFUNDEN")
+                self.karte.kicker.setText("Zielordner nicht gefunden")
                 self.archiv_text.setText(meldungen.ob_ziel_nicht_gefunden())
                 return
-            self.karte.kicker.setText("NEUES ARCHIV")
-            self.archiv_text.setText("Ordner ist da · noch kein Archiv darin.")
+            self.karte.kicker.setText("Neues Archiv")
+            self.archiv_text.setText("Noch kein Archiv in diesem Ordner.")
             return
-        self.karte.kicker.setText("ANGEFANGENES ARCHIV")
+        self.karte.kicker.setText("Angefangenes Archiv")
         if archiv.get("laeuft"):
             self.archiv_text.setText("Gerade läuft ein Schritt.")
             return
         if archiv.get("rettung"):
-            self.karte.kicker.setText("ARCHIV OHNE MERKLISTE")
+            self.karte.kicker.setText("Archiv ohne Merkliste")
             self.archiv_text.setText(archiv.get("rettung_text") or archiv.get("fehler") or "")
             self.rettung.setText("Datenbank zurückholen…" if archiv["rettung"] == "wiederherstellen" else "Archiv neu einlesen…")
             self.rettung.show()
@@ -521,7 +486,7 @@ class HauptSeite(QWidget):
         self.kennzahlen = QHBoxLayout()
         self.kennzahlen.setSpacing(24)
         links.addLayout(self.kennzahlen)
-        self.aktuell = label("", "mono-leise")
+        self.aktuell = label("", "hinweis")
         links.addWidget(self.aktuell)
         self.zaehler = Zaehler()
         links.addWidget(self.zaehler)
@@ -542,18 +507,17 @@ class HauptSeite(QWidget):
 
         rechts = QVBoxLayout()
         rechts.setSpacing(12)
-        self.k_auf = Karte("Aufräumen · Schritt 5")
+        self.k_auf = Karte("Aufräumen (Schritt 5)")
         self.auf_quellen = QVBoxLayout()
         self.auf_quellen.setSpacing(2)
         self.k_auf.lay.addLayout(self.auf_quellen)
-        self.auf_weise = Seg([("papierkorb", "_geloescht_"), ("endgueltig", "endgültig")])
+        self.auf_weise = Seg([("papierkorb", "In Ordner _geloescht_ legen"), ("endgueltig", "Endgültig löschen")], untereinander=True)
         self.auf_weise.setzen("papierkorb")
         self.auf_weise.geaendert.connect(lambda _w: self.auf_wort_pruefen())
         self.k_auf.lay.addWidget(self.auf_weise)
         self.auf_soll = label("Zum Bestätigen tippen: verschieben", "hinweis")
         self.k_auf.lay.addWidget(self.auf_soll)
         self.auf_wort = QLineEdit()
-        self.auf_wort.setProperty("klasse", "mono")
         self.auf_wort.textChanged.connect(lambda _t: self.auf_wort_pruefen())
         self.auf_wort.returnPressed.connect(lambda: self.auf_los.isEnabled() and self.auf_los.click())
         self.k_auf.lay.addWidget(self.auf_wort)
@@ -566,10 +530,9 @@ class HauptSeite(QWidget):
         rechts.addWidget(self.k_auf)
 
         self.k_ordner = Karte("Leere Ordner")
-        self.k_ordner.lay.addWidget(label("Reste wie Thumbs.db zählen als leer · Wurzel bleibt.", "hinweis", wrap=True))
+        self.k_ordner.lay.addWidget(label("Reste wie Thumbs.db zählen als leer. Der Quellordner selbst bleibt.", "hinweis", wrap=True))
         self.k_ordner.lay.addWidget(label("Zum Bestätigen tippen: entfernen", "hinweis"))
         self.ordner_wort = QLineEdit()
-        self.ordner_wort.setProperty("klasse", "mono")
         self.ordner_wort.textChanged.connect(lambda _t: self.ordner_wort_pruefen())
         self.k_ordner.lay.addWidget(self.ordner_wort)
         self.ordner_los = knopf("Leere Ordner entfernen", "primary", self.f.ordner_starten)
@@ -577,12 +540,13 @@ class HauptSeite(QWidget):
         rechts.addWidget(self.k_ordner)
 
         self.k_bericht = Karte("Letzter Bericht", gedaempft=True)
-        self.bericht_name = label("noch keiner", "mono-hell")
+        self.bericht_name = label("noch keiner")
         self.k_bericht.lay.addWidget(self.bericht_name)
         zeile = QHBoxLayout()
         zeile.setSpacing(6)
         self.bericht_oeffnen = knopf("Öffnen", "ghost", lambda: self.f.bericht_oeffnen("txt"))
-        self.bericht_csv = knopf("CSV", "ghost", lambda: self.f.bericht_oeffnen("csv"))
+        self.bericht_csv = knopf("Tabelle", "ghost", lambda: self.f.bericht_oeffnen("csv"))
+        self.bericht_csv.setToolTip("Den Bericht als Tabelle (CSV) öffnen")
         zeile.addWidget(self.bericht_oeffnen)
         zeile.addWidget(self.bericht_csv)
         zeile.addWidget(knopf("Neu schreiben", "ghost", lambda: self.f.bericht_oeffnen("neu")))
@@ -592,7 +556,7 @@ class HauptSeite(QWidget):
         rechts.addStretch(1)
         rechts_w = QWidget()
         rechts_w.setLayout(rechts)
-        rechts_w.setFixedWidth(300)
+        rechts_w.setFixedWidth(320)
         tafel.addWidget(rechts_w)
         lay.addLayout(tafel, 1)
         self.woerter = dict(meldungen.BESTAETIGUNGSWORT)
@@ -629,7 +593,7 @@ class HauptSeite(QWidget):
             rest = (" / " + teile[1] + " " + einheit) if len(teile) > 1 else (" " + einheit)
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
-            w.setText(f'<span style="color:{stil.TEXT}">{teile[0]}</span>{rest}')
+            w.setText(f'<b>{teile[0]}</b>{rest}')
             return w
 
         self.kennzahlen.addWidget(paar(t.get("dateien") or "0", "Dateien"))
@@ -638,17 +602,17 @@ class HauptSeite(QWidget):
         if t.get("rate"):
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
-            w.setText(f'<span style="color:{stil.TEXT}">{t["rate"].replace(" MB/s", "")}</span> MB/s')
+            w.setText(f'<b>{t["rate"].replace(" MB/s", "")}</b> MB/s')
             self.kennzahlen.addWidget(w)
         if t.get("restzeit") and l.get("zustand") not in ENDE:
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
-            w.setText(f'Rest <span style="color:{stil.TEXT}">{t["restzeit"]}</span>')
+            w.setText(f'noch <b>{t["restzeit"]}</b>')
             self.kennzahlen.addWidget(w)
         if t.get("dauer") and l.get("zustand") not in ENDE:
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
-            w.setText(f'bisher <span style="color:{stil.TEXT}">{t["dauer"]}</span>')
+            w.setText(f'bisher <b>{t["dauer"]}</b>')
             self.kennzahlen.addWidget(w)
         self.kennzahlen.addStretch(1)
 
@@ -691,13 +655,13 @@ class ListenSeite(QWidget):
         self.art, self.seite = art, int(l["seite"])
         info = LISTEN[art]
         self.titel.setText(info[0])
-        self.gesamt.setText(f'{l["gesamt_text"]} {"Eintrag" if l["gesamt"] == 1 else "Einträge"} · 100 je Seite')
+        self.gesamt.setText(f'{l["gesamt_text"]} {"Eintrag" if l["gesamt"] == 1 else "Einträge"}, 100 je Seite')
         self.stand.setText(f'{meldungen.anzahl(l["seite"])} / {meldungen.anzahl(l["seiten"])}')
         self.zurueck.setEnabled(l["seite"] > 1)
         self.vor.setEnabled(l["seite"] < l["seiten"])
         t = self.tabelle
         t.setRowCount(0)
-        t.setHorizontalHeaderLabels([k.upper() for k in info[1]])
+        t.setHorizontalHeaderLabels(list(info[1]))
         for z in l["zeilen"]:
             r = t.rowCount()
             t.insertRow(r)
@@ -788,28 +752,23 @@ class Hauptfenster(QMainWindow):
         aussen.setContentsMargins(0, 0, 0, 0)
         aussen.setSpacing(0)
 
-        # Titelzeile
+        # Kopfzeile: Reiter links, Ziel und Hilfe rechts
         self.titel = QFrame()
         self.titel.setObjectName("titelzeile")
-        self.titel.setFixedHeight(40)
         tl = QHBoxLayout(self.titel)
-        tl.setContentsMargins(14, 0, 14, 0)
-        tl.setSpacing(8)
-        marke = QLabel("fotosort")
-        marke.setObjectName("marke")
-        tl.addWidget(marke)
-        tl.addWidget(label("—", "leise"))
-        self.titel_ziel = label("kein Zielordner", "mono")
-        self.titel_ziel.setProperty("klasse", "mono-hell")
-        tl.addWidget(self.titel_ziel, 1)
-        self.titel_lauf = tag("Lauf –", "tag")
-        tl.addWidget(self.titel_lauf)
+        tl.setContentsMargins(32, 10, 24, 0)
+        tl.setSpacing(12)
         # Zwei Reiter (SPEC §8 seit v0.8): „Archiv“ ist der bisherige Ablauf,
         # „Sichten“ zeigt und bewertet die Bilder im Archiv - er ersetzt nichts.
-        self.reiter = Seg([("archiv", "Archiv"), ("sichten", "Sichten")])
+        self.reiter = Seg([("archiv", "Archiv"), ("sichten", "Sichten")], reiter=True)
         self.reiter.setzen("archiv")
         self.reiter.geaendert.connect(self.reiter_wechseln)
         tl.addWidget(self.reiter)
+        tl.addStretch(1)
+        self.titel_ziel = label("kein Zielordner", "hinweis")
+        tl.addWidget(self.titel_ziel)
+        self.titel_lauf = label("", "hinweis")
+        tl.addWidget(self.titel_lauf)
         tl.addWidget(knopf("Hilfe", "ghost", lambda: self.hilfe_zeigen()))
         QShortcut(QKeySequence("F1"), self, activated=lambda: self.hilfe_zeigen())
         aussen.addWidget(self.titel)
@@ -851,21 +810,17 @@ class Hauptfenster(QMainWindow):
         self.reiter_stapel.addWidget(self.sichten)
         aussen.addWidget(self.reiter_stapel, 1)
 
-        # Statusleiste
-        self.status = QFrame()
-        self.status.setObjectName("statusleiste")
-        self.status.setFixedHeight(40)
-        sl = QHBoxLayout(self.status)
-        sl.setContentsMargins(24, 0, 24, 0)
-        sl.setSpacing(20)
-        self.leiste_db = QLabel("db –")
-        self.leiste_sicherung = QLabel("Sicherung –")
+        # Statusleiste von Windows
+        self.status = self.statusBar()
+        self.status.setSizeGripEnabled(True)
+        self.leiste_db = QLabel("")
+        self.leiste_sicherung = QLabel("")
         self.leiste_sperre = QLabel("")
-        sl.addWidget(self.leiste_db)
-        sl.addWidget(self.leiste_sicherung)
-        sl.addStretch(1)
-        sl.addWidget(self.leiste_sperre)
-        aussen.addWidget(self.status)
+        for l in (self.leiste_db, self.leiste_sicherung, self.leiste_sperre):
+            l.setContentsMargins(10, 2, 10, 2)
+        self.status.addWidget(self.leiste_db)
+        self.status.addWidget(self.leiste_sicherung)
+        self.status.addPermanentWidget(self.leiste_sperre)
 
         self.poll = QTimer(self)
         self.poll.setInterval(POLL_MS)
@@ -874,10 +829,6 @@ class Hauptfenster(QMainWindow):
         self.waechter.setInterval(1000)
         self.waechter.timeout.connect(self._schliessen_pruefen)
         self.waechter.start()
-        self.puls = QTimer(self)
-        self.puls.setInterval(1000)
-        self.puls.timeout.connect(self._pulsieren)
-        self._puls_an = False
 
     # -- Rahmen ---------------------------------------------------------------
 
@@ -952,10 +903,6 @@ class Hauptfenster(QMainWindow):
                 pass
             self._schliessen_ohne_frage = True     # niemand da, der antworten koennte
             self.close()
-
-    def _pulsieren(self) -> None:
-        self._puls_an = not self._puls_an
-        klasse_setzen(self.haupt.aktuell, "mono-hell" if self._puls_an else "mono-leise")
 
     def meldung(self, text: str, gut: bool = False) -> None:
         if not text:
@@ -1053,14 +1000,16 @@ class Hauptfenster(QMainWindow):
 
     def rahmen(self) -> None:
         z = self.zustand
-        kuerzen(self.titel_ziel, z.get("ziel") or "kein Zielordner", max(200, self.width() - 260))
+        ziel = z.get("ziel") or ""
+        self.setWindowTitle(f"fotosort – {ziel}" if ziel else "fotosort")
+        kuerzen(self.titel_ziel, ("Archiv: " + ziel) if ziel else "kein Zielordner", max(200, self.width() - 520))
         laeuft = bool(self.lauf.get("zustand")) and self.lauf.get("zustand") not in ENDE
         archiv = z.get("archiv") or {}
         nr = (laeuft and self.lauf.get("lauf")) or archiv.get("lauf_nr") or 0
-        self.titel_lauf.setText(f"Lauf {nr}" if nr else "Lauf –")
-        self.leiste_db.setText("db " + ("lokal" if archiv.get("da") else "–"))
-        self.leiste_sicherung.setText("Sicherung " + (archiv.get("sicherung") or "–"))
-        self.leiste_sperre.setText("Archiv gesperrt · dieser Lauf" if laeuft else ("Archiv frei" if archiv.get("da") else ""))
+        self.titel_lauf.setText(f"Lauf {nr}" if nr else "")
+        self.leiste_db.setText("Merkliste auf diesem PC" if archiv.get("da") else "")
+        self.leiste_sicherung.setText(("Letzte Sicherung: " + archiv["sicherung"]) if archiv.get("sicherung") else "")
+        self.leiste_sperre.setText("Archiv in Arbeit" if laeuft else ("Bereit" if archiv.get("da") else ""))
         b = archiv.get("bericht") or {}
         self.haupt.bericht_name.setText(b.get("name") or "noch keiner")
         self.haupt.bericht_oeffnen.setEnabled(bool(b.get("txt")))
@@ -1272,12 +1221,12 @@ class Hauptfenster(QMainWindow):
         _leeren(self.haupt.pfade)
         quellen = list((z.get("archiv") or {}).get("quellen") or []) + list(z.get("quellen_neu") or [])
         for q in quellen:
-            self.haupt.pfade.addWidget(tag(q, "tag-mono", breite=300))
+            self.haupt.pfade.addWidget(tag(q, "tag", breite=300))
         self.haupt.pfade.addWidget(label("→", "pfeil"))
-        self.haupt.pfade.addWidget(tag(z.get("ziel") or "–", "tag-outline", breite=300))
+        self.haupt.pfade.addWidget(tag(z.get("ziel") or "–", "tag", breite=300))
         self.haupt.pfade.addStretch(1)
-        self.haupt.pfade.addWidget(tag(z.get("profil") or "hdd", "tag"))
-        self.haupt.pfade.addWidget(tag("verschieben" if z.get("verschieben") else "kopieren", "tag"))
+        art = {"hdd": "Festplatte", "ssd": "SSD", "netzwerk": "Netzwerk"}.get(z.get("profil") or "hdd", z.get("profil") or "")
+        self.haupt.pfade.addWidget(tag(f'{"Verschieben" if z.get("verschieben") else "Kopieren"}, {art}', "hinweis"))
 
     def lauf_starten(self, schritt: str) -> None:
         self.letzter_schritt = schritt or self.letzter_schritt
@@ -1289,7 +1238,6 @@ class Hauptfenster(QMainWindow):
         self.haupt.phasen.setzen(self.letzter_schritt, 0)
         self.haupt.karten_sperren(True)
         self.lauf_aktionen({"zustand": "startet"})
-        self.puls.start()
         self.poll.start()
         self.lauf_abfragen()
 
@@ -1306,14 +1254,13 @@ class Hauptfenster(QMainWindow):
                 # blinken, falls der Nutzer gerade woanders ist.
                 QApplication.alert(self, 0)
             self.poll.stop()
-            self.puls.stop()
             self.ruhe_zeigen(l)
 
     def lauf_fuellen(self, l: dict) -> None:
         anteil = l.get("anteil")
         self.haupt.balken.setzen(1.0 if l.get("zustand") in ENDE else (anteil or 0.0))
         self.haupt.kennzahlen_setzen(l)
-        self.haupt.aktuell.setText(f'{l.get("schritt_name") or ""} · {l.get("zustand_text") or ""}')
+        self.haupt.aktuell.setText(f'{l.get("schritt_name") or ""}: {l.get("zustand_text") or ""}')
         self.haupt.phasen.setzen(l.get("schritt") or "", anteil or 0.0)
         if l.get("zustand") not in ENDE:
             self.lauf_aktionen(l)
@@ -1387,8 +1334,7 @@ class Hauptfenster(QMainWindow):
         h = self.haupt
         h.balken.setzen(1.0)
         h.kennzahlen_setzen(lauf if lauf.get("zustand") in ENDE else None)
-        h.aktuell.setText(f'{zf.get("name") or ""} · {lauf.get("zustand_text") if lauf.get("zustand") in ENDE and lauf.get("schritt") == letzter else "erledigt"}')
-        klasse_setzen(h.aktuell, "mono-leise")
+        h.aktuell.setText(f'{zf.get("name") or ""}: {lauf.get("zustand_text") if lauf.get("zustand") in ENDE and lauf.get("schritt") == letzter else "erledigt"}')
         h.zaehler.setzen(zf.get("zeilen") or [])
         if lauf.get("log") and lauf.get("schritt") == letzter:
             h.log.setPlainText(lauf["log"])
@@ -1421,9 +1367,9 @@ class Hauptfenster(QMainWindow):
         elif s == "pruefen":
             eintraege.append(("Prüfen starten", "primary", lambda: self.schritt_starten("pruefen"), True))
         elif s == "kopieren":
-            eintraege.append((f'{"Verschieben" if v else "Kopieren"} starten · {meldungen.anzahl(n.get("n", 0))} Dateien', "primary", lambda: self.kopieren_starten(n), True))
+            eintraege.append((f'{"Verschieben" if v else "Kopieren"} starten ({meldungen.anzahl(n.get("n", 0))} Dateien)', "primary", lambda: self.kopieren_starten(n), True))
         elif s == "aufraeumen":
-            eintraege.append(("Aufräumen · Wort rechts eintippen", "primary", lambda: self.haupt.auf_wort.setFocus(), True))
+            eintraege.append(("Aufräumen: Wort rechts eintippen", "primary", lambda: self.haupt.auf_wort.setFocus(), True))
         else:
             eintraege.append(("Bericht öffnen", "primary", lambda: self.bericht_oeffnen("neu"), True))
         if zf.get("fehler"):
@@ -1517,11 +1463,11 @@ class Hauptfenster(QMainWindow):
         if plan:
             for q in plan["je_quelle"]:
                 zeile = QHBoxLayout()
-                p = label("", "mono-hell")
+                p = label("")
                 kuerzen(p, q["wurzel"], 165)
                 zeile.addWidget(p)
                 zeile.addStretch(1)
-                zeile.addWidget(label(f'{q["n_text"]} · {q["groesse"]}', "hell"))
+                zeile.addWidget(label(f'{q["n_text"]}, {q["groesse"]}', "hell"))
                 h.auf_quellen.addLayout(zeile)
             h.woerter = dict(plan.get("woerter") or h.woerter)
         else:
@@ -1876,9 +1822,7 @@ def starten(ziel: str | None, selbsttest: bool = False, durchlauf: tuple[str, st
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("fotosort")
     app.setApplicationDisplayName("fotosort")
-    stil.schriften_laden()
-    app.setFont(stil.grundschrift())
-    app.setStyleSheet(stil.STYLESHEET)
+    stil.einrichten(app)
     app.setWindowIcon(stil.programm_symbol())
     meldungsfenster.excepthook_einrichten(protokoll)
 

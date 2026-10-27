@@ -58,7 +58,7 @@ def test_startseite_kennt_archiv_und_quellen(app, tmp_path, quelle, ziel):
     f.show()
     _ereignisse(app, 0.3)
     f.start.ziel_setzen(str(ziel))
-    assert ab.ziel == str(ziel) and "NEUES ARCHIV" == f.start.karte.kicker.text()
+    assert ab.ziel == str(ziel) and "Neues Archiv" == f.start.karte.kicker.text()
     f.quelle_hinzufuegen(str(quelle))
     assert ab.quellen == [str(quelle)]
     f.quelle_hinzufuegen(str(ziel))          # Quelle = Ziel: abgelehnt, als Meldung
@@ -116,7 +116,7 @@ def test_rueckfragen_und_archiv_verwerfen_im_fenster(app, tmp_path, quelle, ziel
     assert f.ab.lauf_status()["zustand"] == "fertig"
 
     f.laden("start")
-    assert f.start.verwerfen.isVisible() and f.start.karte.kicker.text() == "ANGEFANGENES ARCHIV"
+    assert f.start.verwerfen.isVisible() and f.start.karte.kicker.text() == "Angefangenes Archiv"
     kopie = ziel / "2026" / "bild.jpg"
     kopie.parent.mkdir()
     kopie.write_bytes(b"bild")
@@ -223,11 +223,52 @@ def test_selbsttest_des_fensters(capsys):
 
 
 def test_stil_schrift_und_symbol(app):
-    assert stil.schriften_laden() is True
-    from PySide6.QtGui import QFontDatabase
-    assert "Inter" in QFontDatabase.families()
     assert stil.symbol(32).width() == 32 and not stil.programm_symbol().isNull()
-    assert "#161826" in stil.STYLESHEET and "Segoe UI" in stil.STYLESHEET
+
+
+def test_aussehen_wie_ein_windows_programm(app, tmp_path, quelle, ziel):
+    """Entscheidung des Nutzers vom 27.10.2026: Das Fenster soll nicht nach KI
+    aussehen, sondern wie ein Windows-11-Programm. Also: Grundstil des Systems
+    (unter Windows "windows11", sonst Fusion), Farben aus der Palette des
+    Systems (hell oder dunkel wie Windows), keine Schreibmaschinenschrift,
+    keine Ueberschriften in Grossbuchstaben, keine Punkt-Trenner "·"."""
+    from PySide6.QtWidgets import QAbstractButton, QLabel, QLineEdit
+    stil.einrichten(app)
+    erwartet = "windows11" if sys.platform.startswith("win") else "fusion"
+    assert app.property("fotosort_grundstil") == erwartet == stil.grundstil()
+    blatt = app.styleSheet()
+    import re
+    assert not re.search(r"#[0-9a-fA-F]{6}\b|rgba\(", blatt.replace(stil.gedaempft_farbe(app.palette()), "")), blatt
+    for verboten in ("monospace", "letter-spacing", "Inter", "Consolas"):
+        assert verboten not in blatt, verboten
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    _ereignisse(app, 0.2)
+
+    def texte():
+        for w in f.findChildren(QLabel) + f.findChildren(QAbstractButton) + f.findChildren(QLineEdit):
+            t = w.text() if not isinstance(w, QLineEdit) else w.placeholderText()
+            if t:
+                yield w, t
+            assert "monospace" not in (w.styleSheet() or "")
+            assert w.font().family() not in ("Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Inter")
+
+    def pruefen():
+        for w, t in texte():
+            assert "·" not in t, (type(w).__name__, t)
+            buchstaben = [c for c in t if c.isalpha()]
+            assert not (len(buchstaben) > 3 and all(c.isupper() for c in buchstaben)), (type(w).__name__, t)
+
+    pruefen()
+    f.start.weitermachen.click()
+    _bis_im_fenster(app, f.in_ruhe, 30)
+    pruefen()
+    f.close()
 
 
 def test_meldungsfenster_texte(tmp_path, monkeypatch):
@@ -275,7 +316,7 @@ def test_startseite_bietet_das_zurueckholen_der_datenbank_an(app, tmp_path, quel
     f.show()
     _ereignisse(app, 0.3)
     f.start.ziel_setzen(str(ziel))
-    assert f.start.karte.kicker.text() == "ARCHIV OHNE MERKLISTE"
+    assert f.start.karte.kicker.text() == "Archiv ohne Merkliste"
     assert f.start.rettung.isVisible() and f.start.rettung.text() == "Datenbank zurückholen…"
     assert not f.start.weitermachen.isVisible()
     antworten.append((False, ""))
@@ -285,7 +326,7 @@ def test_startseite_bietet_das_zurueckholen_der_datenbank_an(app, tmp_path, quel
     f.rettung()                                            # -> Zurueckholen
     assert (lokal / "fotosort.db").is_file()
     assert "zurückgeholt" in f.meldung_label.text()
-    assert not f.start.rettung.isVisible() and f.start.karte.kicker.text() == "ANGEFANGENES ARCHIV"
+    assert not f.start.rettung.isVisible() and f.start.karte.kicker.text() == "Angefangenes Archiv"
     assert f.start.weitermachen.isVisible() and f.start.weitermachen.text().startswith("Weitermachen")
     assert not antworten
     f.close()
@@ -369,7 +410,7 @@ def test_fehlender_gemerkter_zielordner_ist_kein_neues_archiv(app, tmp_path, mon
     f = desktop.Hauptfenster(ab)
     weg = tmp_path / "Archiv auf der USB-Platte"
     f.start.ziel_setzen(str(weg))
-    assert f.start.karte.kicker.text() == "ZIELORDNER NICHT GEFUNDEN"
+    assert f.start.karte.kicker.text() == "Zielordner nicht gefunden"
     assert "angeschlossen" in f.start.archiv_text.text()
     assert "angeschlossen" in meldungen.ob_frage_ziel_anlegen(weg)
     f.close()

@@ -1,7 +1,10 @@
 # Bildschirmfotos der Oberfläche
 
 Jede Ansicht des Programmfensters (PySide6/Qt, 1180 × 800), erzeugt am künstlichen Testbaum
-aus SPEC §11 — nie mit echten Fotos. So entstehen sie, ohne Bildschirm (Qt offscreen):
+aus SPEC §11 — nie mit echten Fotos. Seit v0.10 sieht das Fenster aus wie ein normales
+Windows-Programm. Die Bilder entstehen im Linux-Container und zeigen deshalb den Grundstil
+„Fusion“ in Hell. Unter Windows 11 stehen dort die Knöpfe, Felder und die Akzentfarbe von Windows,
+hell oder dunkel wie eingestellt. So entstehen sie, ohne Bildschirm (Qt offscreen):
 
 ```
 QT_QPA_PLATFORM=offscreen fotosort fenster --durchlauf <Ziel> <Quelle> --fotos docs/oberflaeche
@@ -16,7 +19,7 @@ der CI gegen das Windows-Paket.
 |---|---|
 | [01](01-startseite-leer.png) | Startseite, leer |
 | [02](02-startseite-ausgefuellt.png) | Startseite mit Ziel, Quelle, Modus und Profil |
-| [03](03-uebersicht-nach-scan.png) | Übersicht nach dem Scan (Phasenleiste, Zähler, Karten) |
+| [03](03-uebersicht-nach-scan.png) | Übersicht nach dem Scan (Schritte, Zähler, Karten) |
 | [04](04-uebersicht-nach-analyse-kameras.png) | Übersicht nach der Analyse mit Kamera-Tabelle (Alias tippbar) |
 | [05](05-laufender-schritt-kopieren.png) | Laufender Schritt: Balken, Kennzahlen, Pause/Abbrechen |
 | [06](06-laufender-schritt-pause.png) | Laufender Schritt angehalten |

@@ -64,7 +64,7 @@ Culling/ (Repository-Wurzel)
 │     ├─ ablauf.py           Zustand, Arbeitsprozess (fotosort arbeit), Zusammenfassungen und Listen
 │     ├─ desktop.py          das Desktop-Fenster (PySide6/Qt): Reiter „Archiv“ und „Sichten“, Seiten, Ordnerdialoge, Selbsttest, Durchlauf
 │     ├─ sichtfenster.py     Reiter „Sichten“: Ordnerbaum, Vorschaubilder im Hintergrund, große Ansicht, Tasten (v0.8)
-│     ├─ stil.py             Nocturne als Qt-Stylesheet, Inter-Schrift laden, Programmsymbol
+│     ├─ stil.py             Aussehen wie Windows 11: Grundstil und Palette des Systems, Programmsymbol
 │     ├─ meldungsfenster.py  Startfehler als verständliches Meldungsfenster (ctypes), excepthook
 │     ├─ server.py           FastAPI-Schnittstelle der Browser-Fassung (nur 127.0.0.1, Origin-Prüfung)
 │     ├─ fenster.py          Einstieg: Desktop-Fenster oder --ohne-fenster (Server für Phase 8)

@@ -2527,8 +2527,8 @@ SICHTEN_KEIN_ARCHIV = (
     "in dem schon Fotos liegen, die das Programm übernommen hat."
 )
 SICHTEN_TASTEN = (
-    "Tasten: 0–5 Sterne · P Auswahl · X Ausschuss · U Markierung aufheben · "
-    "Eingabe große Ansicht · Esc zurück. Es wird nichts gelöscht oder verschoben – "
+    "Tasten: 0 bis 5 für Sterne, P für Auswahl, X für Ausschuss, U hebt die Markierung auf, "
+    "Eingabe zeigt das Bild groß, Esc geht zurück. Es wird nichts gelöscht oder verschoben – "
     "Ausschuss ist nur eine Markierung."
 )
 SICHTEN_ORDNER_WAEHLEN = "Links einen Ordner wählen."
@@ -2545,7 +2545,7 @@ def sichten_ordner_zahlen(gezeigt: int, alle: int, bewertet: int, auswahl: int, 
     teile.append(f"{anzahl(bewertet)} mit Sternen")
     teile.append(f"{anzahl(auswahl)} Auswahl")
     teile.append(f"{anzahl(ausschuss)} Ausschuss")
-    return " · ".join(teile)
+    return ", ".join(teile)
 
 
 # ------------------------------------------- Programm beenden (v0.9) ----

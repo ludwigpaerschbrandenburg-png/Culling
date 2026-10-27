@@ -837,6 +837,20 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 
 ---
 
+## Phase 11 — Aussehen wie ein Windows-Programm (Version 0.10)
+
+**Entschieden am 27.10.2026:** „Lass das Overlay nicht wie von einer KI aussehen.“ Auf Nachfrage:
+**wie Windows 11** – folgt hell/dunkel von Windows, Windows-Schrift, normale Windows-Knöpfe und
+-Farben. Version 0.9 kam vorher mit dem alten Aussehen heraus.
+
+- [x] Grundstil `windows11` unter Windows, sonst Fusion; Palette des Systems, Wechsel hell/dunkel im Lauf.
+- [x] Keine Schreibmaschinenschrift, keine Großbuchstaben-Überschriften, keine Punkt-Trenner, keine Leuchtlinien.
+- [x] Optionsfelder statt Schaltflächen-Leisten, Fortschrittsbalken und Statusleiste von Windows, Reiter mit Unterstrich.
+- [x] Schlichtes Foto-Symbol statt lila Kachel.
+- [x] Test `test_aussehen_wie_ein_windows_programm`; Bildschirmfotos neu.
+- [ ] Volle Tests, CI, Release v0.10.
+- [ ] Später (mit Phase 8): Browser-Fassung im selben schlichten Stil.
+
 ## Ohne feste Phase
 
 - [ ] Nichts offen.
