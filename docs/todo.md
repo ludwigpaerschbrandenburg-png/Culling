@@ -812,6 +812,10 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 
 5. Bilder der Quelle, die schon im Archiv lagen („bereits importiert“), werden nie aus der
    Quelle entfernt – weder beim Aufräumen noch beim Verschieben. Nur ihre Zahl wird gemeldet.
+   Umgesetzt so: „bereits importiert“ heißt, der Inhalt lag im Archiv, bevor das Programm die
+   Quelldatei fand. Was das Programm selbst danach abgelegt hat (auch nach einem Neustart
+   mitten im Kopieren), zählt als Doppeltes innerhalb der Quellen. Die XMP-Datei eines
+   bereits importierten Bildes bleibt mit ihm in der Quelle.
 
 ### Runde 3a: Grundwünsche (Version 0.9)
 

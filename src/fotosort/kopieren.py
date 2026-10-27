@@ -239,17 +239,17 @@ def _neuer_zielpfad(struktur, dbank: db.Datenbank, zeile, konf) -> Path:
 VORAB = 64 * 1024
 
 
-def _gleicher_rand(a: Path, b: Path, groesse: int) -> bool:
-    """Gleiche Anfangs- und End-Bytes? Nur ein schneller Vorfilter: Gleich
-    heisst hier "vielleicht gleich", entschieden wird ueber den Hash."""
-    with open(_L(a), "rb") as fa, open(_L(b), "rb") as fb:
-        if fa.read(VORAB) != fb.read(VORAB):
-            return False
+def _rand_abdruck(p: Path, groesse: int) -> bytes:
+    """Abdruck von Anfang und Ende einer Datei (je VORAB Bytes). Nur ein
+    schneller Vorfilter: Gleich heisst hier "vielleicht gleich", entschieden
+    wird ueber den Hash der ganzen Datei."""
+    h = hashes._neuer_hash()
+    with open(_L(p), "rb") as f:
+        h.update(f.read(VORAB))
         if groesse > 2 * VORAB:
-            fa.seek(-VORAB, os.SEEK_END)
-            fb.seek(-VORAB, os.SEEK_END)
-            return fa.read(VORAB) == fb.read(VORAB)
-    return True
+            f.seek(-VORAB, os.SEEK_END)
+            h.update(f.read(VORAB))
+    return h.digest()
 
 
 def _L(p: Path) -> Path:
@@ -519,6 +519,9 @@ class _Lauf:
         # Runde noch aussteht: Ein inhaltsgleiches Duplikat aus derselben
         # Runde findet seinen Partner so auch vor dem Eintrag im Ziel-Index.
         self.hash_anstehend: dict[str, tuple[Path, int]] = {}
+        # Abdruck von Anfang und Ende gleich grosser Archivdateien (Schritt c):
+        # je Lauf einmal gelesen, nicht einmal je Quelldatei.
+        self.rand_abdruecke: dict[str, bytes] = {}
         self.wartend: deque[tuple[_Quelle, list]] = deque()
         self.weg: set[str] = set()             # Quellwurzeln, die mitten im Lauf verschwunden sind
         self.ergebnis = Ergebnis()
@@ -701,7 +704,9 @@ class _Lauf:
         Liefert die Auftraege, die doch kopiert werden muessen (KeinNoReplace)."""
         e = self.ergebnis
         rest: list[_Auftrag] = []
-        for a in auftraege:
+        doch_kopieren: list[_Auftrag] = []
+        # Begleitdateien zuletzt: Ob ihr Bild schon im Archiv liegt, steht dann fest.
+        for a in sorted(auftraege, key=lambda a: a.zeile["dateityp"] == "sidecar"):
             st = _stat(a.quelle)
             if st is None:
                 self._quelle_fehlt(a)
@@ -727,6 +732,11 @@ class _Lauf:
                     if self.anzeige:
                         self.anzeige.weiter(1, 0)
                     continue
+            if a.zeile["dateityp"] == "sidecar" and self.dbank.gruppe_bereits_importiert(a.zeile["gruppe"]):
+                # Das Bild bleibt in der Quelle (bereits importiert), seine
+                # Begleitdatei auch: kopieren statt umbenennen.
+                doch_kopieren.append(a)
+                continue
             if a.zeile["dateityp"] != "sidecar" and self.dbank.ziel_index_groesse_bekannt(int(a.zeile["groesse"])):
                 # Seit v0.9: Liegt eine gleich grosse Datei im Archiv, vor dem
                 # Umbenennen pruefen, ob der Inhalt schon da ist ("bereits
@@ -749,9 +759,9 @@ class _Lauf:
                     continue
             rest.append(a)
         if not rest:
-            return []
+            return doch_kopieren
         anhang = self._freier_anhang(rest, ab=0)
-        kopieren_stattdessen: list[_Auftrag] = []
+        kopieren_stattdessen: list[_Auftrag] = doch_kopieren
         for a in rest:
             k = anhang
             while True:
@@ -1031,7 +1041,11 @@ class _Lauf:
             if partner is not None:
                 _entfernen_eigene(a.schreibziel)
                 self.in_arbeit.discard(a.ziel)
-                self.dbank.duplikat_setzen(a.zeile["quellpfad"], partner, a.ergebnis.hash, self.lauf)
+                # Partner wird in diesem Lauf gerade erst abgelegt: kein "bereits importiert".
+                anstehend = self.hash_anstehend.get(a.ergebnis.hash)
+                gerade = anstehend is not None and db.pfad_text(anstehend[0]) == db.pfad_text(partner)
+                self.dbank.duplikat_setzen(a.zeile["quellpfad"], partner, a.ergebnis.hash, self.lauf,
+                                           partner_im_durchgang=True if gerade else None)
                 self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(partner))
                 e.duplikate += 1
                 e.bearbeitet += 1
@@ -1120,30 +1134,40 @@ class _Lauf:
         #    gleich ist, und das parallel mit den Hash-Workern. Abbruch und
         #    "Fenster zu" greifen auch hier (steuerung.wuensche_pruefen).
         kandidaten: list[Path] = []
+        eigener: bytes | None = None
         for eintrag in self.dbank.ziel_index_ungelesen_nach_groesse(groesse):
             steuerung.wuensche_pruefen()
             p = Path(db.text_pfad(eintrag["zielpfad"]))
-            if db.pfad_text(p) == db.pfad_text(ausser):
+            schluessel = db.pfad_text(p)
+            if schluessel == db.pfad_text(ausser):
                 continue
-            if _stat(p) is None:
-                self.dbank.ziel_index_entfernen(p)
-                continue
+            abdruck = self.rand_abdruecke.get(schluessel)
             try:
-                if not _gleicher_rand(quelle, p, groesse):
-                    continue
+                if abdruck is None:
+                    if _stat(p) is None:
+                        self.dbank.ziel_index_entfernen(p)
+                        continue
+                    abdruck = self.rand_abdruecke[schluessel] = _rand_abdruck(p, groesse)
+                if eigener is None:
+                    eigener = _rand_abdruck(quelle, groesse)
             except OSError:
                 continue
-            kandidaten.append(p)
+            if abdruck == eigener:
+                kandidaten.append(p)
         laufend = [(p, self.hasher.submit(hashes.blake3_datei, _L(p), self.stop)) for p in kandidaten]
-        for p, zukunft in laufend:
-            steuerung.wuensche_pruefen()
-            try:
-                vorhanden = zukunft.result()
-            except (OSError, hashes.Abgebrochen):
-                continue
-            self.index_nachtragen(p, vorhanden)
-            if vorhanden == h:
-                return p
+        try:
+            for p, zukunft in laufend:
+                steuerung.wuensche_pruefen()
+                try:
+                    vorhanden = zukunft.result()
+                except (OSError, hashes.Abgebrochen):
+                    continue
+                self.index_nachtragen(p, vorhanden)
+                if vorhanden == h:
+                    return p
+        finally:
+            for _, zukunft in laufend:
+                zukunft.cancel()      # Treffer oder Abbruch: Wartende nicht mehr lesen
         return None
 
     def _endgueltig(self, a: _Auftrag, anhang: int, vorgemerkt: bool = False) -> None:
@@ -1205,7 +1229,8 @@ class _Lauf:
         if anhang > 0:
             e.namenskonflikte += 1
             self.dbank.ereignis(self.lauf, ART_NAMENSKONFLIKT, a.quelle, 1, db.pfad_text(endname))
-        if self.verschieben:
+        if self.verschieben and not self.dbank.schon_im_archiv(a.zeile["quellpfad"]):
+            # Bereits Importiertes (und seine Begleitdatei) bleibt in der Quelle.
             self.nachpruefung_einreihen(a, endname)
 
     def _anstehend_erledigt(self, a: _Auftrag, endname: Path | None) -> None:

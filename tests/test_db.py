@@ -838,3 +838,83 @@ def test_echte_anhebung_von_v08_bringt_die_spalte_schon_im_archiv(tmp_path):
     finally:
         d.schliessen()
     assert db.vor_schema_pfad(db.datenbank_pfad(ordner), 6).is_file()
+
+
+def test_bereits_importiert_heisst_vor_dem_durchgang_im_archiv(datenbank):
+    """Pruefer-Befund (v0.9): "bereits importiert" (schon_im_archiv) heisst:
+    Der Inhalt lag im Archiv, bevor das Programm diese Quelldatei fand. Legt
+    das Programm den Partner erst danach ab - auch in einem spaeteren Lauf,
+    etwa nach "Fenster zu" mitten im Kopieren -, ist es ein Doppeltes
+    innerhalb der Quellen. Eine Zeile, die den Namen nur geplant hat
+    (kopieren_laeuft), zaehlt nicht als abgelegt."""
+    d = datenbank
+    scan = d.lauf_beginnen("scan")
+    for n in ("a", "b", "c"):
+        d.datei_gesehen(f"/q/{n}.jpg", "/q", 100, 1000.0, "foto", scan)
+    kopieren1 = d.lauf_beginnen("kopieren")
+    d.kopiert_setzen("/q/a.jpg", "/z/2021/a.jpg", "h1", kopieren1)
+    kopieren2 = d.lauf_beginnen("kopieren")           # nach einem Neustart
+    d.duplikat_setzen("/q/b.jpg", "/z/2021/a.jpg", "h1", kopieren2)
+    assert d.zeile("/q/b.jpg")["schon_im_archiv"] == 0
+    # Nur geplant (kopieren_laeuft), nicht abgelegt: zaehlt nicht.
+    d.kopieren_beanspruchen("/q/c.jpg", "/z/2021/x.jpg", "/z/2021/x.jpg", kopieren2)
+    d.datei_gesehen("/q/d.jpg", "/q", 100, 1000.0, "foto", scan)
+    d.duplikat_setzen("/q/d.jpg", "/z/2021/x.jpg", "h2", kopieren2)
+    assert d.zeile("/q/d.jpg")["schon_im_archiv"] == 1
+    # Eine Quelle, die erst nach dem Ablegen gefunden wurde: bereits importiert.
+    spaeter = d.lauf_beginnen("scan")
+    d.datei_gesehen("/q2/e.jpg", "/q2", 100, 1000.0, "foto", spaeter)
+    d.duplikat_setzen("/q2/e.jpg", "/z/2021/a.jpg", "h1", d.lauf_beginnen("kopieren"))
+    assert d.zeile("/q2/e.jpg")["schon_im_archiv"] == 1
+    # Ausdruecklich vom Kopieren genannt (Partner wird gerade abgelegt): kein Import.
+    d.datei_gesehen("/q2/f.jpg", "/q2", 100, 1000.0, "foto", spaeter)
+    d.duplikat_setzen("/q2/f.jpg", "/z/2021/y.jpg", "h3", kopieren2, partner_im_durchgang=True)
+    assert d.zeile("/q2/f.jpg")["schon_im_archiv"] == 0
+    # Quelle veraendert (neu einordnen): die Markierung faellt, der Inhalt ist neu.
+    d.zurueck_auf_gefunden("/q2/e.jpg", 120, 2000.0)
+    assert d.zeile("/q2/e.jpg")["schon_im_archiv"] == 0
+
+
+def test_bereits_importiert_gilt_auch_fuer_die_begleitdatei(datenbank):
+    """Die Begleitdatei (XMP) eines bereits importierten Bildes bleibt mit ihm
+    in der Quelle (Entscheidung vom 27.10.2026: nie anfassen)."""
+    d = datenbank
+    scan = d.lauf_beginnen("scan")
+    d.datei_gesehen("/q/a.jpg", "/q", 100, 1000.0, "foto", scan)
+    d.datei_gesehen("/q/a.xmp", "/q", 10, 1000.0, "sidecar", scan)
+    d.datei_gesehen("/q/b.xmp", "/q", 10, 1000.0, "sidecar", scan)
+    for qp, gruppe in (("/q/a.jpg", "/q/a.jpg"), ("/q/a.xmp", "/q/a.jpg"), ("/q/b.xmp", "/q/b.jpg")):
+        d.verbindung.execute("UPDATE dateien SET gruppe = ? WHERE quellpfad = ?", (gruppe, qp))
+    d.duplikat_setzen("/q/a.jpg", "/z/von_hand/a.jpg", "h1", d.lauf_beginnen("kopieren"))
+    assert d.zeile("/q/a.jpg")["schon_im_archiv"] == 1
+    assert d.zeile("/q/a.xmp")["schon_im_archiv"] == 1
+    assert d.zeile("/q/b.xmp")["schon_im_archiv"] == 0
+
+
+def test_anhebung_von_v08_markiert_vorher_vorhandene_duplikate(tmp_path):
+    """Eine v0.8-Datenbank mitten im Durchgang: Duplikate, deren Partner das
+    Programm nach dem Fund abgelegt hat, bleiben 0; die uebrigen (Inhalt lag
+    schon im Archiv) werden 1 - sonst raeumte das Aufraeumen sie weg."""
+    ordner = tmp_path / "v08"
+    d = db.Datenbank.oeffnen(ordner)
+    scan = d.lauf_beginnen("scan")
+    for n in ("a", "b", "c"):
+        d.datei_gesehen(f"/q/{n}.jpg", "/q", 100, 1000.0, "foto", scan)
+    k = d.lauf_beginnen("kopieren")
+    d.kopiert_setzen("/q/a.jpg", "/z/a.jpg", "h1", k)
+    d.stapel_schreiben()
+    for qp, partner in (("/q/b.jpg", "/z/a.jpg"), ("/q/c.jpg", "/z/von_hand.jpg")):
+        d.verbindung.execute(
+            "UPDATE dateien SET status = 'duplikat', zielpfad = ?, hash = 'h', kopiert_in_lauf = ? WHERE quellpfad = ?",
+            (partner, k, qp))
+    d.verbindung.execute("DROP TABLE abgelegt")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
+    d.verbindung.execute("PRAGMA user_version=6")
+    d.verbindung.commit()
+    d.schliessen()
+    d = db.Datenbank.oeffnen(ordner)
+    try:
+        assert d.zeile("/q/b.jpg")["schon_im_archiv"] == 0
+        assert d.zeile("/q/c.jpg")["schon_im_archiv"] == 1
+    finally:
+        d.schliessen()

@@ -220,3 +220,52 @@ def test_verschieben_laesst_bereits_importiertes_stehen(baum, quelle, ziel, nach
     assert _cli("pruefen", "--ziel", ziel) == cli.OK
     assert analog.exists()
     assert _zeilen(nachschauen, ziel)[str(analog)]["schon_im_archiv"] == 1
+
+
+@pytest.mark.parametrize("verschieben", [False, True])
+def test_begleitdatei_eines_bereits_importierten_bildes_bleibt(baum, quelle, ziel, nachschauen, antwort, verschieben):
+    """Pruefer-Befund (v0.9): Liegt ein Bild schon im Archiv, bleibt auch
+    seine XMP-Datei in der Quelle - beim Aufraeumen und beim Verschieben."""
+    jpg = Path(baum["sidecar_form1"]).with_suffix(".JPG")
+    if not jpg.exists():
+        jpg = next(p for p in Path(baum["sidecar_form1"]).parent.iterdir() if p.suffix.lower() == ".jpg")
+    xmp = Path(baum["sidecar_form1"])
+    _archiv_von_hand(ziel, jpg)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.OK
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    args = ("--verschieben",) if verschieben else ()
+    assert _cli("kopieren", "--ziel", ziel, *args) == cli.OK
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
+    zeilen = _zeilen(nachschauen, ziel)
+    assert zeilen[str(jpg)]["schon_im_archiv"] == 1
+    assert zeilen[str(xmp)]["schon_im_archiv"] == 1, zeilen[str(xmp)]["status"]
+    assert zeilen[str(xmp)]["status"] != "fehler", zeilen[str(xmp)]["fehlergrund"]
+    if not verschieben:
+        antwort.append("loeschen")
+        assert _cli("aufraeumen", "--ziel", ziel, "--endgueltig") == cli.OK
+    assert jpg.exists() and xmp.exists()
+
+
+def test_jede_gleich_grosse_archivdatei_wird_nur_einmal_angelesen(tmp_path, ziel, nachschauen, monkeypatch):
+    """Pruefer-Befund (v0.9): Bei vielen gleich grossen Quell- UND Archivdateien
+    (unkomprimierte RAWs) wird der Anfang und das Ende jeder Archivdatei nur
+    einmal je Lauf gelesen, nicht einmal je Quelldatei."""
+    import testbaum
+    from fotosort import kopieren
+    q = tmp_path / "Q"
+    quellen = [testbaum._schreiben(q / f"NEU_{i}.jpg", testbaum._JPEG + bytes([i + 1]) * 300_000) for i in range(6)]
+    groesse = quellen[0].stat().st_size
+    ordner = ziel / "2019"
+    ordner.mkdir(parents=True)
+    for i in range(15):
+        (ordner / f"RAW_{i:04d}.JPG").write_bytes(bytes([200 + i]) * groesse)
+    assert _cli("scan", "--ziel", ziel, "--quelle", q) == cli.OK
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    angelesen: list = []
+    echt = kopieren._rand_abdruck
+    monkeypatch.setattr(kopieren, "_rand_abdruck", lambda p, g: angelesen.append(str(p)) or echt(p, g))
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    archiv = [p for p in angelesen if "RAW_" in p]
+    assert archiv and len(archiv) == len(set(archiv)), sorted(archiv)
+    zeilen = _zeilen(nachschauen, ziel)
+    assert all(zeilen[str(p)]["status"] == "kopiert" for p in quellen)

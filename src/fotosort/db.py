@@ -91,7 +91,20 @@ SCHEMA_VERSION = 7
 MIGRATIONEN: dict[int, tuple[str, ...]] = {
     # v0.9: Bilder, deren Inhalt schon im Archiv lag, bevor der Durchgang sie
     # sah ("bereits importiert") - werden nie aus der Quelle entfernt.
-    6: ("ALTER TABLE dateien ADD COLUMN schon_im_archiv INTEGER NOT NULL DEFAULT 0",),
+    # Dazu die Tabelle abgelegt: wo das Programm selbst eine Datei abgelegt
+    # hat, und in welchem Lauf. Aeltere Zeilen werden aus dateien nachgetragen;
+    # Duplikate, deren Partner das Programm erst nach ihrem Fund abgelegt hat,
+    # bleiben 0 (Doppelte innerhalb der Quellen), alle uebrigen werden 1.
+    6: (
+        "ALTER TABLE dateien ADD COLUMN schon_im_archiv INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE IF NOT EXISTS abgelegt (zielpfad TEXT PRIMARY KEY, lauf INTEGER NOT NULL)",
+        "INSERT OR IGNORE INTO abgelegt (zielpfad, lauf) SELECT zielpfad, MAX(kopiert_in_lauf) FROM dateien"
+        " WHERE status IN ('kopiert', 'geprueft', 'verschoben', 'quelle_geloescht') AND zielpfad != ''"
+        " AND kopiert_in_lauf IS NOT NULL GROUP BY zielpfad",
+        "UPDATE dateien SET schon_im_archiv = 1 WHERE status IN ('duplikat', 'duplikat_bestaetigt')"
+        " AND NOT EXISTS (SELECT 1 FROM abgelegt a WHERE a.zielpfad = dateien.zielpfad"
+        "   AND dateien.gefunden_in_lauf IS NOT NULL AND a.lauf >= dateien.gefunden_in_lauf)",
+    ),
 }
 VOR_SCHEMA = "fotosort.db.vor_schema_"   # Sicherung vor einer Anhebung, nie geloescht
 
@@ -144,6 +157,12 @@ DROP INDEX IF EXISTS dateien_wurzel;
 DROP INDEX IF EXISTS dateien_zielpfad;
 CREATE INDEX IF NOT EXISTS dateien_hash ON dateien (hash);
 CREATE INDEX IF NOT EXISTS dateien_gruppe ON dateien (quellwurzel, gruppe, quellpfad);
+-- Wo das Programm selbst eine Datei abgelegt hat (kopiert oder verschoben),
+-- und in welchem Lauf (seit v0.9, fuer "bereits importiert").
+CREATE TABLE IF NOT EXISTS abgelegt (
+    zielpfad TEXT PRIMARY KEY,
+    lauf     INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ziel_index (
     zielpfad                TEXT PRIMARY KEY,
     groesse                 INTEGER NOT NULL DEFAULT 0,
@@ -881,7 +900,7 @@ class Datenbank:
         self.verbindung.execute(
             "UPDATE dateien SET quellwurzel = ?, groesse = ?, mtime = ?, dateityp = ?,"
             " hash = '', zielpfad = '', bestaetigt_in_lauf = NULL,"
-            " status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?"
+            " status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?, schon_im_archiv = 0"
             " WHERE quellpfad = ?",
             (quellwurzel, int(groesse), float(mtime), dateityp, lauf, quellpfad),
         )
@@ -1252,29 +1271,65 @@ class Datenbank:
             " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
             (pfad_text(zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
+        self._abgelegt_merken(zielpfad, lauf)
         self._vielleicht_schreiben()
 
-    def duplikat_setzen(self, quellpfad, partner_zielpfad, hash_: str, lauf: int) -> None:
+    def _abgelegt_merken(self, zielpfad, lauf: int) -> None:
+        self.verbindung.execute(
+            "INSERT INTO abgelegt (zielpfad, lauf) VALUES (?, ?)"
+            " ON CONFLICT(zielpfad) DO UPDATE SET lauf = excluded.lauf",
+            (pfad_text(zielpfad), lauf),
+        )
+
+    def duplikat_setzen(self, quellpfad, partner_zielpfad, hash_: str, lauf: int,
+                        partner_im_durchgang: bool | None = None) -> None:
         """Inhaltsgleiche Datei liegt schon im Ziel: nicht kopiert, zielpfad = Partner.
 
-        schon_im_archiv (seit v0.9): 1, wenn der Partner nicht in diesem Lauf
-        vom Programm abgelegt wurde - der Inhalt lag schon im Archiv ("bereits
-        importiert"). Solche Quelldateien werden nie entfernt (Entscheidung
-        des Nutzers vom 27.10.2026). Doppelte innerhalb der Quellen: 0."""
+        schon_im_archiv (seit v0.9): 1, wenn der Inhalt schon im Archiv lag,
+        bevor das Programm diese Quelldatei fand ("bereits importiert") -
+        der Partner wurde nicht vom Programm nach ihrem Fund abgelegt
+        (Tabelle abgelegt; auch ein spaeterer Lauf zaehlt, etwa nach "Fenster
+        zu" mitten im Kopieren). Solche Quelldateien werden nie entfernt,
+        ihre Begleitdateien (XMP) auch nicht (Entscheidung des Nutzers vom
+        27.10.2026). Doppelte innerhalb der Quellen: 0. partner_im_durchgang:
+        vom Kopieren gesetzt, wenn der Partner gerade erst abgelegt wird."""
         self._beginnen()
         partner = pfad_text(partner_zielpfad)
-        im_lauf = self.verbindung.execute(
-            "SELECT 1 FROM dateien WHERE zielpfad = ? AND quellpfad != ?"
-            " AND status NOT IN ('duplikat', 'duplikat_bestaetigt') AND kopiert_in_lauf = ? LIMIT 1",
-            (partner, pfad_text(quellpfad), lauf),
-        ).fetchone() is not None
+        if partner_im_durchgang is None:
+            partner_im_durchgang = self.verbindung.execute(
+                "SELECT 1 FROM abgelegt a, dateien d WHERE a.zielpfad = ? AND d.quellpfad = ?"
+                " AND d.gefunden_in_lauf IS NOT NULL AND a.lauf >= d.gefunden_in_lauf",
+                (partner, pfad_text(quellpfad)),
+            ).fetchone() is not None
+        schon = 0 if partner_im_durchgang else 1
         self.verbindung.execute(
             "UPDATE dateien SET status = 'duplikat', zielpfad = ?, schreibpfad = '', hash = ?,"
             " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0,"
             " schon_im_archiv = ? WHERE quellpfad = ?",
-            (partner, hash_, lauf, 0 if im_lauf else 1, pfad_text(quellpfad)),
+            (partner, hash_, lauf, schon, pfad_text(quellpfad)),
         )
+        if schon:
+            # Die Begleitdateien (XMP) gehoeren zum Bild und bleiben mit ihm.
+            self.verbindung.execute(
+                "UPDATE dateien SET schon_im_archiv = 1 WHERE dateityp = 'sidecar' AND gruppe != ''"
+                " AND gruppe = (SELECT gruppe FROM dateien WHERE quellpfad = ?)",
+                (pfad_text(quellpfad),),
+            )
         self._vielleicht_schreiben()
+
+    def gruppe_bereits_importiert(self, gruppe: str) -> bool:
+        """Liegt ein Bild dieser Gruppe schon im Archiv (bereits importiert)?"""
+        if not gruppe:
+            return False
+        return self.verbindung.execute(
+            "SELECT 1 FROM dateien WHERE gruppe = ? AND schon_im_archiv = 1 LIMIT 1", (gruppe,)
+        ).fetchone() is not None
+
+    def schon_im_archiv(self, quellpfad) -> bool:
+        z = self.verbindung.execute(
+            "SELECT schon_im_archiv FROM dateien WHERE quellpfad = ?", (pfad_text(quellpfad),)
+        ).fetchone()
+        return bool(z and z[0])
 
     def duplikat_partner_umschreiben(self, alt, neu, lauf: int) -> int:
         """Duplikate dieses Laufs, deren Partner unter 'alt' geplant war,
@@ -1309,7 +1364,7 @@ class Datenbank:
         self.verbindung.execute(
             "UPDATE dateien SET status = 'gefunden', groesse = ?, mtime = ?, hash = '',"
             " zielpfad = '', schreibpfad = '', bestaetigt_in_lauf = NULL, kopiert_in_lauf = NULL,"
-            " fehlergrund = '' WHERE quellpfad = ?",
+            " fehlergrund = '', schon_im_archiv = 0 WHERE quellpfad = ?",
             (int(groesse), float(mtime), pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
@@ -1380,7 +1435,7 @@ class Datenbank:
         """Je Quelle: Bilder und Videos, deren Inhalt schon im Archiv lag, bevor
         der Durchgang sie sah (Duplikat - gleicher Inhalt, ueber die Pruefsumme
         nachgewiesen). Nicht mitgezaehlt: Doppelte innerhalb der Quellen, deren
-        Partner im selben Lauf erst abgelegt wurde."""
+        Partner das Programm erst nach ihrem Fund abgelegt hat (schon_im_archiv = 0)."""
         self.stapel_schreiben()
         return {z[0]: int(z[1]) for z in self.verbindung.execute(
             "SELECT quellwurzel, COUNT(*) FROM dateien"
@@ -1641,6 +1696,7 @@ class Datenbank:
             " kopiert_in_lauf = ?, fehlergrund = '' WHERE quellpfad = ?",
             (pfad_text(zielpfad), lauf, pfad_text(quellpfad)),
         )
+        self._abgelegt_merken(zielpfad, lauf)
         self._vielleicht_schreiben()
 
     def echter_typ_bekannt(self, quellpfad) -> bool:
