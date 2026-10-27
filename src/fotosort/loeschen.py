@@ -150,6 +150,10 @@ def bedingungen_pruefen(zeile, lesung: Lesung, lauf: int, byte_vergleich: bool) 
         raise Verweigert(meldungen.GRUND_ZEILE_FEHLT)
     if zeile["status"] not in LOESCHBERECHTIGT:
         raise Verweigert(meldungen.grund_status_nicht_berechtigt(zeile["status"]))
+    if "schon_im_archiv" in zeile.keys() and zeile["schon_im_archiv"]:
+        # Entscheidung des Nutzers vom 27.10.2026: bereits importierte Bilder
+        # bleiben in der Quelle - nie entfernt, nur gemeldet.
+        raise Verweigert(meldungen.GRUND_BEREITS_IMPORTIERT)
     if zeile["dateityp"] not in ("foto", "raw", "video", "sidecar"):
         raise Verweigert(meldungen.GRUND_KEIN_ECHTER_TYP)
     gespeichert = zeile["hash"]

@@ -790,6 +790,9 @@ def befehl_aufraeumen(args, konsole) -> int:
         for q in plan.nicht_erreichbar:
             konsole.print(meldungen.aufraeumen_quelle_nicht_erreichbar(q))
         konsole.print(meldungen.aufraeumen_plan(plan.je_quelle, weise, plan.nicht_erreichbar))
+        schon = datenbank.bereits_importiert_je_quelle()
+        if schon:
+            konsole.print(meldungen.aufraeumen_bleiben({db.text_pfad(q): n for q, n in schon.items()}))
         if not any(n for n, _ in plan.je_quelle.values()) and not args.leere_ordner:
             konsole.print(meldungen.aufraeumen_nichts_zu_tun())
             return OK if not plan.nicht_erreichbar else FEHLER

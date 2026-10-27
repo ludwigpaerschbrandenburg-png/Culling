@@ -212,7 +212,8 @@ Liegt im Zielordner schon ein Archiv, das Sie selbst angelegt haben, erkennt das
 - **Bereits importiert:** Beim Durchsuchen merkt sich das Programm, was im Archiv liegt (nur
   Namen und Größen, das geht schnell). Beim Kopieren erkennt es Bilder, die schon im Archiv
   liegen – auch unter anderem Namen – und legt sie nicht noch einmal ab. Danach steht da:
-  „N Bilder und Videos dieser Quelle sind bereits importiert“. Sonst geschieht mit ihnen nichts.
+  „N Bilder und Videos dieser Quelle sind bereits importiert“. Sie bleiben in der Quelle – auch
+  beim Aufräumen und beim Verschieben werden sie nie entfernt; das Programm meldet nur ihre Zahl.
 - **Ordner mit falschem Datum:** Liegt in der Quelle ein Bild vom Mai in einem Ordner „2021.03“,
   steht das als Hinweis im Bericht. Einsortiert wird nach dem Aufnahmedatum.
 

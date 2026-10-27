@@ -727,6 +727,26 @@ class _Lauf:
                     if self.anzeige:
                         self.anzeige.weiter(1, 0)
                     continue
+            if a.zeile["dateityp"] != "sidecar" and self.dbank.ziel_index_groesse_bekannt(int(a.zeile["groesse"])):
+                # Seit v0.9: Liegt eine gleich grosse Datei im Archiv, vor dem
+                # Umbenennen pruefen, ob der Inhalt schon da ist ("bereits
+                # importiert" - dann bleibt die Quelle, wo sie ist).
+                try:
+                    hq = hashes.blake3_datei(_L(a.quelle), self.stop)
+                    partner = self._partner_im_archiv(a.quelle, hq, int(a.zeile["groesse"]), a.ziel)
+                except OSError as fehler:
+                    self._fehler(a, f"{GRUND_KOPIE}: {fehler.strerror or fehler}")
+                    continue
+                except hashes.Abgebrochen:
+                    continue   # Abbruch: die Zeile bleibt offen, der naechste Lauf macht weiter
+                if partner is not None:
+                    self.dbank.duplikat_setzen(a.zeile["quellpfad"], partner, hq, self.lauf)
+                    self.dbank.ereignis(self.lauf, ART_DUPLIKAT, a.quelle, 1, db.pfad_text(partner))
+                    e.duplikate += 1
+                    e.bearbeitet += 1
+                    if self.anzeige:
+                        self.anzeige.weiter(1, 0)
+                    continue
             rest.append(a)
         if not rest:
             return []
@@ -1077,34 +1097,39 @@ class _Lauf:
         if anstehend is not None and anstehend[1] == a.ergebnis.bytes \
                 and db.pfad_text(anstehend[0]) != db.pfad_text(a.schreibziel):
             return anstehend[0]
+        return self._partner_im_archiv(a.quelle, h, a.ergebnis.bytes, a.schreibziel)
+
+    def _partner_im_archiv(self, quelle: Path, h: str, groesse: int, ausser: Path) -> Path | None:
+        """Eine Archivdatei mit genau diesem Inhalt (Hash h) - aus dem Ziel-Index
+        (b) oder aus dem noch ungelesenen Bestand gleicher Groesse (c). ausser:
+        der eigene Schreibname, der nie als Partner zaehlt."""
         for eintrag in self.dbank.ziel_index_nach_hash(h):
             p = Path(db.text_pfad(eintrag["zielpfad"]))
-            if db.pfad_text(p) == db.pfad_text(a.schreibziel):
+            if db.pfad_text(p) == db.pfad_text(ausser):
                 continue
             st = _stat(p)
             if st is None:
                 self.dbank.ziel_index_entfernen(p)   # Eintrag ohne Datei: nur ein Kandidat
                 continue
-            if st.st_size == a.ergebnis.bytes:
+            if st.st_size == groesse:
                 return p
         # c) Bestand, den noch niemand gelesen hat (seit v0.9: von Hand
-        #    angelegtes Archiv, bestand.py): nur Dateien genau dieser Groesse
-        #    werden jetzt gelesen; ihr Hash bleibt fuer spaeter im Index.
+        #    angelegtes Archiv, bestand.py): nur Dateien genau dieser Groesse.
         #    Unkomprimierte RAWs sind oft alle gleich gross: Erst Anfang und
         #    Ende vergleichen (je VORAB Bytes) - ganz gelesen wird nur, wer dort
         #    gleich ist, und das parallel mit den Hash-Workern. Abbruch und
         #    "Fenster zu" greifen auch hier (steuerung.wuensche_pruefen).
         kandidaten: list[Path] = []
-        for eintrag in self.dbank.ziel_index_ungelesen_nach_groesse(a.ergebnis.bytes):
+        for eintrag in self.dbank.ziel_index_ungelesen_nach_groesse(groesse):
             steuerung.wuensche_pruefen()
             p = Path(db.text_pfad(eintrag["zielpfad"]))
-            if db.pfad_text(p) == db.pfad_text(a.schreibziel):
+            if db.pfad_text(p) == db.pfad_text(ausser):
                 continue
             if _stat(p) is None:
-                self.dbank.ziel_index_entfernen(p)   # Eintrag ohne Datei: nur ein Kandidat
+                self.dbank.ziel_index_entfernen(p)
                 continue
             try:
-                if not _gleicher_rand(a.quelle, p, a.ergebnis.bytes):
+                if not _gleicher_rand(quelle, p, groesse):
                     continue
             except OSError:
                 continue

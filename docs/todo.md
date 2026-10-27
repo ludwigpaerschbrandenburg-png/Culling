@@ -808,6 +808,11 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 4. Ausschuss: auf Knopfdruck mit Bestätigungswort nach `_Ausschuss` im Archiv verschieben,
    nie überschreiben, rückgängig machbar, nie löschen. Neue Regel in CLAUDE.md in Runde 3d.
 
+**Entschieden am 27.10.2026:**
+
+5. Bilder der Quelle, die schon im Archiv lagen („bereits importiert“), werden nie aus der
+   Quelle entfernt – weder beim Aufräumen noch beim Verschieben. Nur ihre Zahl wird gemeldet.
+
 ### Runde 3a: Grundwünsche (Version 0.9)
 
 - [x] Schließen = aus (mit Rückfrage), Fortsetzen beim nächsten Start.

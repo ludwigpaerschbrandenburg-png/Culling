@@ -81,15 +81,18 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: Anhebungen des Schemas: von Version -> SQL-Anweisungen, die eine Datenbank
 #: dieser Version auf Version + 1 heben. Eine aeltere Datenbank wird beim
 #: Oeffnen Schritt fuer Schritt angehoben, nie abgelehnt - vorher wird sie als
-#: fotosort.db.vor_schema_<Version> aufgehoben. Bisher gibt es keine
-#: Anhebung: Alle Archive tragen Version 6 (seit Phase 5, vor v0.3). Wer das
-#: Schema aendert, hebt SCHEMA_VERSION an und traegt hier die Schritte ein.
-MIGRATIONEN: dict[int, tuple[str, ...]] = {}
+#: fotosort.db.vor_schema_<Version> aufgehoben. Wer das Schema aendert,
+#: hebt SCHEMA_VERSION an und traegt hier die Schritte ein.
+MIGRATIONEN: dict[int, tuple[str, ...]] = {
+    # v0.9: Bilder, deren Inhalt schon im Archiv lag, bevor der Durchgang sie
+    # sah ("bereits importiert") - werden nie aus der Quelle entfernt.
+    6: ("ALTER TABLE dateien ADD COLUMN schon_im_archiv INTEGER NOT NULL DEFAULT 0",),
+}
 VOR_SCHEMA = "fotosort.db.vor_schema_"   # Sicherung vor einer Anhebung, nie geloescht
 
 SCHEMA = """
@@ -123,7 +126,8 @@ CREATE TABLE IF NOT EXISTS dateien (
     kopiert_in_lauf         INTEGER,
     umbenannt               INTEGER NOT NULL DEFAULT 0,
     gefunden_in_lauf        INTEGER,
-    zuletzt_gesehen_in_lauf INTEGER
+    zuletzt_gesehen_in_lauf INTEGER,
+    schon_im_archiv         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
@@ -1251,12 +1255,24 @@ class Datenbank:
         self._vielleicht_schreiben()
 
     def duplikat_setzen(self, quellpfad, partner_zielpfad, hash_: str, lauf: int) -> None:
-        """Inhaltsgleiche Datei liegt schon im Ziel: nicht kopiert, zielpfad = Partner."""
+        """Inhaltsgleiche Datei liegt schon im Ziel: nicht kopiert, zielpfad = Partner.
+
+        schon_im_archiv (seit v0.9): 1, wenn der Partner nicht in diesem Lauf
+        vom Programm abgelegt wurde - der Inhalt lag schon im Archiv ("bereits
+        importiert"). Solche Quelldateien werden nie entfernt (Entscheidung
+        des Nutzers vom 27.10.2026). Doppelte innerhalb der Quellen: 0."""
         self._beginnen()
+        partner = pfad_text(partner_zielpfad)
+        im_lauf = self.verbindung.execute(
+            "SELECT 1 FROM dateien WHERE zielpfad = ? AND quellpfad != ?"
+            " AND status NOT IN ('duplikat', 'duplikat_bestaetigt') AND kopiert_in_lauf = ? LIMIT 1",
+            (partner, pfad_text(quellpfad), lauf),
+        ).fetchone() is not None
         self.verbindung.execute(
             "UPDATE dateien SET status = 'duplikat', zielpfad = ?, schreibpfad = '', hash = ?,"
-            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
-            (pfad_text(partner_zielpfad), hash_, lauf, pfad_text(quellpfad)),
+            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0,"
+            " schon_im_archiv = ? WHERE quellpfad = ?",
+            (partner, hash_, lauf, 0 if im_lauf else 1, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
 
@@ -1339,6 +1355,12 @@ class Datenbank:
         self._vielleicht_schreiben()
         return alt is None
 
+    def ziel_index_groesse_bekannt(self, groesse: int) -> bool:
+        """Liegt im Archiv (laut Ziel-Index) eine Datei genau dieser Groesse?"""
+        return self.verbindung.execute(
+            "SELECT 1 FROM ziel_index WHERE groesse = ? LIMIT 1", (int(groesse),)
+        ).fetchone() is not None
+
     def ziel_index_ungelesen_nach_groesse(self, groesse: int) -> list[sqlite3.Row]:
         """Archivdateien dieser Groesse, deren Inhalt noch nie gelesen wurde."""
         return self.verbindung.execute(
@@ -1361,11 +1383,9 @@ class Datenbank:
         Partner im selben Lauf erst abgelegt wurde."""
         self.stapel_schreiben()
         return {z[0]: int(z[1]) for z in self.verbindung.execute(
-            "SELECT d.quellwurzel, COUNT(*) FROM dateien d"
-            " WHERE d.status IN ('duplikat', 'duplikat_bestaetigt') AND d.dateityp IN ('foto', 'raw', 'video')"
-            " AND NOT EXISTS (SELECT 1 FROM dateien p WHERE p.zielpfad = d.zielpfad AND p.quellpfad != d.quellpfad"
-            "   AND p.status NOT IN ('duplikat', 'duplikat_bestaetigt') AND p.kopiert_in_lauf = d.kopiert_in_lauf)"
-            " GROUP BY d.quellwurzel")}
+            "SELECT quellwurzel, COUNT(*) FROM dateien"
+            " WHERE status IN ('duplikat', 'duplikat_bestaetigt') AND dateityp IN ('foto', 'raw', 'video')"
+            " AND schon_im_archiv = 1 GROUP BY quellwurzel")}
 
     def ziel_index_nach_hash(self, hash_: str) -> list[sqlite3.Row]:
         # Kein Sammelschreiben noetig: Dieselbe Verbindung sieht ihre eigenen,
@@ -1538,7 +1558,7 @@ class Datenbank:
     # Zeilen unter einem Ordner _geloescht_ sind nie Kandidaten: Der
     # Papierkorb wird vom Aufraeumen nie angefasst (SPEC §4 Phase 5).
     ZU_LOESCHEN_SQL = (
-        "status IN ('geprueft', 'duplikat_bestaetigt') AND zielpfad != ''"
+        "status IN ('geprueft', 'duplikat_bestaetigt') AND zielpfad != '' AND schon_im_archiv = 0"
         " AND instr(quellpfad, '/_geloescht_') = 0 AND instr(quellpfad, '\\_geloescht_') = 0"
     )
 

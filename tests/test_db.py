@@ -81,6 +81,7 @@ def test_dateien_hat_alle_spalten_aus_der_spec(datenbank):
         "schreibpfad",
         "gefunden_in_lauf",
         "zuletzt_gesehen_in_lauf",
+        "schon_im_archiv",          # seit v0.9 (bereits importiert, nie aus der Quelle entfernt)
     }
 
 
@@ -817,3 +818,23 @@ def test_sicherung_entsteht_lokal_und_wird_am_stueck_ins_ziel_kopiert(tmp_path, 
         assert not list((ziel / db.ARCHIV_UNTERORDNER).glob("*.neu"))
     finally:
         d.schliessen()
+
+
+def test_echte_anhebung_von_v08_bringt_die_spalte_schon_im_archiv(tmp_path):
+    """Version 0.9: Eine Datenbank aus v0.8 (Schema 6) bekommt die Spalte
+    schon_im_archiv (0 fuer alle vorhandenen Zeilen); vorher aufgehoben."""
+    ordner = tmp_path / "v08"
+    d = db.Datenbank.oeffnen(ordner)
+    lauf = d.lauf_beginnen("scan")
+    d.datei_gesehen("/q/a.jpg", "/q", 100, 1000.0, "foto", lauf)
+    d.stapel_schreiben()
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
+    d.verbindung.execute("PRAGMA user_version=6")
+    d.schliessen()
+    d = db.Datenbank.oeffnen(ordner)
+    try:
+        assert d.angehoben_von == 6 and db.SCHEMA_VERSION == 7
+        assert d.zeile("/q/a.jpg")["schon_im_archiv"] == 0
+    finally:
+        d.schliessen()
+    assert db.vor_schema_pfad(db.datenbank_pfad(ordner), 6).is_file()

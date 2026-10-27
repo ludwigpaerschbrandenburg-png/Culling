@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from fotosort import cli, hashes
+from test_aufraeumen import antwort  # noqa: F401
 from test_kopieren import _cli, _zeilen
 
 
@@ -172,3 +173,50 @@ def test_gleich_byteweise_mit_kurzen_lesungen(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.open", oeffnen)
     assert hashes.gleich_byteweise(a, b) is True
+
+
+def test_bereits_importiertes_bleibt_beim_aufraeumen_in_der_quelle(baum, quelle, ziel, nachschauen, antwort, capsys):
+    """Entscheidung vom 27.10.2026: Bilder, die schon im Archiv lagen, werden
+    nie aus der Quelle entfernt - auch nicht beim Aufraeumen. Alles andere
+    (auch Doppelte innerhalb der Quelle) wie bisher."""
+    from fotosort import loeschen
+    analog = Path(baum["analog"])
+    _archiv_von_hand(ziel, analog)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.OK
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
+    zeilen = _zeilen(nachschauen, ziel)
+    assert zeilen[str(analog)]["status"] == "duplikat_bestaetigt" and zeilen[str(analog)]["schon_im_archiv"] == 1
+    innerhalb = [k for k, z in zeilen.items() if z["status"] == "duplikat_bestaetigt" and not z["schon_im_archiv"]]
+    assert innerhalb                                          # der Testbaum hat Doppelte in der Quelle
+    antwort.append("loeschen")
+    capsys.readouterr()
+    assert _cli("aufraeumen", "--ziel", ziel, "--endgueltig") == cli.OK
+    aus = capsys.readouterr().out
+    assert analog.exists(), aus                               # bleibt in der Quelle
+    assert "bereits importiert" in aus
+    nachher = _zeilen(nachschauen, ziel)
+    assert nachher[str(analog)]["status"] == "duplikat_bestaetigt"
+    assert all(nachher[k]["status"] == "quelle_geloescht" for k in innerhalb), \
+        {k: (nachher[k]["status"], nachher[k]["fehlergrund"], nachher[k]["dateityp"]) for k in innerhalb}
+    # Auch die einzige Loeschstelle selbst weigert sich (zweite Sicherung).
+    with nachschauen(ziel) as d:
+        zeile = d.zeile(str(analog))
+    try:
+        loeschen.bedingungen_pruefen(zeile, loeschen.Lesung("ok"), 0, False)
+    except loeschen.Verweigert as v:
+        assert "bereits importiert" in str(v)
+    else:
+        raise AssertionError("haette sich weigern muessen")
+
+
+def test_verschieben_laesst_bereits_importiertes_stehen(baum, quelle, ziel, nachschauen):
+    analog = Path(baum["analog"])
+    _archiv_von_hand(ziel, analog)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.OK
+    assert _cli("analyse", "--ziel", ziel) == cli.OK
+    assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.OK
+    assert _cli("pruefen", "--ziel", ziel) == cli.OK
+    assert analog.exists()
+    assert _zeilen(nachschauen, ziel)[str(analog)]["schon_im_archiv"] == 1

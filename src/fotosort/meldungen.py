@@ -2607,3 +2607,13 @@ MONATSNAMEN_TEXT = ("Januar", "Februar", "März", "April", "Mai", "Juni",
 
 
 BESTAND_WIRD_ERFASST = "Bestand des Archivs wird erfasst … (nur Namen und Größen, das geht schnell)"
+
+GRUND_BEREITS_IMPORTIERT = "bereits importiert: lag schon im Archiv, bleibt in der Quelle (wird nie entfernt)"
+
+
+def aufraeumen_bleiben(je_quelle: dict) -> str:
+    zeilen = ["Bleiben in der Quelle (bereits importiert – lagen schon im Archiv, werden nie entfernt):"]
+    for quelle, n in sorted(je_quelle.items(), key=lambda x: str(x[0])):
+        zeilen.append(f"  {quelle}: {anzahl(n)} Bilder und Videos")
+    return "\n".join(zeilen)
+
