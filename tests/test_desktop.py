@@ -613,3 +613,26 @@ def test_nur_eine_instanz(app, tmp_path):
     dritte = desktop.Instanz(ordner)
     assert dritte.erste
     dritte.freigeben()
+
+
+def test_fremden_schritt_haelt_das_fenster_nicht_an(app, tmp_path, grosse_quelle, ziel, monkeypatch):
+    """Pruefer-Befund (v0.9): Ein Schritt, den nicht dieses Fenster gestartet
+    hat (Browser-Fassung auf dem Server), laeuft beim Schliessen weiter -
+    ohne Rueckfrage."""
+    from test_unterbrechungen import _bis, _vorbereitet
+    monkeypatch.setattr(desktop, "frage", lambda *a, **k: (_ for _ in ()).throw(AssertionError("gefragt")))
+    ab = _vorbereitet(tmp_path, grosse_quelle, ziel)
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    ab.fenster_pid = None                                      # wie ein Schritt aus der Browser-Fassung
+    assert ab.schritt("kopieren")["gestartet"] == "kopieren"
+    _bis(lambda: _kopierte(ziel) >= 10)
+    f.close()
+    assert not f.isVisible() and ab.lauf_lebt()
+    assert ab.beenden(warten=60)
+
+
+def test_beenden_frage_verspricht_nichts_falsches():
+    text = desktop.meldungen.ob_beenden_frage("Kopieren")
+    assert "Nichts geht verloren" in text and "in der Regel" in text

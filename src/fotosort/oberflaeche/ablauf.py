@@ -175,12 +175,7 @@ def prozess_beenden(pid: int, start: float | None = None, nachsetzen: float = 5.
 
 
 def _ist_zombie(pid: int) -> bool:
-    """Beendet, aber vom Elternprozess noch nicht abgeholt (Linux)."""
-    try:
-        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="ascii", errors="replace")
-    except OSError:
-        return False
-    return stat[stat.rindex(")") + 2:].startswith("Z")
+    return prozesse.ist_zombie(pid)
 
 
 class _StilleKonsole:
@@ -1187,8 +1182,7 @@ class Ablauf:
                         zeilen.append(["Quellordner nennt ein anderes Datum (siehe Bericht)", meldungen.anzahl(n)])
                     # Schaetzung vor dem Kopieren (seit v0.9): schon im Archiv?
                     for quelle, anzahl in sorted(d.vermutlich_importiert_je_quelle().items()):
-                        zeilen.append([f"vermutlich bereits importiert – {Path(db.text_pfad(quelle)).name}",
-                                       meldungen.anzahl(anzahl)])
+                        zeilen.append([meldungen.ob_vermutlich_importiert(db.text_pfad(quelle)), meldungen.anzahl(anzahl)])
                     zeilen.append(["Fehler", meldungen.anzahl(a["fehler"])])
                     if a["offen"]:
                         zeilen.append(["noch nicht analysiert", meldungen.anzahl(a["offen"])])

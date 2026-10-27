@@ -229,4 +229,15 @@ def lebt(pid: int, start: float | None = None) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    # Beendet, aber vom Elternprozess noch nicht abgeholt (Zombie): gilt als weg.
+    return not ist_zombie(pid)
+
+
+def ist_zombie(pid: int) -> bool:
+    """Beendet, aber vom Elternprozess noch nicht abgeholt (Linux)."""
+    try:
+        with open(f"/proc/{int(pid)}/stat", encoding="ascii", errors="replace") as f:
+            stat = f.read()
+    except OSError:
+        return False
+    return stat[stat.rindex(")") + 2:].startswith("Z")

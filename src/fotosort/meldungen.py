@@ -2556,9 +2556,9 @@ OB_WIRD_BEENDET = "Wird beendet … die aktuelle Datei wird noch fertig, dann is
 
 def ob_beenden_frage(schritt: str) -> str:
     return (
-        f"Es läuft gerade ein Schritt ({schritt}). Beim Beenden wird die aktuelle Datei noch fertig, "
-        "alles Bisherige bleibt gespeichert, und beim nächsten Öffnen geht es genau dort weiter. "
-        "Nichts geht verloren."
+        f"Es läuft gerade ein Schritt ({schritt}). Beim Beenden hält er sauber an – in der Regel wird die "
+        "aktuelle Datei noch fertig. Alles Bisherige bleibt gespeichert, und beim nächsten Öffnen geht es "
+        "genau dort weiter. Nichts geht verloren."
     )
 
 
@@ -2582,14 +2582,18 @@ def vermutlich_importiert(je_quelle: dict) -> str:
 
 
 def bereits_importiert(je_quelle: dict) -> str:
-    zeilen = ["Bereits importiert (lag schon im Archiv, nicht noch einmal abgelegt):"]
+    zeilen = ["Schon im Archiv (nicht noch einmal abgelegt, bleiben in der Quelle):"]
     for quelle, n in sorted(je_quelle.items(), key=lambda x: str(x[0])):
-        zeilen.append(f"  {anzahl(n)} Bilder und Videos dieser Quelle sind bereits importiert: {quelle}")
+        zeilen.append(f"  {quelle}: {anzahl(n)} Bilder und Videos bereits importiert")
     return "\n".join(zeilen)
 
 
 def ob_bereits_importiert(quelle) -> str:
-    return f"bereits importiert – {Path(str(quelle)).name or quelle}"
+    return f"bereits importiert – {quelle}"
+
+
+def ob_vermutlich_importiert(quelle) -> str:
+    return f"vermutlich bereits importiert – {quelle}"
 
 
 def ereignis_ordner_datum(zeitraum, tag) -> str:

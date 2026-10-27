@@ -144,8 +144,9 @@ Bericht**. Unten stehen die Knöpfe: Der umrandete Hauptknopf ist immer der näc
 Schritt („Analyse starten", „Kopieren starten · 3.912 Dateien", „Prüfen starten"); solange ein
 Schritt läuft, ist er gesperrt, und daneben stehen **Pause** und **Abbrechen**. Nichts läuft
 ohne Ihren Klick. Alles Bisherige bleibt gespeichert. **Fenster zu heißt Programm aus:** Läuft
-gerade ein Schritt, fragt das Fenster kurz nach; bei „Beenden“ wird die aktuelle Datei noch
-fertig, dann ist alles aus. Beim nächsten `start.bat` geht es genau dort weiter. Das Programm
+gerade ein Schritt, fragt das Fenster kurz nach; bei „Beenden“ hält der Schritt sauber an (in
+der Regel wird die aktuelle Datei noch fertig), dann ist alles aus. Nichts geht verloren: Beim
+nächsten `start.bat` geht es genau dort weiter. Das Programm
 ist immer nur einmal offen – ein zweiter Doppelklick holt das offene Fenster nach vorn.
 
 ### Schritt 1: Quellen durchsuchen (Scan)

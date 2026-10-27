@@ -895,8 +895,11 @@ class Hauptfenster(QMainWindow):
         if self._beendet_gerade:
             ev.ignore()
             return
-        if self.ab.lauf_lebt():
-            if not self._schliessen_ohne_frage:
+        eigener = self.ab.lauf is not None and self.ab.lauf.auftrag.get("fenster_pid") == os.getpid()
+        if eigener and self.ab.lauf_lebt():
+            # Windows meldet sich ab oder faehrt herunter: nicht fragen, kurz warten.
+            sitzung_endet = QApplication.instance() is not None and QApplication.instance().isSavingSession()
+            if not self._schliessen_ohne_frage and not sitzung_endet:
                 schritt = self.kurzname((self.ab.lauf.schritt if self.ab.lauf else "") or self.lauf.get("schritt", ""))
                 ja, _ = frage(self, meldungen.OB_BEENDEN_TITEL, meldungen.ob_beenden_frage(schritt),
                               ja="Beenden", nein="Weiterarbeiten")
@@ -907,7 +910,7 @@ class Hauptfenster(QMainWindow):
             self.meldung(meldungen.OB_WIRD_BEENDET)
             try:
                 with self.beschaeftigt():
-                    self.ab.beenden(warten=60.0, takt=QApplication.processEvents)
+                    self.ab.beenden(warten=10.0 if sitzung_endet else 60.0, takt=QApplication.processEvents)
             finally:
                 self._beendet_gerade = False
         self.poll.stop()
@@ -1821,6 +1824,14 @@ class Instanz:
         except FotosortFehler:
             self.erste = True       # nicht sperrbar: lieber ein Fenster zu viel als keins
         if not self.erste:
+            if sys.platform.startswith("win"):  # pragma: no cover - nur Windows
+                # Sonst darf das erste Fenster nicht nach vorn (Windows blinkt
+                # nur in der Taskleiste): Dieser Start erlaubt es ausdruecklich.
+                try:
+                    import ctypes
+                    ctypes.windll.user32.AllowSetForegroundWindow(-1)   # ASFW_ANY
+                except (OSError, AttributeError):
+                    pass
             try:
                 (self.ordner / WECKEN).write_text(str(time.time()), encoding="utf-8")
             except OSError:

@@ -232,3 +232,18 @@ def test_windows_baum_beenden_nimmt_die_kinder_mit():
     finally:
         p.kill()
         subprocess.run(["taskkill", "/F", "/PID", str(kind)], capture_output=True, check=False)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Zombie-Prozesse: nur Linux")
+def test_beendeter_aber_nicht_abgeholter_prozess_lebt_nicht():
+    """Pruefer-Befund (v0.9): Ein Fenster, das beendet, aber vom Elternprozess
+    noch nicht abgeholt ist (Zombie), gilt als weg - sonst liefe ein Schritt
+    weiter, obwohl sein Fenster zu ist."""
+    import subprocess
+    import time
+    kind = subprocess.Popen([sys.executable, "-c", "pass"])
+    ende = time.monotonic() + 10
+    while prozesse.lebt(kind.pid) and time.monotonic() < ende:
+        time.sleep(0.05)
+    assert not prozesse.lebt(kind.pid)
+    kind.wait()
