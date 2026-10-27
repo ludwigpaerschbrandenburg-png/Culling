@@ -6,6 +6,7 @@ Datei formuliert eigene Texte fuer den Nutzer.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------- Zahlen ----
@@ -2543,20 +2544,86 @@ SICHTEN_KEIN_ARCHIV = (
 )
 SICHTEN_TASTEN = (
     "Tasten: 0 bis 5 für Sterne, P für Auswahl, X für Ausschuss, U hebt die Markierung auf, "
-    "Eingabe zeigt das Bild groß, Esc geht zurück. Es wird nichts gelöscht oder verschoben – "
+    "6 bis 9 für Rot, Gelb, Grün und Blau. Eingabe zeigt das Bild groß, Z in voller Größe, "
+    "C vergleicht die gewählten Bilder, Esc geht zurück. Es wird nichts gelöscht oder verschoben – "
     "Ausschuss ist nur eine Markierung."
 )
 SICHTEN_ORDNER_WAEHLEN = "Links einen Ordner wählen."
 SICHTEN_FILTER: list[tuple[str, str]] = [
-    ("alle", "Alle"), ("auswahl", "Nur Auswahl"), ("ausschuss", "Nur Ausschuss"),
+    ("alle", "Alle"), ("unbewertet", "Noch nicht bewertet"), ("auswahl", "Nur Auswahl"), ("ausschuss", "Nur Ausschuss"),
     ("ab1", "ab 1 ★"), ("ab2", "ab 2 ★"), ("ab3", "ab 3 ★"), ("ab4", "ab 4 ★"), ("ab5", "5 ★"),
+    ("farbe_rot", "Rot"), ("farbe_gelb", "Gelb"), ("farbe_gruen", "Grün"), ("farbe_blau", "Blau"), ("farbe_lila", "Lila"),
 ]
+SICHTEN_FARBE: dict[str, str] = {"": "", "rot": "Rot", "gelb": "Gelb", "gruen": "Grün", "blau": "Blau", "lila": "Lila"}
+SICHTEN_WEITER = "Nach dem Bewerten zum nächsten Bild"
+SICHTEN_VERGLEICH_WAEHLEN = "Für den Vergleich zwei bis vier Bilder wählen (Strg oder Umschalt beim Klicken)."
+SICHTEN_VERGLEICH_TITEL = "Vergleich – bewertet wird das umrandete Bild"
+SICHTEN_XMP_KNOPF = "XMP-Dateien anlegen…"
+SICHTEN_XMP_TITEL = "Bewertungen als XMP-Dateien speichern?"
+SICHTEN_XMP_FRAGE = (
+    "Für jedes bewertete Bild im Archiv entsteht daneben eine kleine Datei „Name.xmp“ mit Sternen, "
+    "Ausschuss und Farbe. Lightroom (bei RAW-Dateien), darktable und Capture One lesen sie. "
+    "Liegt zu einem Bild schon eine XMP-Datei, bleibt sie, wie sie ist – es entsteht dann keine. "
+    "Die Bilder selbst werden nicht verändert. „Auswahl“ kennt XMP nicht."
+)
+
+
+def sichten_xmp_ergebnis(e) -> str:
+    teile = [f"{anzahl(e.neu)} XMP-Dateien neu angelegt"]
+    if e.vorhanden:
+        teile.append(f"{anzahl(e.vorhanden)} hatten schon eine und blieben, wie sie waren")
+    if e.ohne:
+        teile.append(f"{anzahl(e.ohne)} nur mit „Auswahl“ (in XMP nicht darstellbar)")
+    if e.fehlt:
+        teile.append(f"{anzahl(e.fehlt)} Bilder liegen nicht mehr im Archiv")
+    if e.fehler:
+        teile.append(f"{anzahl(e.fehler)} ließen sich nicht schreiben")
+    return ", ".join(teile) + "."
+
+
+def _zahl_de(wert: float) -> str:
+    text = f"{wert:.1f}".replace(".", ",")
+    return text[:-2] if text.endswith(",0") else text
+
+
+def sichten_kameradaten(werte: dict) -> str:
+    """Kameradaten eines Bilds in einer Zeile: Kamera, Objektiv, Blende,
+    Belichtungszeit, ISO, Brennweite, Aufnahmezeit. Fehlendes entfaellt."""
+    teile: list[str] = []
+    marke, modell = str(werte.get("Make") or "").strip(), str(werte.get("Model") or "").strip()
+    if modell:
+        teile.append(modell if not marke or modell.casefold().startswith(marke.casefold()) else f"{marke} {modell}")
+    objektiv = str(werte.get("LensModel") or "").strip()
+    if objektiv and objektiv != "----":
+        teile.append(objektiv)
+    try:
+        blende = float(str(werte.get("FNumber")).replace(",", "."))
+        teile.append(f"f/{_zahl_de(blende)}")
+    except (TypeError, ValueError):
+        pass
+    zeit = werte.get("ExposureTime")
+    if zeit not in (None, ""):
+        if isinstance(zeit, (int, float)) and 0 < zeit < 1:
+            zeit = f"1/{round(1 / zeit)}"
+        teile.append(f"{str(zeit).replace('.', ',')} s")
+    if werte.get("ISO") not in (None, ""):
+        teile.append(f"ISO {werte['ISO']}")
+    try:
+        brennweite = float(str(werte.get("FocalLength") or "").split()[0])
+        teile.append(f"{_zahl_de(brennweite)} mm")
+    except (IndexError, ValueError):
+        pass
+    m = re.match(r"(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2})", str(werte.get("DateTimeOriginal") or ""))
+    if m:
+        teile.append(f"{m.group(3)}.{m.group(2)}.{m.group(1)} {m.group(4)}:{m.group(5)}")
+    return ", ".join(teile)
 SICHTEN_MARKIERUNG: dict[str, str] = {"": "", "auswahl": "Auswahl", "ausschuss": "Ausschuss"}
 SICHTEN_KEINE_VORSCHAU = "keine Vorschau"
 
 
 def sichten_ordner_zahlen(gezeigt: int, alle: int, bewertet: int, auswahl: int, ausschuss: int) -> str:
-    teile = [f"{anzahl(gezeigt)} von {anzahl(alle)} Bildern" if gezeigt != alle else f"{anzahl(alle)} Bilder"]
+    teile = [f"{anzahl(gezeigt)} von {anzahl(alle)} Bildern" if gezeigt != alle
+             else ("1 Bild" if alle == 1 else f"{anzahl(alle)} Bilder")]
     teile.append(f"{anzahl(bewertet)} mit Sternen")
     teile.append(f"{anzahl(auswahl)} Auswahl")
     teile.append(f"{anzahl(ausschuss)} Ausschuss")

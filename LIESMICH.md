@@ -310,14 +310,33 @@ Reiter „Archiv" läuft dabei weiter – Sie können sichten, während kopiert 
 - **Rechts** stehen die Bilder als kleine Vorschau. Ein RAW und das JPG gleichen Namens sind
   **ein** Bild. Von einem RAW ohne JPG zeigt das Programm das Vorschaubild, das die Kamera in
   die RAW-Datei gelegt hat. Videos erscheinen als Platzhalter.
-- **Bewerten** mit der Tastatur, für alle gewählten Bilder (mehrere mit Strg oder Umschalt):
-  `0`–`5` Sterne, `P` Auswahl (grün), `X` Ausschuss (abgeblendet), `U` Markierung aufheben.
-  **Eingabe** öffnet die große Ansicht, dort blättern die Pfeiltasten, **Esc** geht zurück.
-- **Filter** oben rechts: alle, nur Auswahl, nur Ausschuss oder ab einer Zahl Sterne.
+- **Bewerten** für alle gewählten Bilder (mehrere mit Strg oder Umschalt) – mit den Knöpfen
+  unter den Bildern oder mit der Tastatur: `0`–`5` Sterne, `P` Auswahl (grün), `X` Ausschuss
+  (abgeblendet), `U` Markierung aufheben, `6`–`9` Farbe Rot, Gelb, Grün, Blau (Lila nur über
+  den Knopf; dieselbe Farbe noch einmal nimmt sie wieder weg). Mit dem Haken **„Nach dem
+  Bewerten zum nächsten Bild“** geht es nach jeder Bewertung von selbst weiter.
+- **Groß ansehen:** Eingabe (oder der Knopf) zeigt das Bild groß, darüber die Kameradaten
+  (Kamera, Objektiv, Blende, Belichtungszeit, ISO, Brennweite, Uhrzeit). Die Pfeiltasten
+  blättern, **Esc** geht zurück. **`Z`** oder ein Klick ins Bild zeigt es in voller Größe an
+  dieser Stelle (Lupe); mit gedrückter Maustaste verschieben, noch ein Klick zurück.
+- **Vergleichen:** zwei bis vier Bilder wählen und **`C`** drücken (oder „Vergleichen“). Sie
+  stehen nebeneinander; bewertet wird das umrandete, die Pfeiltasten wechseln es.
+- **Filter** oben rechts: alle, noch nicht bewertet, nur Auswahl, nur Ausschuss, ab einer Zahl
+  Sterne oder eine Farbe.
+- **iPhone-Live-Photos** (HEIC und MOV gleichen Namens) sind ein Bild.
+- **Bewertungen aus Lightroom & Co.:** Liegt neben einem Bild schon eine XMP-Datei mit Sternen
+  oder Farbe, zeigt das Programm sie an.
+- **„XMP-Dateien anlegen…"** (links unten) schreibt Ihre Sterne, Ausschuss und Farben in kleine
+  Dateien `Name.xmp` neben die Bilder, damit Lightroom (bei RAW-Dateien), darktable oder
+  Capture One sie sehen. Es entstehen nur **neue** Dateien: Liegt zu einem Bild schon eine
+  XMP-Datei, bleibt sie, wie sie ist. „Auswahl“ kennt XMP nicht.
 
 **Das Sichten verändert keine Datei.** Nichts wird gelöscht, verschoben oder umbenannt;
 Ausschuss ist nur eine Markierung. Die Bewertungen merkt sich das Programm in einer eigenen
-kleinen Datei auf dem Rechner (Abschnitt 7), nicht in den Bildern.
+kleinen Datei auf dem Rechner (Abschnitt 7), nicht in den Bildern. Einzige Ausnahme sind die
+neuen XMP-Dateien, und die nur, wenn Sie „XMP-Dateien anlegen…" drücken und bestätigen. Die
+kleinen Vorschaubilder hebt das Programm auf dem Rechner auf (nicht im Archiv), damit ein
+Ordner beim nächsten Mal sofort da ist.
 
 ### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
 
@@ -576,7 +595,8 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   die richtige Datenbank, auch wenn das Ziel unter einem anderen Laufwerksbuchstaben
   eingebunden ist.
 - **Bewertungen** aus dem Reiter „Sichten": `bewertungen.db` im selben Ordner wie die
-  Datenbank. „Archiv verwerfen" entfernt sie mit.
+  Datenbank, dazu der Ordner `vorschau` mit den aufgehobenen Vorschaubildern. „Archiv
+  verwerfen" entfernt beides mit.
 - **Sicherungskopie und Berichte**: `<Ziel>\.fotosortierer\` (siehe Abschnitt 4).
 - **Ordner `_geloescht_<Datum>`**: in der Quelle, nur wenn Sie aufgeräumt haben.
 - **Oberfläche**: `C:\Users\<Name>\AppData\Local\fotosortierer\oberflaeche\` – der Stand des
@@ -708,10 +728,9 @@ neben der alten den Anhang `_1`.
 
 ## 10. Was noch nicht gebaut ist
 
-- Der Reiter „Sichten" ist ein erster Ausbau. Noch nicht gebaut: Bewertungen in `.xmp`-Dateien
-  für Lightroom schreiben, Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder finden,
-  Vorschaubilder von Videos, eine Sicherungskopie der Bewertungen im Ziel und der Reiter in der
-  Browser-Fassung.
+- Im Reiter „Sichten" noch nicht gebaut: Videos abspielen, Serien stapeln, Tasten frei
+  belegen, Umbenennen nach Muster, mehrere Ziele, ähnliche Bilder finden, eine Sicherungskopie
+  der Bewertungen im Ziel und der Reiter in der Browser-Fassung.
 
 - Der Betrieb auf dem TrueNAS-Server (im Browser, mit eigenem Ordner-Browser statt des
   Windows-Dialogs) ist eine spätere Phase. Die Browser-Fassung der Oberfläche läuft dort schon

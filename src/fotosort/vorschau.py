@@ -26,9 +26,17 @@ STUFEN_GROSS = (("JpgFromRaw", "PreviewImage", "ThumbnailImage"),)
 ZEITLIMIT = 30.0
 
 
+#: Kameradaten fuer die grosse Ansicht (seit v0.11).
+KAMERADATEN = ("Make", "Model", "LensModel", "FNumber", "ExposureTime", "ISO", "FocalLength", "DateTimeOriginal")
+
+
 def _argumente(felder: tuple[str, ...]) -> list[str]:
     return ["-j", "-b", "-charset", "filename=utf8", "-m", "-api", "LargeFileSupport=1",
             *(f"-{f}" for f in felder), "-Orientation#"]
+
+
+def _argumente_text(felder: tuple[str, ...]) -> list[str]:
+    return ["-j", "-charset", "filename=utf8", "-m", "-api", "LargeFileSupport=1", *(f"-{f}" for f in felder)]
 
 
 class Vorschauleser:
@@ -40,7 +48,7 @@ class Vorschauleser:
         self._sperre = threading.Lock()
         self._zu = False
 
-    def _lesen(self, pfad: Path, felder: tuple[str, ...]) -> dict:
+    def _lesen(self, pfad: Path, felder: tuple[str, ...], argumente=None) -> dict:
         if self._zu:
             return {}   # geschlossen: nie wieder ein ExifTool starten
         if self._prozess is None:
@@ -49,7 +57,7 @@ class Vorschauleser:
             except metadaten.MetadatenFehler:
                 return {}
         try:
-            antwort = self._prozess.lesen([(str(pfad), "")], limit=ZEITLIMIT, argumente=_argumente(felder))
+            antwort = self._prozess.lesen([(str(pfad), "")], limit=ZEITLIMIT, argumente=(argumente or _argumente)(felder))
         except metadaten.MetadatenFehler:
             # Prozess haengt oder ist weg: beim naechsten Bild frisch starten.
             self._prozess.beenden()
@@ -81,6 +89,14 @@ class Vorschauleser:
                     if daten[:2] == b"\xff\xd8":
                         return daten, drehung
         return None, 1
+
+    def kameradaten(self, pfad: Path) -> dict:
+        """Kamera, Objektiv, Blende, Zeit, ISO, Brennweite, Aufnahmezeit - nur lesend."""
+        if self._zu or metadaten.unzulaessig_fuer_exiftool(pfad) or not os.path.isfile(pfade.lang(Path(pfad))):
+            return {}
+        with self._sperre:
+            werte = self._lesen(Path(pfad), KAMERADATEN, _argumente_text)
+        return {k: v for k, v in werte.items() if k in KAMERADATEN}
 
     def schliessen(self) -> None:
         """Beenden, ohne auf ein langsames Bild zu warten: Ist der Prozess

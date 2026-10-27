@@ -851,6 +851,35 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 - [x] Volle Tests, CI, Release v0.10.
 - [ ] Später (mit Phase 8): Browser-Fassung im selben schlichten Stil.
 
+## Phase 12 — Fehlersuche und Sichten wie ein Profi (Runde 3b, Version 0.11)
+
+**Auftrag vom 28.10.2026:** „Bau schon mal weiter und überprüf, ob es irgendwelche Bugs gibt und
+führe weitere Features ein, die ein professionelles Sortier-Dings hätte, wie zum Beispiel das
+Bewerten von den Bildern.“
+
+**Entschieden am 28.10.2026:** Bewertungen kommen auf Knopfdruck in XMP-Dateien – aber nur
+**neue**: Wo zu einem Bild schon eine XMP-Datei liegt, bleibt sie unberührt.
+
+- [x] Zwei unabhängige Prüfer: 11 Befunde, keiner mit Datenverlust, alle behoben (Test zuerst):
+  - zweite Karte am selben Laufwerksbuchstaben gilt jetzt als „bereits importiert“;
+  - Verknüpfungen beim Verschieben werden kopiert;
+  - Umbenennen: „Quelle ersetzt“ und fremde Windows-Fehler gelten nicht mehr als „Name belegt“;
+  - Ziel einheitlich gespeichert;
+  - Verschieben: kaputte Zielkopie wird neu kopiert;
+  - `_geloescht_` gilt nicht als freier Platz;
+  - „2021_01“ ist kein Jahresordner;
+  - Fenstertexte („Nicht fertig geworden“, „alles erledigt“, „Unbekannt“, „zuruecklegen“).
+- [x] Farbmarken (Tasten 6–9, Knöpfe), Filter „noch nicht bewertet“ und je Farbe.
+- [x] Bewerten mit der Maus (Knopfleiste), „Nach dem Bewerten zum nächsten Bild“.
+- [x] Große Ansicht: Kameradaten, Lupe in voller Größe, Vorab-Laden der Nachbarn.
+- [x] Vergleich von zwei bis vier Bildern.
+- [x] Vorschaubilder lokal zwischengespeichert.
+- [x] Live-Photos (HEIC + MOV) als ein Bild.
+- [x] XMP lesen; XMP nur neu anlegen.
+- [ ] Volle Tests, CI, Release v0.11.
+- [ ] Später: Videos abspielen (braucht Qt Multimedia im Paket), Serien und Belichtungsreihen
+  stapeln, Tasten frei belegen, Reiter „Sichten“ in der Browser-Fassung.
+
 ## Ohne feste Phase
 
 - [ ] Nichts offen.

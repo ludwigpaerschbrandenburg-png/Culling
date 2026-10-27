@@ -84,11 +84,11 @@ def test_sichten_zeigt_das_archiv_und_bewertet_ohne_etwas_zu_veraendern(app, tmp
     erstes = s.alle[s.raster.item(0).data(sichtfenster.ROLLE_NR)]
     QTest.keyClick(s.raster, Qt.Key.Key_3)
     QTest.keyClick(s.raster, Qt.Key.Key_P)
-    assert s.stand[erstes.schluessel] == (3, "auswahl")
+    assert s.stand[erstes.schluessel] == (3, "auswahl", "")
     assert "★★★☆☆" in s.raster.item(0).text() and "Auswahl" in s.raster.item(0).text()
     s.raster.selectAll()
     QTest.keyClick(s.raster, Qt.Key.Key_X)
-    assert all(m == "ausschuss" for _st, m in s.stand.values()) and len(s.stand) == s.raster.count()
+    assert all(b.markierung == "ausschuss" for b in s.stand.values()) and len(s.stand) == s.raster.count()
     assert f"{s.raster.count()} Ausschuss" in s.zahlen.text() or f"{meldungen.anzahl(s.raster.count())} Ausschuss" in s.zahlen.text()
 
     # Filter
@@ -99,14 +99,14 @@ def test_sichten_zeigt_das_archiv_und_bewertet_ohne_etwas_zu_veraendern(app, tmp
     s.filter.setCurrentIndex(s.filter.findData("alle"))
     s.raster.selectAll()
     QTest.keyClick(s.raster, Qt.Key.Key_U)
-    assert {m for _st, m in s.stand.values()} == {""} and s.stand == {erstes.schluessel: (3, "")}
+    assert {b.markierung for b in s.stand.values()} == {""} and s.stand == {erstes.schluessel: (3, "", "")}
 
     # Grosse Ansicht: Eingabe oeffnet, Pfeil blaettert, Esc zurueck.
     s.raster.setCurrentRow(jpg)
     QTest.keyClick(s.raster, Qt.Key.Key_Return)
     assert s.stapel.currentWidget() is s.gross
     _fertig_laden(app, s)
-    assert s.gross.bild is not None and not s.gross.pixmap().isNull()
+    assert s.gross.bild is not None and not s.gross.bild.isNull()
     QTest.keyClick(s.gross, Qt.Key.Key_5)
     gross_schluessel = s.alle[s.gross_nr].schluessel
     assert s.stand[gross_schluessel][0] == 5 and "★★★★★" in s.titel.text()
@@ -119,7 +119,7 @@ def test_sichten_zeigt_das_archiv_und_bewertet_ohne_etwas_zu_veraendern(app, tmp
     f.close()
 
     # Bewertungen bleiben (neues Fenster, neue Seite) - in bewertungen.db.
-    erwartet = {erstes.schluessel: (3, ""), gross_schluessel: (5, "")}
+    erwartet = {erstes.schluessel: (3, "", ""), gross_schluessel: (5, "", "")}
     assert sichten.Bewertungen(lokal).lesen(list(erwartet)) == erwartet
     # Im Archiv hat sich nichts geaendert, und fotosort.db ist unberuehrt.
     assert _stand(ziel) == vorher
@@ -203,3 +203,160 @@ def test_vorschau_auf_ssd_mit_allen_kernen(monkeypatch):
     assert sichtfenster.leser_fuer("hdd") == sichtfenster.LESER == sichtfenster.leser_fuer("")
     monkeypatch.setattr(sichtfenster.os, "cpu_count", lambda: 2)
     assert sichtfenster.leser_fuer("ssd") == sichtfenster.LESER
+
+
+# --- Runde 3b (v0.11): Sichten wie ein Profi -----------------------------------------
+
+
+@pytest.fixture
+def sicht(app, tmp_path, quelle, ziel):
+    """Ein Archiv aus dem Testbaum plus ein Tagesordner mit sechs Bildern
+    (der neueste, also beim Oeffnen gewaehlt); das Fenster im Reiter Sichten."""
+    _vorbereiten(ziel, quelle)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    probe = ziel / "2027" / "2027-01-01"
+    for i in range(6):
+        testbaum._schreiben(probe / f"P_{i:04d}.jpg", testbaum._JPEG)
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob", ziel=str(ziel))
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    f.reiter_wechseln("sichten")
+    s = f.sichten
+    _fertig_laden(app, s)
+    yield f, s, probe
+    f.close()
+
+
+def test_farben_per_taste_und_knopf(app, sicht):
+    f, s, _probe = sicht
+    s.raster.setCurrentRow(0)
+    erstes = s.alle[s.raster.item(0).data(sichtfenster.ROLLE_NR)]
+    QTest.keyClick(s.raster, Qt.Key.Key_6)
+    assert s.stand[erstes.schluessel].farbe == "rot" and "Rot" in s.raster.item(0).text()
+    QTest.keyClick(s.raster, Qt.Key.Key_6)                       # noch einmal: weg
+    assert erstes.schluessel not in s.stand
+    s.farb_knoepfe["lila"].click()
+    assert s.stand[erstes.schluessel].farbe == "lila"
+    s.sterne_knoepfe[4].click()
+    assert s.stand[erstes.schluessel] == (4, "", "lila")
+    s.filter.setCurrentIndex(s.filter.findData("farbe_lila"))
+    assert s.raster.count() == 1
+    s.filter.setCurrentIndex(s.filter.findData("unbewertet"))
+    assert s.raster.count() == len(s.alle) - 1
+
+
+def test_nach_dem_bewerten_weiter(app, sicht):
+    f, s, _probe = sicht
+    s.weiter.setChecked(True)
+    s.raster.setCurrentRow(0)
+    QTest.keyClick(s.raster, Qt.Key.Key_3)
+    assert s.raster.currentRow() == 1
+    s.gross_zeigen(s.gezeigt[1])
+    QTest.keyClick(s.gross, Qt.Key.Key_2)
+    assert s.gross_nr == s.gezeigt[2]
+    assert s.stand[s.alle[s.gezeigt[1]].schluessel].sterne == 2
+
+
+def test_bewertung_aus_vorhandener_xmp_wird_gezeigt_und_beim_aendern_uebernommen(app, sicht, archiv_basis):
+    f, s, probe = sicht
+    (probe / "P_0000.xmp").write_text('<x:xmpmeta><rdf:Description xmp:Rating="4" xmp:Label="Blue"/></x:xmpmeta>', encoding="utf-8")
+    s.neu_einlesen()
+    erstes = next(b for b in s.alle if b.name == "P_0000.jpg")
+    assert s.stand[erstes.schluessel] == (4, "", "blau") and erstes.schluessel in s.aus_xmp
+    assert "Blau" in s.eintraege[s.alle.index(erstes)].text()
+    s.raster.setCurrentRow(s.gezeigt.index(s.alle.index(erstes)))
+    QTest.keyClick(s.raster, Qt.Key.Key_5)
+    # Gespeichert mit der Farbe aus der XMP-Datei - die XMP-Datei selbst bleibt.
+    assert s.bew.lesen([erstes.schluessel])[erstes.schluessel] == (5, "", "blau")
+    assert "Blue" in (probe / "P_0000.xmp").read_text(encoding="utf-8")
+
+
+def test_xmp_knopf_legt_nur_neue_dateien_an(app, sicht, monkeypatch):
+    f, s, probe = sicht
+    vorhanden = probe / "P_0001.xmp"
+    vorhanden.write_bytes(b"<x:xmpmeta>von Lightroom</x:xmpmeta>")
+    s.neu_einlesen()
+    vorher = _stand(s.ziel)
+    for name, sterne in (("P_0001.jpg", 3), ("P_0002.jpg", 5)):
+        nr = next(i for i, b in enumerate(s.alle) if b.name == name)
+        s.raster.clearSelection()
+        s.raster.setCurrentRow(s.gezeigt.index(nr))
+        s.bewerten(sterne=sterne)
+    monkeypatch.setattr(sichtfenster.QMessageBox, "question", lambda *a, **k: sichtfenster.QMessageBox.StandardButton.Yes)
+    s.xmp_knopf.click()
+    nachher = _stand(s.ziel)
+    neu = set(nachher) - set(vorher)
+    assert {Path(n).name for n in neu} == {"P_0002.xmp"}, neu
+    assert all(nachher[n] == vorher[n] for n in vorher)                 # nichts Vorhandenes geaendert
+    assert "1 XMP-Dateien neu angelegt" in s.zahlen.text() and "schon eine" in s.zahlen.text()
+    # Nein auf die Frage: nichts geschieht.
+    monkeypatch.setattr(sichtfenster.QMessageBox, "question", lambda *a, **k: sichtfenster.QMessageBox.StandardButton.No)
+    s.xmp_knopf.click()
+    assert _stand(s.ziel) == nachher
+
+
+def test_vergleich_von_drei_bildern(app, sicht):
+    f, s, _probe = sicht
+    s.raster.setCurrentRow(0)
+    QTest.keyClick(s.raster, Qt.Key.Key_C)                       # nur eines gewaehlt
+    assert s.stapel.currentWidget() is s.raster and "zwei bis vier" in s.zahlen.text()
+    for i in range(3):
+        s.raster.item(i).setSelected(True)
+    QTest.keyClick(s.raster, Qt.Key.Key_C)
+    assert s.stapel.currentWidget() is s.vergleich
+    sichtbar = [feld for feld in s.vergleich.felder if feld.isVisible()]
+    assert len(sichtbar) == 3
+    _fertig_laden(app, s)
+    assert all(feld.bild is not None for feld in sichtbar)
+    QTest.keyClick(s.vergleich.felder[0], Qt.Key.Key_Right)
+    QTest.keyClick(s.vergleich.felder[0], Qt.Key.Key_2)
+    zweites = s.alle[s.vergleich.nummern[1]]
+    assert s.stand[zweites.schluessel].sterne == 2
+    assert s.vergleich.felder[1].aktiv and "★★☆☆☆" in s.vergleich.unter[1].text()
+    QTest.keyClick(s.vergleich.felder[0], Qt.Key.Key_Escape)
+    assert s.stapel.currentWidget() is s.raster
+
+
+def test_lupe_und_vorab_laden(app, sicht):
+    f, s, _probe = sicht
+    s.gross_zeigen(s.gezeigt[0])
+    _fertig_laden(app, s)
+    assert s.gross.bild is not None
+    # Die Nachbarn liegen schon bereit.
+    assert s.gezeigt[1] in s.gross_bilder
+    QTest.keyClick(s.gross, Qt.Key.Key_Z)
+    assert s.gross.lupe
+    _fertig_laden(app, s)
+    assert s.gross.voll is not None
+    QTest.keyClick(s.gross, Qt.Key.Key_Z)
+    assert not s.gross.lupe
+    # Blaettern zum vorab geladenen Bild zeigt es sofort.
+    QTest.keyClick(s.gross, Qt.Key.Key_Right)
+    assert s.gross.bild is not None and s.gross_nr == s.gezeigt[1]
+
+
+def test_kameradaten_in_der_grossen_ansicht(app, sicht):
+    f, s, _probe = sicht
+    # Ein Tag des Testbaums mit EXIF-Daten (Sony ILCE-7CM2).
+    ordner = next(p.parent for p in s.ziel.rglob("DSC01234*.JPG"))
+    s._ordner_gewaehlt(s._finden(ordner))
+    nr = next(i for i, b in enumerate(s.alle) if b.name.startswith("DSC01234"))
+    s.gross_zeigen(nr)
+    _fertig_laden(app, s)
+    assert s.kameradaten.isVisible() and "ILCE-7CM2" in s.kameradaten.text(), s.kameradaten.text()
+
+
+def test_vorschaubilder_werden_lokal_zwischengespeichert(app, tmp_path, sicht, monkeypatch, archiv_basis):
+    f, s, probe = sicht
+    zwischen = s.zwischen
+    assert zwischen is not None and zwischen.is_dir() and zwischen.is_relative_to(_lokal(s.ziel, archiv_basis))
+    dateien = list(zwischen.rglob("*.vorschau"))
+    assert len(dateien) >= 6
+    assert not list(s.ziel.rglob("*.vorschau"))                 # nie im Archiv
+    gelesen: list = []
+    echt = sichtfenster.bild_laden
+    monkeypatch.setattr(sichtfenster, "bild_laden", lambda *a, **k: gelesen.append(1) or echt(*a, **k))
+    s.neu_einlesen()
+    _fertig_laden(app, s)
+    assert not gelesen and all(not s.vorschau[i].isNull() for i in s.gezeigt)

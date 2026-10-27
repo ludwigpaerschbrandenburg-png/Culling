@@ -96,7 +96,8 @@ def test_bewertungen_bleiben_und_das_archiv_bleibt_unberuehrt(ziel, tmp_path):
     bew.setzen([s[3]], sterne=2)
     bew.setzen([s[3]], sterne=0)                                   # zurueck auf nichts
     neu = sichten.Bewertungen(lokal)                               # nach einem Neustart
-    assert neu.lesen(s) == {s[0]: (4, ""), s[1]: (4, "auswahl"), s[2]: (0, "ausschuss")}
+    # Seit v0.11 mit Farbe (dritter Wert).
+    assert neu.lesen(s) == {s[0]: (4, "", ""), s[1]: (4, "auswahl", ""), s[2]: (0, "ausschuss", "")}
     assert (lokal / sichten.DATEINAME).is_file()
     # Nichts im Archiv hat sich veraendert - kein Byte, keine Aenderungszeit, keine neue Datei.
     assert _stand(ziel) == vorher

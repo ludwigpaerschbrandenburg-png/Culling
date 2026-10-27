@@ -29,6 +29,6 @@ der CI gegen das Windows-Paket.
 | [10](10-liste-duplikate.png) | Liste (Duplikate), seitenweise |
 | [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
 | [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
-| [13](13-sichten.png) | Reiter „Sichten“ (seit v0.8): Ordner des Archivs, Vorschaubilder, Sterne und Markierung (die Testbilder sind nur 1 × 1 Pixel groß) |
+| [13](13-sichten.png) | Reiter „Sichten“ (seit v0.8, ausgebaut in v0.11): Ordner des Archivs, Vorschaubilder, Knopfleiste für Sterne, Markierung und Farbe, Vergleichen (die Testbilder sind nur 1 × 1 Pixel groß) |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).
