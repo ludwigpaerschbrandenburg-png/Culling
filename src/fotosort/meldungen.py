@@ -1683,6 +1683,9 @@ def aufraeumen_ergebnis(e) -> str:
         f"  Loeschung verweigert (Ziel fehlt oder weicht ab, Lesefehler): {anzahl(e.verweigert)}",
         f"  freigegebener Platz:               {groesse(e.bytes_frei)}",
     ]
+    if getattr(e, "bytes_papierkorb", 0):
+        zeilen.append(f"  im Ordner _geloescht_:             {groesse(e.bytes_papierkorb)}"
+                      " (frei erst, wenn Sie den Ordner selbst loeschen)")
     for wurzel in getattr(e, "quellen_weg", []):
         zeilen.append(f"  Quelle waehrend des Laufs nicht mehr erreichbar - ihre Dateien bleiben, wie sie sind: {wurzel}")
     if e.leere_ordner_entfernt or e.reste_entfernt or e.reste_verweigert:
@@ -2067,10 +2070,6 @@ def arbeit_schritt_unbekannt(schritt: str) -> str:
     return f"Unbekannter Schritt im Auftrag: {schritt}"
 
 
-def arbeit_mit_fehlern(schritt: str) -> str:
-    return f"Der Schritt '{schritt}' ist durchgelaufen, hat aber Fehler gemeldet (siehe Bericht)."
-
-
 # ------------------------------------------------ Oberflaeche (Phase 7) ----
 # Diese Texte erscheinen nur im Fenster (UTF-8), nie in der Windows-Konsole.
 # Deshalb duerfen sie - anders als der Rest dieser Datei - Umlaute tragen.
@@ -2419,6 +2418,10 @@ def ob_server_fehlgeschlagen(fehler) -> str:
     return f"Der Server der Oberfläche konnte nicht gestartet werden: {fehler}"
 
 
+def ob_ohne_modell(n: int, ordner: str) -> str:
+    return f"ohne Modell: {anzahl(n)} → Ordner „{ordner or 'Unbekannte_Kamera'}“"
+
+
 def ob_selbsttest(ok: bool, einzelheit: str, fenster: bool = True) -> str:
     if ok and fenster:
         return f"Selbsttest bestanden: Fenster geöffnet, Seite geladen, Zustand gelesen. {einzelheit}"
@@ -2431,8 +2434,20 @@ def ob_abgebrochen_hart(schritt: str) -> str:
     return f"Der Schritt {SCHRITT_NAME.get(schritt, schritt)} wurde sofort beendet. Angefangene Kopien räumt der nächste Lauf auf."
 
 
-def ob_phase_kurz(niedrigster: str | None, dateien_erfasst: bool) -> str:
-    """Die aktuelle Phase in einem Satz fuer die Startseite."""
+def ob_phase_kurz(niedrigster: str | None, dateien_erfasst: bool, naechster: str | None = None) -> str:
+    """Die aktuelle Phase in einem Satz fuer die Startseite. naechster (seit
+    v0.11): der naechste Schritt, wie ihn auch der Knopf "Weitermachen" nennt -
+    er entscheidet, sonst passten Satz und Knopf nicht zusammen (verschobene
+    Dateien und Duplikate sind keine Stufe, muessen aber noch geprueft werden)."""
+    if naechster and niedrigster != "kopieren_laeuft":
+        satz = {
+            "analyse": "Die Quellen sind durchsucht; die Analyse steht noch aus.",
+            "kopieren": "Die Analyse ist fertig; das Kopieren steht noch aus.",
+            "pruefen": "Kopiert; die Prüfung steht noch aus.",
+            "aufraeumen": "Kopiert und geprüft; die Quelle kann aufgeräumt werden.",
+        }.get(naechster)
+        if satz:
+            return satz
     if niedrigster is None:
         return "Es sind noch keine Dateien erfasst." if not dateien_erfasst else "Alle erfassten Dateien sind erledigt oder übersprungen."
     return {

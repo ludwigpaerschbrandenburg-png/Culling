@@ -409,6 +409,25 @@ def test_nicht_ausgefuehrter_schritt_nennt_den_grund(app, tmp_path):
     f.close()
 
 
+def test_durchgelaufen_mit_fehlern_heisst_nicht_nicht_fertig(app, tmp_path, quelle, ziel, monkeypatch):
+    """Pruefer-Befund (v0.11): Eine Analyse, die durchlief, aber bei einer
+    Datei einen Fehler meldete, hiess im Fenster "Nicht fertig geworden – der
+    Grund steht oben", und oben stand der interne Name 'analyse'."""
+    from fotosort import steuerung
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    auftrag = tmp_path / "auftrag.json"
+    import json
+    auftrag.write_text(json.dumps({"schritt": "analyse", "ziel": str(ziel), "status_datei": str(ab.status_datei),
+                                   "steuer_datei": str(ab.steuer_datei)}), encoding="utf-8")
+    monkeypatch.setattr(cli, "befehl_analyse", lambda args, konsole: cli.FEHLER)   # mit Fehlern durchgelaufen
+    cli.main(["arbeit", "--auftrag", str(auftrag)])
+    l = ab.lauf_status()
+    assert l["zustand"] == steuerung.ZUSTAND_FEHLER
+    assert l["zustand_text"] == meldungen.OB_ZUSTAND["fehler"], l["zustand_text"]
+    assert "'analyse'" not in l["hinweis"]
+
+
 def test_fehlender_gemerkter_zielordner_ist_kein_neues_archiv(app, tmp_path, monkeypatch):
     """Platte nicht angeschlossen oder Ordner umbenannt: frueher "NEUES ARCHIV"
     und eine Anlegen-Frage ohne Warnung vor einem zweiten, leeren Archiv."""

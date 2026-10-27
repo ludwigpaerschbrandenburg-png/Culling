@@ -211,6 +211,14 @@ class Zielstruktur:
             vorhanden_genutzt = name is not None
             if name is None and erlaubt:
                 kandidaten = [n for n in vorhanden if self.passt(_nfc(n), gleich)]
+                if tag is not None and soll[i] is not None:
+                    # Seit v0.11: Ein Ordner "mit Zusatz" muss auch als Datum
+                    # dasselbe meinen - "2021_01" oder "2021 Januar" ist ein
+                    # Monat, kein Jahresordner "2021" mit Zusatz; ein
+                    # Jahresbereich ("2021 - 2022 Schule") gar kein Datum.
+                    kandidaten = [n for n in kandidaten
+                                  if (z := strukturen.zeitraum(_nfc(n), z_aktuell)) is not None
+                                  and z.rang == soll[i].rang and z.umfasst(tag)]
                 if kandidaten:
                     if len(kandidaten) > 1:
                         mehrdeutig = True

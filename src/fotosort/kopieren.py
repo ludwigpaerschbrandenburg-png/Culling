@@ -31,6 +31,7 @@ Datei), sowie liegengebliebene .part-Dateien nach SPEC Abschnitt 5.
 from __future__ import annotations
 
 import os
+import stat as stat_modul
 import threading
 import time
 import unicodedata
@@ -250,6 +251,16 @@ def _rand_abdruck(p: Path, groesse: int) -> bytes:
             f.seek(-VORAB, os.SEEK_END)
             h.update(f.read(VORAB))
     return h.digest()
+
+
+def _verknuepfung(p: Path) -> bool:
+    """Ist die Quelldatei eine Verknuepfung (Symlink, unter Windows auch jeder
+    Analysepunkt)? Umbenennen bewegte dann nur den Verweis ins Archiv."""
+    try:
+        st = os.lstat(_L(p))
+    except OSError:
+        return False
+    return stat_modul.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
 
 
 def _L(p: Path) -> Path:
@@ -707,6 +718,11 @@ class _Lauf:
         doch_kopieren: list[_Auftrag] = []
         # Begleitdateien zuletzt: Ob ihr Bild schon im Archiv liegt, steht dann fest.
         for a in sorted(auftraege, key=lambda a: a.zeile["dateityp"] == "sidecar"):
+            if _verknuepfung(a.quelle):
+                # Eine Verknuepfung wird kopiert (ihr Ziel gelesen), nie
+                # selbst ins Archiv umbenannt.
+                doch_kopieren.append(a)
+                continue
             st = _stat(a.quelle)
             if st is None:
                 self._quelle_fehlt(a)
@@ -903,7 +919,14 @@ class _Lauf:
                 return
             e.quelle_geloescht += 1
             return
-        grund = L.grund or (meldungen.grund_lesung(L.art) if L.art != "ok" else meldungen.GRUND_ZIEL_ABWEICHUNG)
+        if L.art == "ziel_fehlt":
+            # Wie eine fehlgeschlagene Pruefung: Der naechste Lauf kopiert neu
+            # (_nach_pruefung_zuruecksetzen); die Quelle bleibt bis dahin.
+            grund = meldungen.GRUND_PRUEFUNG_FEHLT
+        elif L.art == "ok" and L.ziel_hash != h:
+            grund = meldungen.GRUND_PRUEFUNG_INHALT
+        else:
+            grund = L.grund or (meldungen.grund_lesung(L.art) if L.art != "ok" else meldungen.GRUND_ZIEL_ABWEICHUNG)
         self.dbank.status_setzen(quellpfad, "fehler", grund)
         self.dbank.ereignis(self.lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
         e.loeschung_verweigert += 1

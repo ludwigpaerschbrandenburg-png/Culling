@@ -269,3 +269,30 @@ def test_jede_gleich_grosse_archivdatei_wird_nur_einmal_angelesen(tmp_path, ziel
     assert archiv and len(archiv) == len(set(archiv)), sorted(archiv)
     zeilen = _zeilen(nachschauen, ziel)
     assert all(zeilen[str(p)]["status"] == "kopiert" for p in quellen)
+
+
+def test_ziel_ueber_verknuepfung_oder_relativ_wird_einheitlich_gespeichert(baum, quelle, tmp_path, nachschauen, monkeypatch):
+    """Pruefer-Befund (v0.11): Ein Ziel, das ueber eine Verknuepfung (unter
+    Windows: Laufwerksbuchstabe eines Netzlaufwerks) oder relativ angegeben
+    wird, steht in der Datenbank in genau einer Schreibweise - sonst passen
+    Ziel-Index und kopierte Dateien nicht zusammen, und die Pruefsummen-Liste
+    wird nie erneuert."""
+    import os
+    import sys
+    if sys.platform.startswith("win"):
+        pytest.skip("Symlinks brauchen unter Windows besondere Rechte")
+    echt = tmp_path / "EchtesZiel"
+    echt.mkdir()
+    link = tmp_path / "ZielLink"
+    link.symlink_to(echt, target_is_directory=True)
+    _archiv_von_hand(echt, Path(baum["analog"]))
+    monkeypatch.chdir(tmp_path)
+    assert _cli("scan", "--ziel", "ZielLink", "--quelle", quelle) == cli.OK
+    assert _cli("analyse", "--ziel", "ZielLink") == cli.OK
+    assert _cli("kopieren", "--ziel", str(link)) == cli.OK
+    wurzel = str(echt.resolve()) + os.sep
+    with nachschauen(echt) as d:
+        index = [r["zielpfad"] for r in d.verbindung.execute("SELECT zielpfad FROM ziel_index")]
+        ziele = [r["zielpfad"] for r in d.verbindung.execute("SELECT zielpfad FROM dateien WHERE zielpfad != ''")]
+    assert index and ziele
+    assert all(p.startswith(wurzel) for p in index + ziele), [p for p in index + ziele if not p.startswith(wurzel)][:3]

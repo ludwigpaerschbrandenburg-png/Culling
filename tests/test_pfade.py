@@ -303,8 +303,11 @@ def test_rueckfall_laesst_eine_zwischendurch_ersetzte_quelle_stehen(tmp_path, mo
         Path(von).write_bytes(b"neu")
 
     monkeypatch.setattr(pfade.os, "link", link_dann_ersetzt)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as fehler:
         pfade.umbenennen_ohne_ueberschreiben(a, b)
+    # Pruefer-Befund (v0.11): kein FileExistsError - sonst versuchte der
+    # Aufrufer den naechsten Namen und bewegte die fremde, ungepruefte Datei.
+    assert not isinstance(fehler.value, FileExistsError)
     assert a.read_bytes() == b"neu" and b.read_bytes() == b"alt"
 
 
@@ -538,6 +541,19 @@ def test_windows_umbenennen_fehlernummern(windows_umbenennen, nummer, fehler):
     with pytest.raises(fehler):
         pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/x/a.jpg"))
     assert len(k.aufrufe) == 1 and not pausen
+
+
+def test_windows_umbenennen_anderes_laufwerk_und_fremde_fehler(windows_umbenennen):
+    """Pruefer-Befund (v0.11): Fehler 17 (anderes Laufwerk, etwa ein geklontes
+    mit gleicher Seriennummer) heisst: Umbenennen geht hier nicht - kopieren.
+    Andere Fehlernummern duerfen nie als "Name belegt" gelten (sonst: Schleife)."""
+    windows_umbenennen([17])
+    with pytest.raises(pfade.KeinNoReplace):
+        pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/y/a.jpg"))
+    windows_umbenennen([1117])
+    with pytest.raises(OSError) as fehler:
+        pfade.umbenennen_ohne_ueberschreiben(Path("/x/a.part"), Path("/x/a.jpg"))
+    assert not isinstance(fehler.value, (FileExistsError, FileNotFoundError))
 
 
 def test_windows_umbenennen_gibt_nach_der_wartezeit_auf(windows_umbenennen):

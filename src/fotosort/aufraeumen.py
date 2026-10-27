@@ -53,7 +53,8 @@ class Ergebnis:
     nachgetragen: int = 0
     quelle_veraendert: int = 0
     verweigert: int = 0
-    bytes_frei: int = 0
+    bytes_frei: int = 0             # endgueltig geloescht: Platz ist frei
+    bytes_papierkorb: int = 0       # im Ordner _geloescht_: frei erst, wenn der Nutzer ihn loescht
     bytes_gelesen: int = 0
     leere_ordner_entfernt: int = 0
     reste_entfernt: int = 0
@@ -242,11 +243,12 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
         dbank.ereignis(lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
         e.verweigert += 1
         return
-    e.bytes_frei += int(z["groesse"])
     if neu is None:
         e.geloescht += 1
+        e.bytes_frei += int(z["groesse"])
     else:
         e.in_papierkorb += 1
+        e.bytes_papierkorb += int(z["groesse"])
 
 
 def _quelle_weg(z, dbank, lauf, e) -> bool:

@@ -309,3 +309,26 @@ def test_eigenes_archiv_bleibt_wie_es_ist(tmp_path, konf):
     _bild(tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "A7C2", "DSC1.ARW")
     pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, 1, 15, 12), "iPhone 15", "IMG_1.HEIC", konf)
     assert pfad == tmp_path / "2021" / "2021-01 Januar" / "2021-01-15" / "iPhone 15" / "IMG_1.HEIC"
+
+
+@pytest.mark.parametrize("ordner, monat, erwartet", [
+    (["2021_01", "2021_02"], 2, "2021_02"),
+    (["2021_01", "2021_02"], 3, None),
+    (["2021 Januar", "2021 Februar"], 3, None),
+    (["2021 - 2022 Schule"], 3, None),
+])
+def test_monatsordner_wird_nicht_zum_jahresordner(tmp_path, konf, ordner, monat, erwartet):
+    """Pruefer-Befund (v0.11): Ein vorhandener Monatsordner wie „2021_01“ oder
+    „2021 Januar“ ist kein Jahresordner „2021“ mit Zusatz - sonst landeten
+    Februar- und Maerz-Bilder im Januar-Ordner. Auch ein Jahresbereich nicht."""
+    for n in ordner:
+        _bild(tmp_path / n)
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path), _d(2021, monat, 5, 12), "A7C2", "IMG_1.JPG", konf)
+    if erwartet:
+        assert pfad == tmp_path / erwartet / "IMG_1.JPG"
+    else:
+        assert pfad.relative_to(tmp_path).parts[0] == "2021", pfad
+    # "2021 Hochzeit" bleibt ein Jahresordner mit Zusatz.
+    _bild(tmp_path / "Archiv2" / "2021 Hochzeit" / "x")
+    pfad, _ort = ziel.zielpfad(ziel.Zielstruktur(tmp_path / "Archiv2"), _d(2021, monat, 5, 12), "A7C2", "IMG_1.JPG", konf)
+    assert pfad.relative_to(tmp_path / "Archiv2").parts[0] == "2021 Hochzeit", pfad

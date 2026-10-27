@@ -155,6 +155,17 @@ def test_verschieben_zieldatei_nach_dem_kopieren_veraendert_wird_nicht_geloescht
     assert "Loeschung verweigert:         1" in capsys.readouterr().out
     z = _zeilen(nachschauen, ziel)[str(datei)]
     assert datei.exists() and z["status"] == "fehler"
+    # Pruefer-Befund (v0.11): Wie nach einer fehlgeschlagenen Pruefung gilt die
+    # Zieldatei als kaputt - der naechste Lauf kopiert neu (neuer Name, die
+    # kaputte Datei bleibt liegen) und verschiebt dann erst.
+    from fotosort import meldungen
+    assert z["fehlergrund"].startswith(meldungen.GRUND_PRUEFUNG), z["fehlergrund"]
+    kaputt = Path(z["zielpfad"])
+    monkeypatch.setattr(kopieren.loeschen, "frisch_lesen", original)
+    assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.OK
+    z = _zeilen(nachschauen, ziel)[str(datei)]
+    assert z["status"] == "quelle_geloescht" and not datei.exists(), z
+    assert kaputt.read_bytes() == b"kaputt" and Path(z["zielpfad"]) != kaputt
 
 
 def test_verschieben_im_rueckfall_ohne_part(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
@@ -191,3 +202,29 @@ def test_abbruch_im_verschieben_laesst_kopierte_zeilen_stehen(baum, quelle, ziel
         else:
             assert Path(qp).exists()
     assert not _parts(ziel)
+
+
+def test_verschieben_legt_keine_verknuepfung_ins_archiv(tmp_path, ziel, nachschauen):
+    """Pruefer-Befund (v0.11): Eine Verknuepfung in der Quelle (Symlink auf ein
+    Bild woanders) darf beim Verschieben auf demselben Laufwerk nicht selbst ins
+    Archiv wandern - dort laege dann nur ein Verweis, kein Bild. Sie wird
+    kopiert; das Bild, auf das sie zeigt, bleibt unangetastet."""
+    import os
+    import sys
+    if sys.platform.startswith("win"):
+        pytest.skip("Symlinks brauchen unter Windows besondere Rechte")
+    aussen = testbaum._schreiben(tmp_path / "Aussen" / "ECHT.jpg", testbaum._JPEG + b"echt")
+    q = tmp_path / "Q"
+    q.mkdir()
+    (q / "LINK.jpg").symlink_to(aussen)
+    testbaum._schreiben(q / "NORMAL.jpg", testbaum._JPEG + b"normal")
+    _vorbereiten(ziel, q)
+    assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.OK
+    zeilen = _zeilen(nachschauen, ziel)
+    z = zeilen[str(q / "LINK.jpg")]
+    assert z["zielpfad"], z
+    ablage = Path(z["zielpfad"])
+    assert ablage.is_file() and not os.path.islink(ablage), z
+    assert ablage.read_bytes() == aussen.read_bytes()
+    assert aussen.exists()
+    assert zeilen[str(q / "NORMAL.jpg")]["status"] == "verschoben"

@@ -259,6 +259,11 @@ def archiv_ort(args, konsole, anlegen: bool) -> ArchivOrt:
             raise FotosortFehler(meldungen.ziel_eltern_fehlt(ziel, ziel.parent))
         ziel.mkdir(parents=True, exist_ok=True)
         konsole.print(meldungen.ziel_angelegt(ziel))
+    # Ab hier in genau einer Schreibweise: absolut und mit aufgeloesten
+    # Verknuepfungen (relativ angegeben, Verknuepfung, unter Windows der
+    # Buchstabe eines Netzlaufwerks). Sonst stuenden Ziel-Index und kopierte
+    # Dateien in zwei Schreibweisen in der Datenbank (Pruefer-Befund v0.11).
+    ziel = pfade.aufloesen(ziel)
 
     # Der Konfigurationswert datenbank_ort wirkt nur aus einer mit --config
     # angegebenen Datei (SPEC Abschnitt 6).
@@ -1316,7 +1321,9 @@ def befehl_arbeit(args, konsole) -> int:
     elif rc == OK:
         st.beenden(steuerung.ZUSTAND_FERTIG, rc)
     else:
-        st.beenden(steuerung.ZUSTAND_FEHLER, rc, meldungen.arbeit_mit_fehlern(schritt))
+        # Durchgelaufen, aber mit Fehlern (Seit v0.11 ohne Hinweis: Ein Hinweis
+        # heisst im Fenster "nicht fertig geworden, der Grund steht oben").
+        st.beenden(steuerung.ZUSTAND_FEHLER, rc)
     return rc
 
 

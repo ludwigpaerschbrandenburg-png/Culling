@@ -938,3 +938,33 @@ def test_profil_vorschlag_schont_langsame_laufwerke_und_alte_wahl(ob, quelle, zi
     assert alt.profil == "netzwerk"
     (ordner / "zustand.json").write_text(json.dumps({"ziel": "", "quellen": [], "profil": "hdd"}), encoding="utf-8")
     assert ablauf_modul.Ablauf(ordner=ordner).profil_von_hand is False   # hdd war nur der Standard
+
+
+def test_startseite_sagt_nicht_alles_erledigt_wenn_noch_zu_pruefen_ist(tmp_path, quelle, ziel):
+    """Pruefer-Befund (v0.11): Nach Verschieben auf derselben Platte (Status
+    'verschoben') stand auf der Startseite "Alle erfassten Dateien sind
+    erledigt", der Knopf darunter hiess aber "Weitermachen: Prüfen"."""
+    from fotosort import cli
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.OK
+    info = ablauf_modul.Ablauf(ziel=str(ziel), ordner=tmp_path / "ob").archiv_info()
+    assert info["naechster"] == "pruefen", info
+    assert "Prüfung steht noch aus" in info["phase"], info["phase"]
+
+
+def test_ohne_modell_nennt_den_echten_ordner(tmp_path, quelle, ziel):
+    """Pruefer-Befund (v0.11): Im Fenster stand "→ Ordner „Unbekannt“", der
+    Ordner heisst aber (Vorgabe) "Unbekannte_Kamera"."""
+    from fotosort import cli, meldungen
+    assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
+    assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
+    zf = ablauf_modul.Ablauf(ziel=str(ziel), ordner=tmp_path / "ob").zusammenfassung("analyse")
+    assert zf["ohne_modell"] > 0 and zf["ohne_modell_ordner"] == "Unbekannte_Kamera"
+    text = meldungen.ob_ohne_modell(zf["ohne_modell"], zf["ohne_modell_ordner"])
+    assert "Unbekannte_Kamera" in text and "Unbekannt“" not in text
+
+
+def test_kurzname_zuruecklegen():
+    from fotosort.oberflaeche import desktop
+    assert "Zurücklegen" == desktop.Hauptfenster.kurzname(type("F", (), {"zustand": {}})(), "zuruecklegen")

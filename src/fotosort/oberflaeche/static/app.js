@@ -470,7 +470,7 @@
           zaehlerZeigen(zf.zeilen);
           if (lauf.log && lauf.schritt === letzter) { $("log").textContent = lauf.log; $("log").classList.remove("versteckt"); }
           else $("log").classList.add("versteckt");
-          kamerasZeigen(letzter === "analyse" ? zf.modelle : null, zf.ohne_modell);
+          kamerasZeigen(letzter === "analyse" ? zf.modelle : null, zf.ohne_modell, zf.ohne_modell_ordner);
           phasenSetzen(n.schritt === "fertig" ? "" : n.schritt, 0);
           if (n.schritt === "fertig") { alle("#phasen-liste li").forEach(function (li) { li.className = "ist-fertig"; }); $("phasen-fill").style.width = "100%"; }
           kartenFuellen(n, z);
@@ -518,7 +518,7 @@
   }
 
   // -- Kamera-Tabelle ---------------------------------------------------------
-  function kamerasZeigen(modelle, ohne) {
+  function kamerasZeigen(modelle, ohne, ohneOrdner) {
     var box = $("kameras"); leer(box);
     if (!modelle || !modelle.length) { box.classList.add("versteckt"); return; }
     box.classList.remove("versteckt");
@@ -541,7 +541,7 @@
     box.appendChild(t);
     var zeile = el("div", null, "zeile");
     zeile.appendChild(knopf("Ordnernamen übernehmen", "btn-ghost", aliaseSenden));
-    if (ohne) zeile.appendChild(el("span", "ohne Modell: " + ohne + " → Ordner „Unbekannt“", "hinweis"));
+    if (ohne) zeile.appendChild(el("span", "ohne Modell: " + ohne + " → Ordner „" + (ohneOrdner || "Unbekannte_Kamera") + "“", "hinweis"));
     box.appendChild(zeile);
   }
 

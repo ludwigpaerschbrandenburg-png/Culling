@@ -607,3 +607,16 @@ def test_papierkorb_rueckfall_entfernt_keine_waehrenddessen_geaenderte_quelle(ba
             loeschen.quelldatei_entfernen(d, lauf, z["quellpfad"], lesung, loeschen.WEISE_PAPIERKORB, False, korb)
         assert baum["analog"].read_bytes().endswith(b"neu")
         assert not any(p.is_file() for p in korb.rglob("*")) if korb.exists() else True
+
+
+def test_freier_platz_nur_fuer_endgueltig_geloeschtes():
+    """Pruefer-Befund (v0.11): Was in den Ordner _geloescht_ wandert, macht noch
+    keinen Platz frei - das geschieht erst, wenn der Nutzer den Ordner loescht.
+    Der Bericht sagt das so."""
+    from fotosort import aufraeumen, meldungen
+    e = aufraeumen.Ergebnis()
+    e.in_papierkorb, e.bytes_papierkorb = 3, 3 * 1024 * 1024
+    text = meldungen.aufraeumen_ergebnis(e)
+    zeile = next(z for z in text.splitlines() if "freigegebener Platz" in z)
+    assert zeile.rstrip().endswith(meldungen.groesse(0)), zeile
+    assert meldungen.groesse(3 * 1024 * 1024) in text and "_geloescht_" in text

@@ -531,7 +531,11 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
             raise FileExistsError(str(nach))
         if fehler in (2, 3):  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
             raise FileNotFoundError(str(von))
-        raise OSError(fehler, f"MoveFileEx fehlgeschlagen (Fehler {fehler})", str(von))
+        if fehler == 17:  # ERROR_NOT_SAME_DEVICE: doch ein anderes Laufwerk - kopieren
+            raise KeinNoReplace(f"anderes Laufwerk: {von} -> {nach}")
+        # Nur mit Text, ohne Fehlernummer: Python leitet aus einer Windows-
+        # Nummer sonst eine Unterklasse ab (17 waere "Datei existiert").
+        raise OSError(f"MoveFileEx fehlgeschlagen (Fehler {fehler}): {von}")
     import errno
 
     if _renameat2_noreplace(von, nach):
@@ -564,7 +568,10 @@ def umbenennen_ohne_ueberschreiben(von: Path, nach: Path) -> None:
         # Unter dem alten Namen liegt inzwischen eine ANDERE Datei: nicht
         # anruehren. Der neue Name ist jetzt der einzige der alten Datei und
         # bleibt auch. Beide stehen lassen, als Fehler melden.
-        raise OSError(errno.EEXIST, "Datei waehrend des Umbenennens ersetzt", str(von))
+        # Bewusst ohne Fehlernummer: Ein FileExistsError hiesse fuer den
+        # Aufrufer "Name belegt, naechsten versuchen" - und der bewegte dann
+        # die fremde, ungepruefte Datei unter dem alten Namen.
+        raise OSError(f"Datei waehrend des Umbenennens ersetzt: {von}")
     try:
         os.unlink(lang(von))
     except FileNotFoundError:

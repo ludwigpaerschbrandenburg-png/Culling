@@ -869,12 +869,14 @@ class Datenbank:
             # Ordner _geloescht_ geholt, oder "zuruecklegen" wurde zwischen
             # Umbenennen und Datenbank unterbrochen): neu einordnen (seit v0.8).
             # Ihr Inhalt liegt im Archiv; sie wird dort als Duplikat erkannt.
+            # Als in diesem Lauf gefunden: Es kann auch eine andere Datei unter
+            # altem Namen sein (zweite Karte, gleicher Laufwerksbuchstabe).
             self.verbindung.execute(
                 "UPDATE dateien SET quellwurzel = ?, groesse = ?, mtime = ?, dateityp = ?,"
                 " hash = '', zielpfad = '', schreibpfad = '', bestaetigt_in_lauf = NULL,"
-                " kopiert_in_lauf = NULL, status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?"
-                " WHERE quellpfad = ?",
-                (quellwurzel, int(groesse), float(mtime), dateityp, lauf, quellpfad),
+                " kopiert_in_lauf = NULL, status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?,"
+                " gefunden_in_lauf = ? WHERE quellpfad = ?",
+                (quellwurzel, int(groesse), float(mtime), dateityp, lauf, lauf, quellpfad),
             )
             self._vielleicht_schreiben()
             return "veraendert"
@@ -900,9 +902,9 @@ class Datenbank:
         self.verbindung.execute(
             "UPDATE dateien SET quellwurzel = ?, groesse = ?, mtime = ?, dateityp = ?,"
             " hash = '', zielpfad = '', bestaetigt_in_lauf = NULL,"
-            " status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?, schon_im_archiv = 0"
-            " WHERE quellpfad = ?",
-            (quellwurzel, int(groesse), float(mtime), dateityp, lauf, quellpfad),
+            " status = 'gefunden', fehlergrund = '', zuletzt_gesehen_in_lauf = ?, schon_im_archiv = 0,"
+            " gefunden_in_lauf = ? WHERE quellpfad = ?",
+            (quellwurzel, int(groesse), float(mtime), dateityp, lauf, lauf, quellpfad),
         )
         self._vielleicht_schreiben()
         return "veraendert"

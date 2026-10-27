@@ -918,3 +918,29 @@ def test_anhebung_von_v08_markiert_vorher_vorhandene_duplikate(tmp_path):
         assert d.zeile("/q/c.jpg")["schon_im_archiv"] == 1
     finally:
         d.schliessen()
+
+
+def test_neue_datei_am_alten_pfad_gilt_als_neu_gefunden(datenbank):
+    """Pruefer-Befund (v0.11): Karte 1 wurde importiert und aufgeraeumt; Karte 2
+    steckt spaeter am selben Laufwerksbuchstaben, mit denselben Dateinamen.
+    Ihre Bilder lagen schon im Archiv (aus einer Sicherung importiert) - also
+    "bereits importiert". Dafuer muss die Zeile als in diesem Lauf gefunden
+    gelten, nicht im Lauf der ersten Karte."""
+    d = datenbank
+    scan1 = d.lauf_beginnen("scan")
+    d.datei_gesehen("/E/IMG_0001.JPG", "/E", 100, 1000.0, "foto", scan1)
+    k1 = d.lauf_beginnen("kopieren")
+    d.kopiert_setzen("/E/IMG_0001.JPG", "/z/a.jpg", "h1", k1)
+    d.status_setzen("/E/IMG_0001.JPG", "quelle_geloescht")
+    k2 = d.lauf_beginnen("kopieren")                    # Sicherung von Karte 2 importiert
+    d.datei_gesehen("/B/IMG_0001.JPG", "/B", 200, 2000.0, "foto", d.lauf_beginnen("scan"))
+    d.kopiert_setzen("/B/IMG_0001.JPG", "/z/b.jpg", "h2", k2)
+    scan3 = d.lauf_beginnen("scan")                     # Karte 2 steckt nun an /E
+    assert d.datei_gesehen("/E/IMG_0001.JPG", "/E", 200, 2000.0, "foto", scan3) == "veraendert"
+    assert d.zeile("/E/IMG_0001.JPG")["gefunden_in_lauf"] == scan3
+    d.duplikat_setzen("/E/IMG_0001.JPG", "/z/b.jpg", "h2", d.lauf_beginnen("kopieren"))
+    assert d.zeile("/E/IMG_0001.JPG")["schon_im_archiv"] == 1
+    # Auch eine veraenderte Datei am bekannten Pfad gilt als neu gefunden.
+    d.datei_gesehen("/E/x.jpg", "/E", 10, 1.0, "foto", scan1)
+    d.datei_gesehen("/E/x.jpg", "/E", 11, 2.0, "foto", scan3)
+    assert d.zeile("/E/x.jpg")["gefunden_in_lauf"] == scan3

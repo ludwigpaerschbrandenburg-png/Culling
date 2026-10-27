@@ -996,7 +996,8 @@ class Hauptfenster(QMainWindow):
 
     def kurzname(self, schritt: str) -> str:
         return {"scan": "Scan", "analyse": "Analyse", "kopieren": "Verschieben" if self.zustand.get("verschieben") else "Kopieren",
-                "pruefen": "Prüfen", "aufraeumen": "Aufräumen", "ziel-index": "Neu einlesen"}.get(schritt, schritt)
+                "pruefen": "Prüfen", "aufraeumen": "Aufräumen", "ziel-index": "Neu einlesen",
+                "zuruecklegen": "Zurücklegen"}.get(schritt, schritt)
 
     def rahmen(self) -> None:
         z = self.zustand
@@ -1341,7 +1342,8 @@ class Hauptfenster(QMainWindow):
             h.log.show()
         else:
             h.log.hide()
-        self.kameras_zeigen(zf.get("modelle") if letzter == "analyse" else None, zf.get("ohne_modell") or 0)
+        self.kameras_zeigen(zf.get("modelle") if letzter == "analyse" else None, zf.get("ohne_modell") or 0,
+                            zf.get("ohne_modell_ordner") or "")
         if n["schritt"] == "fertig":
             h.phasen.setzen("", 0, alles_fertig=True)
         else:
@@ -1407,7 +1409,7 @@ class Hauptfenster(QMainWindow):
 
     # -- Kamera-Tabelle -------------------------------------------------------------------
 
-    def kameras_zeigen(self, modelle, ohne: int) -> None:
+    def kameras_zeigen(self, modelle, ohne: int, ohne_ordner: str = "") -> None:
         h = self.haupt
         _leeren(h.kameras_lay)
         if not modelle:
@@ -1437,7 +1439,7 @@ class Hauptfenster(QMainWindow):
         zeile = QHBoxLayout()
         zeile.addWidget(knopf("Ordnernamen übernehmen", "ghost", self.aliase_senden))
         if ohne:
-            zeile.addWidget(label(f"ohne Modell: {meldungen.anzahl(ohne)} → Ordner „Unbekannt“", "hinweis"))
+            zeile.addWidget(label(meldungen.ob_ohne_modell(ohne, ohne_ordner), "hinweis"))
         zeile.addStretch(1)
         h.kameras_lay.addLayout(zeile)
         h.kameras.show()

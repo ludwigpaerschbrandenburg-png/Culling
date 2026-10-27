@@ -546,7 +546,7 @@ class Ablauf:
                 loeschbar = d.zu_loeschen_summe()
                 niedrigster = next((s for s in db.STUFEN if zaehler.get(s, 0) > 0), None)
                 letzter = d.letzter_lauf()
-                return {
+                stand = {
                     "quellen": [str(z["wurzel"]) for z in d.quellen_liste()],
                     "zaehler": zaehler,
                     "profil": str(archiv.konf.wert("leistung.profil") or "hdd"),
@@ -562,6 +562,9 @@ class Ablauf:
                     "letzter_lauf": dict(letzter) if letzter is not None else None,
                     "hinweise": stille.zeilen,
                 }
+                # Der Satz zur Phase folgt dem naechsten Schritt (wie der Knopf).
+                stand["phase"] = meldungen.ob_phase_kurz(niedrigster, sum(zaehler.values()) > 0, self._naechster_aus(stand))
+                return stand
             finally:
                 d.schliessen()
 
@@ -1167,6 +1170,8 @@ class Ablauf:
                         for m, o, n in a["modelle"] if m
                     ]
                     extra["ohne_modell"] = sum(n for m, _o, n in a["modelle"] if not m)
+                    extra["ohne_modell_ordner"] = next(
+                        (o for m, o, _n in a["modelle"] if not m and o), str(archiv.konf.wert("kamera.unbekannt") or ""))
                     zeilen.append(["analysiert", meldungen.anzahl(a["analysiert"])])
                     zeilen.append(["ohne sicheres Datum", meldungen.anzahl(a["unsicher"])])
                     if a["zeitzone_angenommen"]:
