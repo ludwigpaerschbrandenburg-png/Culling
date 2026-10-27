@@ -115,6 +115,7 @@ def bild_laden(b: sichten.Bild, groesse: int, leser: vorschau.Vorschauleser | No
 class _Signale(QObject):
     fertig = Signal(int, int, int, QImage)   # Durchgang, Nummer des Bilds, Art (KLEIN/GROSS_ART/VOLL), Bild
     daten = Signal(int, int, str)            # Durchgang, Nummer, Kameradaten als Text
+    xmp_fertig = Signal(str)                 # Ergebnis von "XMP-Dateien anlegen"
 
 
 def zwischen_datei(ordner: Path | None, b: sichten.Bild) -> Path | None:
@@ -181,6 +182,24 @@ class _Laden(QRunnable):
             self.signale.fertig.emit(self.durchgang, self.nr, self.art, bild if bild is not None else QImage())
         except RuntimeError:
             pass   # Fenster inzwischen geschlossen
+
+
+class _XmpArbeit(QRunnable):
+    """XMP-Dateien im Hintergrund anlegen - das Fenster bleibt bedienbar."""
+
+    def __init__(self, signale: "_Signale", ziel: Path, bew: sichten.Bewertungen, konf) -> None:
+        super().__init__()
+        self.signale, self.ziel, self.bew, self.konf = signale, ziel, bew, konf
+
+    def run(self) -> None:
+        try:
+            text = meldungen.sichten_xmp_ergebnis(sichten.xmp_anlegen(self.ziel, self.bew, self.konf))
+        except (FotosortFehler, OSError) as fehler:
+            text = str(fehler)
+        try:
+            self.signale.xmp_fertig.emit(text)
+        except RuntimeError:
+            pass
 
 
 class _Daten(QRunnable):
@@ -509,9 +528,12 @@ class SichtenSeite(QWidget):
         self.daten_text: dict[int, str] = {}
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(LESER)
+        self.xmp_pool = QThreadPool(self)
+        self.xmp_pool.setMaxThreadCount(1)
         self.signale = _Signale()
         self.signale.fertig.connect(self._geladen)
         self.signale.daten.connect(self._daten_da)
+        self.signale.xmp_fertig.connect(self._xmp_fertig)
         self._icon_leer = _platzhalter("…")
         self._icon_video = _platzhalter("Video")
         self._icon_keins = _platzhalter(meldungen.SICHTEN_KEINE_VORSCHAU)
@@ -663,6 +685,7 @@ class SichtenSeite(QWidget):
         noch an; der Rest folgt beim Zurueckkommen (_fehlende_laden)."""
         self.pool.clear()
         self.angefragt.clear()
+        self.voll_warten.clear()
 
     def _fehlende_laden(self) -> None:
         for i in self.gezeigt:
@@ -762,6 +785,7 @@ class SichtenSeite(QWidget):
         """Das Raster fuer den Ordner und den Filter neu fuellen; Vorschau im Hintergrund."""
         self.pool.clear()
         self.angefragt.clear()
+        self.voll_warten.clear()
         self.durchgang += 1
         self.gross_nr = None
         filter_ = self.filter.currentData() or "alle"
@@ -892,9 +916,14 @@ class SichtenSeite(QWidget):
             for s in schluessel:
                 if s in self.aus_xmp:
                     alt = self.stand[s]
-                    self.bew.setzen([s], sterne=alt.sterne, markierung=alt.markierung, farbe=alt.farbe)
+                    self.bew.setzen([s], sterne=alt.sterne, markierung=alt.markierung, farbe=alt.farbe, leer_merken=True)
                     self.aus_xmp.discard(s)
-            self.bew.setzen(schluessel, sterne=sterne, markierung=markierung, farbe=farbe)
+            # Bei Bildern mit XMP-Datei bleibt auch "nichts" gespeichert -
+            # sonst kaeme die Bewertung aus der XMP beim naechsten Oeffnen zurueck.
+            mit_xmp = [self.alle[i].schluessel for i in nummern if self.alle[i].xmp]
+            ohne_xmp = [self.alle[i].schluessel for i in nummern if not self.alle[i].xmp]
+            self.bew.setzen(mit_xmp, sterne=sterne, markierung=markierung, farbe=farbe, leer_merken=True)
+            self.bew.setzen(ohne_xmp, sterne=sterne, markierung=markierung, farbe=farbe)
         except FotosortFehler as fehler:
             self.zahlen.setText(str(fehler))
             return True
@@ -1041,15 +1070,15 @@ class SichtenSeite(QWidget):
         antwort = QMessageBox.question(self, meldungen.SICHTEN_XMP_TITEL, meldungen.SICHTEN_XMP_FRAGE)
         if antwort != QMessageBox.StandardButton.Yes:
             return
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            e = sichten.xmp_anlegen(self.ziel, self.bew, self.info.get("konf"))
-        except FotosortFehler as fehler:
-            self.zahlen.setText(str(fehler))
-            return
-        finally:
-            QApplication.restoreOverrideCursor()
-        self.zahlen.setText(meldungen.sichten_xmp_ergebnis(e))
+        self.xmp_knopf.setEnabled(False)
+        self.zahlen.setText(meldungen.SICHTEN_XMP_LAEUFT)
+        # Eigener Strang ausserhalb des Vorschau-Pools: "Reiter verlassen"
+        # leert den Pool, das Anlegen soll trotzdem zu Ende laufen.
+        self.xmp_pool.start(_XmpArbeit(self.signale, self.ziel, self.bew, self.info.get("konf")))
+
+    def _xmp_fertig(self, text: str) -> None:
+        self.xmp_knopf.setEnabled(True)
+        self.zahlen.setText(text)
 
     # -- Ende ---------------------------------------------------------------------
 
@@ -1063,6 +1092,7 @@ class SichtenSeite(QWidget):
         if self.leser is not None:
             self.leser.schliessen()
         self.pool.waitForDone(5000)
+        self.xmp_pool.waitForDone(60000)     # angefangenes Anlegen zu Ende bringen
         self.leser = None
         self.ordner_jetzt = None
         self.gross_bilder.clear()

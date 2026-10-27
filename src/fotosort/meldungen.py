@@ -2559,6 +2559,7 @@ SICHTEN_WEITER = "Nach dem Bewerten zum nächsten Bild"
 SICHTEN_VERGLEICH_WAEHLEN = "Für den Vergleich zwei bis vier Bilder wählen (Strg oder Umschalt beim Klicken)."
 SICHTEN_VERGLEICH_TITEL = "Vergleich – bewertet wird das umrandete Bild"
 SICHTEN_XMP_KNOPF = "XMP-Dateien anlegen…"
+SICHTEN_XMP_LAEUFT = "XMP-Dateien werden angelegt …"
 SICHTEN_XMP_TITEL = "Bewertungen als XMP-Dateien speichern?"
 SICHTEN_XMP_FRAGE = (
     "Für jedes bewertete Bild im Archiv entsteht daneben eine kleine Datei „Name.xmp“ mit Sternen, "
@@ -2568,8 +2569,13 @@ SICHTEN_XMP_FRAGE = (
 )
 
 
+def sichten_xmp_kein_sicheres_umbenennen(datei) -> str:
+    return (f"{datei}: Dieses Laufwerk kann eine neue Datei nicht sicher unter ihren Namen bringen "
+            "(ohne etwas zu überschreiben) – hier wurde keine XMP-Datei angelegt.")
+
+
 def sichten_xmp_ergebnis(e) -> str:
-    teile = [f"{anzahl(e.neu)} XMP-Dateien neu angelegt"]
+    teile = [f"{anzahl(e.neu)} XMP-{'Datei' if e.neu == 1 else 'Dateien'} neu angelegt"]
     if e.vorhanden:
         teile.append(f"{anzahl(e.vorhanden)} hatten schon eine und blieben, wie sie waren")
     if e.ohne:
@@ -2578,7 +2584,11 @@ def sichten_xmp_ergebnis(e) -> str:
         teile.append(f"{anzahl(e.fehlt)} Bilder liegen nicht mehr im Archiv")
     if e.fehler:
         teile.append(f"{anzahl(e.fehler)} ließen sich nicht schreiben")
-    return ", ".join(teile) + "."
+    text = ", ".join(teile) + "."
+    gruende = list(getattr(e, "gruende", []) or [])
+    if gruende:
+        text += " " + " ".join(gruende[:3]) + (f" (und {anzahl(len(gruende) - 3)} weitere)" if len(gruende) > 3 else "")
+    return text
 
 
 def _zahl_de(wert: float) -> str:

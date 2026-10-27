@@ -164,15 +164,14 @@ def test_xmp_anlegen_ueberschreibt_auch_im_wettlauf_nichts(ziel, tmp_path, monke
     """Legt ein anderes Programm die XMP-Datei genau zwischen Nachsehen und
     Schreiben an, bleibt seine Datei stehen: Das Umbenennen ueberschreibt nie."""
     ordner, _vorhandene, bew = _archiv_mit_bewertungen(ziel, tmp_path)
-    echt = sichten._xmp_vorhanden
+    echt = sichten._neu_schreiben
 
-    def gleich_danach_angelegt(haupt, namen):
-        ergebnis = echt(haupt, namen)
-        if haupt.name == "IMG_0001.CR2":
-            (haupt.parent / "IMG_0001.xmp").write_bytes(b"fremd")
-        return ergebnis
+    def gleich_davor_angelegt(datei, inhalt):
+        if datei.name == "IMG_0001.xmp":
+            datei.write_bytes(b"fremd")
+        return echt(datei, inhalt)
 
-    monkeypatch.setattr(sichten, "_xmp_vorhanden", gleich_danach_angelegt)
+    monkeypatch.setattr(sichten, "_neu_schreiben", gleich_davor_angelegt)
     e = sichten.xmp_anlegen(ziel, bew, config.Konfiguration())
     assert (ordner / "IMG_0001.xmp").read_bytes() == b"fremd"
     assert e.vorhanden == 2 and e.neu == 1
@@ -217,3 +216,83 @@ def test_kameradaten_aus_der_datei(tmp_path):
     finally:
         leser.schliessen()
     assert werte.get("Model") == "ILCE-7CM2"
+
+
+# --- Nacharbeit nach der Pruefung (v0.11) -----------------------------------------------
+
+
+def test_geloeschte_bewertung_kommt_nicht_aus_der_xmp_zurueck(tmp_path):
+    """Pruefer-Befund: Wer die Sterne eines Bilds mit XMP-Datei auf 0 setzt,
+    darf sie nach einem Neustart nicht wieder aus der XMP bekommen. Dafuer
+    bleibt eine leere Zeile stehen ("bewusst ohne Bewertung")."""
+    bew = _bew(tmp_path)
+    bew.setzen(["a.jpg"], sterne=3, leer_merken=True)
+    bew.setzen(["a.jpg"], sterne=0, leer_merken=True)
+    assert bew.lesen(["a.jpg"]) == {"a.jpg": sichten.Bewertung()}
+    assert sichten.passt(bew.lesen(["a.jpg"])["a.jpg"], "unbewertet")
+    bew.setzen(["b.jpg"], sterne=3)
+    bew.setzen(["b.jpg"], sterne=0)                      # ohne XMP: Zeile weg wie bisher
+    assert bew.lesen(["b.jpg"]) == {}
+
+
+def test_leere_zeile_schreibt_keine_xmp(ziel, tmp_path):
+    ordner = ziel / "2026" / "a"
+    testbaum._schreiben(ordner / "IMG_0001.JPG", testbaum._JPEG)
+    bew = _bew(tmp_path)
+    bew.setzen(["2026/a/IMG_0001.JPG"], sterne=0, leer_merken=True)
+    e = sichten.xmp_anlegen(ziel, bew, config.Konfiguration())
+    assert (e.neu, e.ohne) == (0, 0) and not list(ziel.rglob("*.xmp"))
+
+
+def test_gleicher_stamm_bei_zwei_bildern_bekommt_eigene_xmp(ziel, tmp_path):
+    """Pruefer-Befund: IMG_1.JPG und IMG_1.MOV (Live-Photo als JPG gespeichert)
+    sind zwei Bilder - eine gemeinsame IMG_1.xmp gehoerte keinem eindeutig.
+    Dann bekommt jedes "<Name>.<Endung>.xmp", und "a.b.xmp" gehoert nicht zu "a.CR2"."""
+    ordner = ziel / "2026" / "b"
+    for name in ("IMG_1.JPG", "IMG_1.MOV", "a.CR2", "a.b.CR2"):
+        testbaum._schreiben(ordner / name, testbaum._JPEG)
+    testbaum._schreiben(ordner / "a.b.xmp", b'<x xmp:Rating="2"/>')
+    bilder = {b.name: b for b in sichten.bilder(ordner, ziel, config.Konfiguration())}
+    assert bilder["a.CR2"].xmp == () and [p.name for p in bilder["a.b.CR2"].xmp] == ["a.b.xmp"]
+    bew = _bew(tmp_path)
+    bew.setzen([bilder["IMG_1.JPG"].schluessel], sterne=4)
+    bew.setzen([bilder["IMG_1.MOV"].schluessel], sterne=1)
+    e = sichten.xmp_anlegen(ziel, bew, config.Konfiguration())
+    assert e.neu == 2 and not (ordner / "IMG_1.xmp").exists()
+    assert sichten.xmp_lesen(ordner / "IMG_1.JPG.xmp").sterne == 4
+    assert sichten.xmp_lesen(ordner / "IMG_1.MOV.xmp").sterne == 1
+
+
+def test_xmp_ohne_sicheres_umbenennen_wird_nicht_angelegt(ziel, tmp_path, monkeypatch):
+    """Kann das Laufwerk nicht sicher umbenennen, entsteht keine XMP-Datei -
+    lieber keine als eine halbe unter dem endgueltigen Namen. Die eigene .part
+    wird entfernt, der Grund genannt."""
+    from fotosort import pfade
+    ordner, _vorhandene, bew = _archiv_mit_bewertungen(ziel, tmp_path)
+
+    def kein_noreplace(von, nach):
+        raise pfade.KeinNoReplace("exFAT")
+
+    monkeypatch.setattr(sichten.pfade, "umbenennen_ohne_ueberschreiben", kein_noreplace)
+    e = sichten.xmp_anlegen(ziel, bew, config.Konfiguration())
+    assert e.neu == 0 and e.fehler == 2 and e.gruende
+    assert not list(ziel.rglob("*.part")) and not (ordner / "IMG_0001.xmp").exists()
+
+
+def test_schreibfehler_hinterlaesst_keine_part(ziel, tmp_path, monkeypatch):
+    ordner, _vorhandene, bew = _archiv_mit_bewertungen(ziel, tmp_path)
+
+    def voll(fd):
+        raise OSError(28, "Kein Platz auf dem Geraet")
+
+    monkeypatch.setattr(sichten.os, "fsync", voll)
+    e = sichten.xmp_anlegen(ziel, bew, config.Konfiguration())
+    assert e.neu == 0 and e.fehler == 2 and "Platz" in " ".join(e.gruende)
+    assert not list(ziel.rglob("*.part"))
+    monkeypatch.undo()
+    assert sichten.xmp_anlegen(ziel, bew, config.Konfiguration()).neu == 2   # spaeter geht es
+
+
+def test_xmp_ergebnis_einzahl():
+    e = sichten.XmpErgebnis(neu=1)
+    assert meldungen.sichten_xmp_ergebnis(e).startswith("1 XMP-Datei neu angelegt")

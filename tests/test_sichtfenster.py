@@ -285,11 +285,13 @@ def test_xmp_knopf_legt_nur_neue_dateien_an(app, sicht, monkeypatch):
         s.bewerten(sterne=sterne)
     monkeypatch.setattr(sichtfenster.QMessageBox, "question", lambda *a, **k: sichtfenster.QMessageBox.StandardButton.Yes)
     s.xmp_knopf.click()
+    s.xmp_pool.waitForDone(30000)
+    _ereignisse(app, 0.2)
     nachher = _stand(s.ziel)
     neu = set(nachher) - set(vorher)
     assert {Path(n).name for n in neu} == {"P_0002.xmp"}, neu
     assert all(nachher[n] == vorher[n] for n in vorher)                 # nichts Vorhandenes geaendert
-    assert "1 XMP-Dateien neu angelegt" in s.zahlen.text() and "schon eine" in s.zahlen.text()
+    assert "1 XMP-Datei neu angelegt" in s.zahlen.text() and "schon eine" in s.zahlen.text()
     # Nein auf die Frage: nichts geschieht.
     monkeypatch.setattr(sichtfenster.QMessageBox, "question", lambda *a, **k: sichtfenster.QMessageBox.StandardButton.No)
     s.xmp_knopf.click()
@@ -360,3 +362,18 @@ def test_vorschaubilder_werden_lokal_zwischengespeichert(app, tmp_path, sicht, m
     s.neu_einlesen()
     _fertig_laden(app, s)
     assert not gelesen and all(not s.vorschau[i].isNull() for i in s.gezeigt)
+
+
+
+def test_geloeschte_bewertung_bleibt_geloescht_trotz_xmp(app, sicht):
+    """Pruefer-Befund (v0.11): Sterne auf 0 bei einem Bild mit XMP-Datei - nach
+    "Neu einlesen" duerfen die Sterne aus der XMP nicht zurueckkommen."""
+    f, s, probe = sicht
+    (probe / "P_0003.xmp").write_text('<x xmp:Rating="4"/>', encoding="utf-8")
+    s.neu_einlesen()
+    nr = next(i for i, b in enumerate(s.alle) if b.name == "P_0003.jpg")
+    s.raster.clearSelection()
+    s.raster.setCurrentRow(s.gezeigt.index(nr))
+    QTest.keyClick(s.raster, Qt.Key.Key_0)
+    s.neu_einlesen()
+    assert s.bewertung(s.alle[nr]).sterne == 0

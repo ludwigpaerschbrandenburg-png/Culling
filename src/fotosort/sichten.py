@@ -84,6 +84,12 @@ class Bild:
     art: str
     dateien: tuple[Path, ...]
     xmp: tuple[Path, ...] = field(default=())
+    stamm_eigen: bool = True     # kein anderes Bild im Ordner traegt denselben Stamm
+
+    def xmp_neu(self) -> Path:
+        """Name einer neuen XMP-Datei: "<Stamm>.xmp", bei geteiltem Stamm
+        "<Name>.<Endung>.xmp"."""
+        return self.haupt.with_name((self.haupt.stem if self.stamm_eigen else self.haupt.name) + ".xmp")
 
     @property
     def name(self) -> str:
@@ -146,17 +152,21 @@ def _endung(p: Path) -> str:
     return p.suffix.lower().lstrip(".")
 
 
-def _xmp_zu(haupt: Path, namen: dict[str, str]) -> tuple[Path, ...]:
-    """Vorhandene XMP-Dateien einer Aufnahme: "<Stamm>.xmp" (Lightroom, Capture
-    One) oder "<Name>.<Endung>.xmp" (darktable), in jeder Schreibweise."""
-    stamm = haupt.stem.casefold()
-    treffer = [n for k, n in namen.items()
-               if k.endswith(".xmp") and (k == stamm + ".xmp" or (k.startswith(stamm + ".") and k.count(".") == stamm.count(".") + 2))]
-    return tuple(haupt.parent / n for n in sorted(treffer, key=str.casefold))
+def _xmp_namen(dateien: tuple[Path, ...], stamm_eigen: bool) -> list[str]:
+    """Namen (klein), unter denen eine XMP-Datei zu dieser Aufnahme gehoert:
+    "<Name>.<Endung>.xmp" (darktable) zu jeder ihrer Dateien, und "<Stamm>.xmp"
+    (Lightroom, Capture One) - Letzteres nur, wenn keine andere Aufnahme im
+    Ordner denselben Stamm traegt (IMG_1.JPG und IMG_1.MOV als zwei Bilder)."""
+    namen = [p.name.casefold() + ".xmp" for p in dateien]
+    if stamm_eigen:
+        namen.insert(0, dateien[0].stem.casefold() + ".xmp")
+    return namen
 
 
-def _xmp_vorhanden(haupt: Path, namen: dict[str, str]) -> bool:
-    return bool(_xmp_zu(haupt, namen))
+def _xmp_zu(dateien: tuple[Path, ...], namen: dict[str, str], stamm_eigen: bool) -> tuple[Path, ...]:
+    """Vorhandene XMP-Dateien einer Aufnahme, in jeder Schreibweise."""
+    ordner_ = dateien[0].parent
+    return tuple(ordner_ / namen[k] for k in _xmp_namen(dateien, stamm_eigen) if k in namen)
 
 
 def bilder(ordner_: Path, ziel: Path, konf) -> list[Bild]:
@@ -187,16 +197,18 @@ def bilder(ordner_: Path, ziel: Path, konf) -> list[Bild]:
     vergeben: set[Path] = set()
     ergebnis: list[Bild] = []
 
-    def bild(haupt: Path, anzeige: Path, art: str, dateien: tuple[Path, ...]) -> Bild:
-        return Bild(schluessel(haupt, ziel), haupt, anzeige, art, dateien, _xmp_zu(haupt, namen))
+    roh: list[tuple[Path, Path, str, tuple[Path, ...]]] = []
+
+    def bild(haupt: Path, anzeige: Path, art: str, dateien: tuple[Path, ...]) -> None:
+        roh.append((haupt, anzeige, art, dateien))
 
     for p in sorted((p for p, t in typen.items() if t == dateitypen.RAW), key=lambda p: p.name.casefold()):
         partner = next((f for f in fotos.get(p.stem.casefold(), []) if f not in vergeben), None)
         if partner is not None:
             vergeben.add(partner)
-            ergebnis.append(bild(p, partner, dateitypen.FOTO, (p, partner)))
+            bild(p, partner, dateitypen.FOTO, (p, partner))
         else:
-            ergebnis.append(bild(p, p, dateitypen.RAW, (p,)))
+            bild(p, p, dateitypen.RAW, (p,))
     live: dict[str, Path] = {}
     for p, typ in typen.items():
         if typ == dateitypen.VIDEO and _endung(p) in _LIVE_VIDEO:
@@ -207,13 +219,22 @@ def bilder(ordner_: Path, ziel: Path, konf) -> list[Bild]:
         video = live.get(p.stem.casefold()) if _endung(p) in _LIVE_FOTO else None
         if video is not None and video not in vergeben:
             vergeben.add(video)
-            ergebnis.append(bild(p, p, dateitypen.FOTO, (p, video)))
+            bild(p, p, dateitypen.FOTO, (p, video))
         else:
-            ergebnis.append(bild(p, p, typ, (p,)))
+            bild(p, p, typ, (p,))
         vergeben.add(p)
     for p, typ in typen.items():
         if typ != dateitypen.RAW and p not in vergeben:
-            ergebnis.append(bild(p, p, typ, (p,)))
+            bild(p, p, typ, (p,))
+    # Ein Stamm, den zwei Aufnahmen tragen, gehoert keiner allein (XMP).
+    stamm_zahl: dict[str, int] = {}
+    for _h, _a, _t, dateien in roh:
+        for s in {p.stem.casefold() for p in dateien}:
+            stamm_zahl[s] = stamm_zahl.get(s, 0) + 1
+    for haupt, anzeige, art, dateien in roh:
+        eigen = all(stamm_zahl[p.stem.casefold()] == 1 for p in dateien)
+        ergebnis.append(Bild(schluessel(haupt, ziel), haupt, anzeige, art, dateien,
+                             _xmp_zu(dateien, namen, eigen), eigen))
     ergebnis.sort(key=lambda b: b.name.casefold())
     return ergebnis
 
@@ -264,7 +285,8 @@ class Bewertungen:
             v.close()
 
     def lesen(self, schluessel_: list[str]) -> dict[str, Bewertung]:
-        """Nur Bilder mit Bewertung, Markierung oder Farbe stehen im Ergebnis."""
+        """Bilder mit Bewertung, Markierung oder Farbe - und solche, die bewusst
+        auf "nichts" gesetzt wurden (leer_merken, Bewertung())."""
         if not self.datei.exists():
             return {}
         ergebnis: dict[str, Bewertung] = {}
@@ -287,7 +309,10 @@ class Bewertungen:
                     for s, st, m, f in v.execute("SELECT schluessel, sterne, markierung, farbe FROM bewertungen")}
 
     def setzen(self, schluessel_: list[str], sterne: int | None = None, markierung: str | None = None,
-               farbe: str | None = None) -> None:
+               farbe: str | None = None, leer_merken: bool = False) -> None:
+        """leer_merken (seit v0.11, fuer Bilder mit XMP-Datei): Ist nichts mehr
+        gesetzt, bleibt eine leere Zeile stehen - sonst kaeme beim naechsten
+        Oeffnen die Bewertung aus der XMP-Datei zurueck."""
         if sterne is not None and (isinstance(sterne, bool) or not isinstance(sterne, int) or not 0 <= sterne <= 5):
             raise FotosortFehler(meldungen.sichten_wert_ungueltig(sterne))
         if markierung is not None and markierung not in MARKIERUNGEN:
@@ -303,7 +328,7 @@ class Bewertungen:
                 neu = Bewertung(sterne if sterne is not None else (alt[0] if alt else 0),
                                 markierung if markierung is not None else (alt[1] if alt else ""),
                                 farbe if farbe is not None else (alt[2] if alt else ""))
-                if neu == Bewertung():
+                if neu == Bewertung() and not leer_merken:
                     v.execute("DELETE FROM bewertungen WHERE schluessel = ?", (s,))
                 else:
                     v.execute(
@@ -392,30 +417,27 @@ def _im_ziel(ziel: Path, schluessel_: str) -> Path | None:
 
 def _neu_schreiben(datei: Path, inhalt: bytes) -> bool:
     """Neue Datei ueber eine .part-Datei und ein Umbenennen, das nie
-    ueberschreibt. False: Unter dem Namen liegt inzwischen etwas - es bleibt."""
+    ueberschreibt. False: Unter dem Namen liegt inzwischen etwas - es bleibt.
+    Kann das Laufwerk nicht sicher umbenennen (KeinNoReplace), entsteht keine
+    Datei (lieber keine als eine halbe unter dem endgueltigen Namen). Bei
+    jedem Fehler wird nur die eigene, eben angelegte .part-Datei entfernt."""
     part = datei.with_name(datei.name + ".part")
     with open(pfade.lang(part), "xb") as f:      # nie eine vorhandene Datei
-        f.write(inhalt)
-        f.flush()
-        os.fsync(f.fileno())
+        try:
+            f.write(inhalt)
+            f.flush()
+            os.fsync(f.fileno())
+        except OSError:
+            f.close()
+            with contextlib.suppress(OSError):
+                pfade.lang(part).unlink()
+            raise
     try:
         pfade.umbenennen_ohne_ueberschreiben(part, datei)
         return True
     except FileExistsError:
-        pfade.lang(part).unlink()                  # nur die eigene, eben angelegte .part
+        pfade.lang(part).unlink()
         return False
-    except pfade.KeinNoReplace:
-        # Dateisystem ohne sicheres Umbenennen (exFAT): exklusiv anlegen.
-        try:
-            with open(pfade.lang(datei), "xb") as f:
-                f.write(inhalt)
-                f.flush()
-                os.fsync(f.fileno())
-            return True
-        except FileExistsError:
-            return False
-        finally:
-            pfade.lang(part).unlink()
     except OSError:
         with contextlib.suppress(OSError):
             pfade.lang(part).unlink()
@@ -423,40 +445,50 @@ def _neu_schreiben(datei: Path, inhalt: bytes) -> bool:
 
 
 def xmp_anlegen(ziel: Path, bew: Bewertungen, konf, nur: list[str] | None = None) -> XmpErgebnis:
-    """Fuer jedes bewertete Bild eine XMP-Datei "<Stamm>.xmp" neben der
-    Hauptdatei anlegen - nur, wo zu diesem Bild noch keine liegt (in keiner
-    Schreibweise, auch nicht "<Name>.<Endung>.xmp"). Vorhandene Dateien
+    """Fuer jedes bewertete Bild eine neue XMP-Datei neben der Hauptdatei
+    ("<Stamm>.xmp", bei geteiltem Stamm "<Name>.<Endung>.xmp") - nur, wo zu
+    diesem Bild noch keine liegt (in keiner Schreibweise). Vorhandene Dateien
     werden nie angefasst. nur: diese Schluessel (sonst alle bewerteten)."""
     e = XmpErgebnis()
     eintraege = bew.alle()
     if nur is not None:
         eintraege = {s: eintraege[s] for s in nur if s in eintraege}
-    je_ordner: dict[Path, list[tuple[Path, Bewertung]]] = {}
+    je_ordner: dict[Path, dict[str, Bewertung]] = {}
     for s, b in sorted(eintraege.items()):
+        if b == Bewertung():
+            continue                     # bewusst ohne Bewertung: nichts zu schreiben
         pfad = _im_ziel(ziel, s)
         if pfad is None:
             e.fehler += 1
             continue
-        je_ordner.setdefault(pfad.parent, []).append((pfad, b))
+        je_ordner.setdefault(pfad.parent, {})[s] = b
     for ordner_, liste in je_ordner.items():
-        namen = {x.name.casefold(): x.name for x in _eintraege(ordner_)}
-        for haupt, b in liste:
-            if haupt.name.casefold() not in namen:
+        try:
+            im_ordner = {b.schluessel: b for b in bilder(ordner_, ziel, konf)} if ordner_.is_dir() else {}
+        except FotosortFehler as fehler:
+            e.fehler += len(liste)
+            e.gruende.append(str(fehler))
+            continue
+        for s, wert in liste.items():
+            b = im_ordner.get(s)
+            if b is None:
                 e.fehlt += 1
                 continue
-            if b.sterne == 0 and b.farbe == "" and b.markierung != "ausschuss":
+            if wert.sterne == 0 and wert.farbe == "" and wert.markierung != "ausschuss":
                 e.ohne += 1
                 continue
-            if _xmp_vorhanden(haupt, namen):
+            if b.xmp:
                 e.vorhanden += 1
                 continue
-            datei = haupt.with_name(haupt.stem + ".xmp")
+            datei = b.xmp_neu()
             try:
-                if _neu_schreiben(datei, xmp_text(b).encode("utf-8")):
+                if _neu_schreiben(datei, xmp_text(wert).encode("utf-8")):
                     e.neu += 1
-                    namen[datei.name.casefold()] = datei.name
                 else:
                     e.vorhanden += 1
+            except pfade.KeinNoReplace:
+                e.fehler += 1
+                e.gruende.append(meldungen.sichten_xmp_kein_sicheres_umbenennen(datei))
             except OSError as fehler:
                 e.fehler += 1
                 e.gruende.append(f"{datei}: {fehler.strerror or fehler}")

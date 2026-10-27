@@ -325,7 +325,8 @@ Reiter „Archiv" läuft dabei weiter – Sie können sichten, während kopiert 
   Sterne oder eine Farbe.
 - **iPhone-Live-Photos** (HEIC und MOV gleichen Namens) sind ein Bild.
 - **Bewertungen aus Lightroom & Co.:** Liegt neben einem Bild schon eine XMP-Datei mit Sternen
-  oder Farbe, zeigt das Programm sie an.
+  oder Farbe, zeigt das Programm sie an. Ändern Sie sie hier, gilt ab dann Ihre Bewertung (auch „keine
+  Sterne“); die XMP-Datei selbst bleibt, wie sie ist.
 - **„XMP-Dateien anlegen…"** (links unten) schreibt Ihre Sterne, Ausschuss und Farben in kleine
   Dateien `Name.xmp` neben die Bilder, damit Lightroom (bei RAW-Dateien), darktable oder
   Capture One sie sehen. Es entstehen nur **neue** Dateien: Liegt zu einem Bild schon eine
