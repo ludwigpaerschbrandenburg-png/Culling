@@ -399,8 +399,9 @@ class StartSeite(QWidget):
         self.karte.lay.addWidget(self.verwerfen)
         seite.addWidget(self.karte)
         k2 = Karte("Bevor es losgeht", gedaempft=True)
-        for t in ("Zuerst mit Kopien üben.", "Gelöscht wird nur nach Bestätigungswort.", "Fenster schließen hält nichts an."):
-            k2.lay.addWidget(label(t, "hinweis"))
+        for t in ("Zuerst mit Kopien üben.", "Gelöscht wird nur nach Bestätigungswort.",
+                  "Fenster zu hält den Schritt sauber an; beim nächsten Öffnen geht es weiter."):
+            k2.lay.addWidget(label(t, "hinweis", wrap=True))
         seite.addWidget(k2)
         seite.addStretch(1)
         rechts = QWidget()
