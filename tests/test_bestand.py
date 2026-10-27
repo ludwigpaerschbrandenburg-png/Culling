@@ -109,7 +109,6 @@ def test_quellordner_mit_anderem_datum_wird_gemeldet(tmp_path, ziel, nachschauen
     assert gemeldet == {str(falsch)}
 
 
-@pytest.mark.xfail(reason="Pruefer-Befund v0.9, Behebung folgt (Anfang/Ende vorab vergleichen)", strict=False)
 def test_viele_gleich_grosse_archivdateien_werden_nicht_ganz_gelesen(baum, quelle, ziel, nachschauen, monkeypatch):
     """Pruefer-Befund (v0.9): Unkomprimierte RAWs sind alle gleich gross. Vor
     dem vollstaendigen Lesen vergleicht das Programm Anfang und Ende der Datei;
@@ -128,3 +127,48 @@ def test_viele_gleich_grosse_archivdateien_werden_nicht_ganz_gelesen(baum, quell
     assert _cli("kopieren", "--ziel", ziel) == cli.OK
     assert not [p for p in gelesen if "RAW_" in p]
     assert _zeilen(nachschauen, ziel)[str(analog)]["status"] == "kopiert"
+
+
+def test_abbruch_waehrend_des_bestands_schliesst_den_lauf_sauber(baum, quelle, ziel, nachschauen, monkeypatch, capsys):
+    """Pruefer-Befund (v0.9): Strg+C oder „Fenster zu“ waehrend der Bestand
+    erfasst wird: Der Lauf endet sauber als abgebrochen, nichts haengt offen."""
+    from fotosort import bestand
+    _archiv_von_hand(ziel, Path(baum["analog"]))
+
+    def abbruch(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bestand, "erfassen", abbruch)
+    assert _cli("scan", "--ziel", ziel, "--quelle", quelle) == cli.ABGEBROCHEN
+    with nachschauen(ziel) as d:
+        lauf = d.verbindung.execute("SELECT * FROM laeufe ORDER BY nummer DESC LIMIT 1").fetchone()
+        assert lauf["ende"]                                   # Lauf ist beendet eingetragen
+
+
+def test_gleich_byteweise_mit_kurzen_lesungen(tmp_path, monkeypatch):
+    """Pruefer-Befund (v0.9): Ein Netzlaufwerk liefert manchmal weniger Bytes je
+    Lesung. Gleiche Dateien muessen trotzdem als gleich gelten."""
+    import io
+    a = tmp_path / "a.bin"
+    b = tmp_path / "b.bin"
+    daten = bytes(range(256)) * 40000
+    a.write_bytes(daten)
+    b.write_bytes(daten)
+    echt_open = open
+
+    class Kurz(io.RawIOBase):
+        def __init__(self, f):
+            self.f = f
+
+        def read(self, n=-1):
+            return self.f.read(min(n, 1000) if n and n > 0 else n)
+
+        def close(self):
+            self.f.close()
+
+    def oeffnen(p, mode="r", *args, **kw):
+        f = echt_open(p, mode, *args, **kw)
+        return Kurz(f) if str(p) == str(b) and "b" in mode else f
+
+    monkeypatch.setattr("builtins.open", oeffnen)
+    assert hashes.gleich_byteweise(a, b) is True

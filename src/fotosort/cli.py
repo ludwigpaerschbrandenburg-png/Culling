@@ -391,10 +391,20 @@ def befehl_scan(args, konsole) -> int:
             konsole.print(text)
         # Bestand des Archivs (seit v0.9): was schon im Ziel liegt, auch in einem
         # von Hand angelegten Archiv - nur Namen und Groessen, nichts wird gelesen.
-        try:
-            bestand_e = bestand.erfassen(archiv.ziel, datenbank)
-        except OSError:
-            bestand_e = None
+        bestand_e = None
+        if not gesamt.abgebrochen:
+            konsole.print("")
+            konsole.print(meldungen.BESTAND_WIRD_ERFASST)
+            try:
+                bestand_e = bestand.erfassen(archiv.ziel, datenbank)
+            except OSError:
+                bestand_e = None
+            except KeyboardInterrupt:
+                # Strg+C oder "Fenster zu" mitten im Erfassen: sauber beenden.
+                konsole.print("")
+                konsole.print(meldungen.scan_abgebrochen())
+                _lauf_sauber_abbrechen(datenbank, lauf)
+                return ABGEBROCHEN
         if bestand_e is not None:
             konsole.print("")
             konsole.print(meldungen.bestand_erfasst(bestand_e.dateien, bestand_e.neu))

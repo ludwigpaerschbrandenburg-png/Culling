@@ -2605,3 +2605,5 @@ def ereignis_ordner_datum(zeitraum, tag) -> str:
 MONATSNAMEN_TEXT = ("Januar", "Februar", "März", "April", "Mai", "Juni",
                     "Juli", "August", "September", "Oktober", "November", "Dezember")
 
+
+BESTAND_WIRD_ERFASST = "Bestand des Archivs wird erfasst … (nur Namen und Größen, das geht schnell)"

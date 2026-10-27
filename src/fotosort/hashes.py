@@ -118,9 +118,23 @@ def gleich_byteweise(a: Path, b: Path) -> bool:
     """Zwei Dateien Byte fuer Byte vergleichen (Option byte_vergleich_vor_loeschen)."""
     with open(a, "rb", buffering=0) as fa, open(b, "rb", buffering=0) as fb:
         while True:
-            x = fa.read(BLOCK)
-            y = fb.read(BLOCK)
+            x = _ganz_lesen(fa, BLOCK)
+            y = _ganz_lesen(fb, BLOCK)
             if x != y:
                 return False
             if not x:
                 return True
+
+
+def _ganz_lesen(f, n: int) -> bytes:
+    """n Bytes lesen, auch wenn eine Lesung weniger liefert (Netzlaufwerke);
+    weniger nur am Dateiende."""
+    teile = []
+    rest = n
+    while rest > 0:
+        stueck = f.read(rest)
+        if not stueck:
+            break
+        teile.append(stueck)
+        rest -= len(stueck)
+    return b"".join(teile)

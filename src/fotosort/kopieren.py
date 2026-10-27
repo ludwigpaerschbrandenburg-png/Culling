@@ -39,7 +39,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import FotosortFehler, db, fortschritt, hashes, loeschen, meldungen, pfade
+from . import FotosortFehler, db, fortschritt, hashes, loeschen, meldungen, pfade, steuerung
 from .scan import ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, TEXT_QUELLE_VERAENDERT
 
 # Ereignisarten dieses Moduls (SPEC Abschnitt 6).
@@ -233,6 +233,23 @@ def _neuer_zielpfad(struktur, dbank: db.Datenbank, zeile, konf) -> Path:
 
     neu = analyse.zielpfad_aus_zeile(struktur, zeile, konf)
     return mit_anhang(neu, _gruppen_anhang(dbank, zeile), _stamm(zeile))
+
+
+#: Vorabvergleich mit gleich grossen Archivdateien (Anfang und Ende, je so viele Bytes).
+VORAB = 64 * 1024
+
+
+def _gleicher_rand(a: Path, b: Path, groesse: int) -> bool:
+    """Gleiche Anfangs- und End-Bytes? Nur ein schneller Vorfilter: Gleich
+    heisst hier "vielleicht gleich", entschieden wird ueber den Hash."""
+    with open(_L(a), "rb") as fa, open(_L(b), "rb") as fb:
+        if fa.read(VORAB) != fb.read(VORAB):
+            return False
+        if groesse > 2 * VORAB:
+            fa.seek(-VORAB, os.SEEK_END)
+            fb.seek(-VORAB, os.SEEK_END)
+            return fa.read(VORAB) == fb.read(VORAB)
+    return True
 
 
 def _L(p: Path) -> Path:
@@ -1073,13 +1090,31 @@ class _Lauf:
         # c) Bestand, den noch niemand gelesen hat (seit v0.9: von Hand
         #    angelegtes Archiv, bestand.py): nur Dateien genau dieser Groesse
         #    werden jetzt gelesen; ihr Hash bleibt fuer spaeter im Index.
+        #    Unkomprimierte RAWs sind oft alle gleich gross: Erst Anfang und
+        #    Ende vergleichen (je VORAB Bytes) - ganz gelesen wird nur, wer dort
+        #    gleich ist, und das parallel mit den Hash-Workern. Abbruch und
+        #    "Fenster zu" greifen auch hier (steuerung.wuensche_pruefen).
+        kandidaten: list[Path] = []
         for eintrag in self.dbank.ziel_index_ungelesen_nach_groesse(a.ergebnis.bytes):
+            steuerung.wuensche_pruefen()
             p = Path(db.text_pfad(eintrag["zielpfad"]))
             if db.pfad_text(p) == db.pfad_text(a.schreibziel):
                 continue
+            if _stat(p) is None:
+                self.dbank.ziel_index_entfernen(p)   # Eintrag ohne Datei: nur ein Kandidat
+                continue
             try:
-                vorhanden = self.hash_von_vorhandener(p).result()
+                if not _gleicher_rand(a.quelle, p, a.ergebnis.bytes):
+                    continue
             except OSError:
+                continue
+            kandidaten.append(p)
+        laufend = [(p, self.hasher.submit(hashes.blake3_datei, _L(p), self.stop)) for p in kandidaten]
+        for p, zukunft in laufend:
+            steuerung.wuensche_pruefen()
+            try:
+                vorhanden = zukunft.result()
+            except (OSError, hashes.Abgebrochen):
                 continue
             self.index_nachtragen(p, vorhanden)
             if vorhanden == h:
