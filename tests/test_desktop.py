@@ -257,6 +257,12 @@ def test_aussehen_wie_ein_windows_programm(app, tmp_path, quelle, ziel):
                 yield w, t
             assert "monospace" not in (w.styleSheet() or "")
             assert w.font().family() not in ("Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Inter")
+        from PySide6.QtWidgets import QTableWidget
+        for tabelle in f.findChildren(QTableWidget):     # auch Tabellenkoepfe (Kamera-Tabelle, Listen)
+            for i in range(tabelle.columnCount()):
+                kopf = tabelle.horizontalHeaderItem(i)
+                if kopf is not None and kopf.text():
+                    yield tabelle, kopf.text()
 
     def pruefen():
         for w, t in texte():

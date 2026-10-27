@@ -1414,7 +1414,7 @@ class Hauptfenster(QMainWindow):
             h.kameras.hide()
             return
         t = QTableWidget(len(modelle), 3)
-        t.setHorizontalHeaderLabels(["KAMERAMODELL", "DATEIEN", "ORDNERNAME IM ARCHIV"])
+        t.setHorizontalHeaderLabels(["Kameramodell", "Dateien", "Ordnername im Archiv"])
         t.verticalHeader().setVisible(False)
         t.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
