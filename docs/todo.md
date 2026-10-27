@@ -848,7 +848,7 @@ Ideensammlung mit Stand je Punkt: [`ideen.md`](ideen.md).
 - [x] Optionsfelder statt Schaltflächen-Leisten, Fortschrittsbalken und Statusleiste von Windows, Reiter mit Unterstrich.
 - [x] Schlichtes Foto-Symbol statt lila Kachel.
 - [x] Test `test_aussehen_wie_ein_windows_programm`; Bildschirmfotos neu.
-- [ ] Volle Tests, CI, Release v0.10.
+- [x] Volle Tests, CI, Release v0.10.
 - [ ] Später (mit Phase 8): Browser-Fassung im selben schlichten Stil.
 
 ## Ohne feste Phase
