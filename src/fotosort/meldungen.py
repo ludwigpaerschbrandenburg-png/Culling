@@ -2646,12 +2646,106 @@ OB_BEENDEN_TITEL = "Programm beenden?"
 OB_WIRD_BEENDET = "Wird beendet … die aktuelle Datei wird noch fertig, dann ist alles gespeichert."
 
 
-def ob_beenden_frage(schritt: str) -> str:
-    return (
+def ob_beenden_frage(schritt: str, kette: bool = False) -> str:
+    text = (
         f"Es läuft gerade ein Schritt ({schritt}). Beim Beenden hält er sauber an – in der Regel wird die "
         "aktuelle Datei noch fertig. Alles Bisherige bleibt gespeichert, und beim nächsten Öffnen geht es "
         "genau dort weiter. Nichts geht verloren."
     )
+    if kette:
+        text += (" Der automatische Ablauf hält dabei ebenfalls an; nach dem nächsten Öffnen macht "
+                 "„Weitermachen“ und dann „Automatisch weiter“ dort weiter.")
+    return text
+
+
+# ------------------------- Alles automatisch (v0.13, Entscheidung vom 28.10.2026) ----
+
+OB_ABLAUF_FELD = "Ablauf"
+OB_ABLAUF_AUTOMATISCH = "Alles automatisch"
+OB_ABLAUF_EINZELN = "Schritt für Schritt"
+OB_ABLAUF_TEXT_AUTOMATISCH = (
+    "Nach „Los geht's“ und einem Bestätigungswort laufen alle Schritte von selbst bis zum Aufräumen "
+    "(nur in den Ordner _geloescht_). Kameranamen lassen sich dann erst am Ende ändern."
+)
+OB_ABLAUF_TEXT_EINZELN = "Nach jedem Schritt zeigt das Programm das Ergebnis und wartet auf Ihren Klick."
+OB_KETTE_TITEL = "Alles automatisch"
+OB_KETTE_JA = "Starten"
+OB_KETTE_VERSCHIEBEN_HINWEIS = (
+    "Im Modus „Verschieben“ hält der Ablauf nach der Analyse an: Verschieben löscht die Originale "
+    "endgültig – das bestätigen Sie dann selbst."
+)
+OB_KETTE_VERSCHIEBEN_SELBST = (
+    "Verschieben löscht die Originale endgültig und läuft deshalb nie von selbst. "
+    "Bitte „Verschieben starten“ drücken und bestätigen."
+)
+OB_KETTE_NICHTS = "Es gibt keinen offenen Schritt, mit dem der automatische Ablauf weitermachen könnte."
+OB_KETTE_ANGEHALTEN = (
+    "Der automatische Ablauf ist angehalten. Es beginnt kein weiterer Schritt; das Bisherige ist gespeichert."
+)
+
+
+def ob_kette_knopf(schritt_name: str) -> str:
+    return f"Automatisch weiter ab {schritt_name}"
+
+
+def ob_frage_automatisch(quellen: list[str], aufraeumbar: int, verschieben: bool, ab_schritt: str = "") -> str:
+    """Die eine Frage vor dem automatischen Ablauf (mit dem Bestaetigungswort)."""
+    if ab_schritt:
+        anfang = f"Ab „{ab_schritt}“ laufen jetzt alle Schritte bis zum Aufräumen von selbst nacheinander."
+    else:
+        anfang = ("Jetzt laufen alle Schritte von selbst nacheinander: Quellen durchsuchen, Analyse, "
+                  "Kopieren ins Archiv, Prüfen und Aufräumen.")
+    zeilen = [
+        anfang + " Das kann Stunden dauern – danach muss niemand mehr etwas anklicken.",
+        "",
+        "Beim Aufräumen kommen die Originale, deren Kopie im Archiv geprüft ist, in den Ordner „_geloescht_“ "
+        "in ihrer Quelle. Nichts wird endgültig gelöscht, und „Zurücklegen…“ holt alles zurück. "
+        "Leere Ordner bleiben stehen.",
+    ]
+    if quellen:
+        zeilen += ["", "Quellen:"] + [f"  {q}" for q in quellen[:6]]
+        if len(quellen) > 6:
+            zeilen.append(f"  und {anzahl(len(quellen) - 6)} weitere")
+    if aufraeumbar:
+        zeilen += ["", f"Aus früheren Läufen sind schon {anzahl(aufraeumbar)} Dateien geprüft; "
+                       "auch sie kommen in den Ordner „_geloescht_“."]
+    if verschieben:
+        zeilen += ["", OB_KETTE_VERSCHIEBEN_HINWEIS]
+    zeilen += [
+        "",
+        "Das Fenster offen lassen – es darf klein sein. Ein Laptop bleibt am Strom und aufgeklappt. "
+        "Der Bildschirm darf ausgehen; der PC schläft nicht ein, solange das Programm arbeitet.",
+        "",
+        f"Zum Bestätigen „{BESTAETIGUNGSWORT['papierkorb']}“ eintippen:",
+    ]
+    return "\n".join(zeilen)
+
+
+def ob_kette_ende(grund: str, sekunden: float, offen: str = "", fehler: str = "") -> str:
+    """Warum der automatische Ablauf vorbei ist - fertig oder angehalten."""
+    zeit = dauer(sekunden)
+    if grund == "fertig":
+        return (f"Alles erledigt ({zeit}). Aufgeräumte Originale liegen im Ordner „_geloescht_“ ihrer Quelle; "
+                "„Zurücklegen…“ holt sie zurück. Den Ordner erst löschen, wenn alles stimmt.")
+    if grund == "offen":
+        return (f"Erledigt, was ging ({zeit}). Noch offen: {offen} – etwa Dateien einer Quelle, die gerade "
+                "nicht erreichbar ist. „Automatisch weiter“ macht dort weiter.")
+    if grund == "pruefen_befunde":
+        return ("Der automatische Ablauf hat vor dem Aufräumen angehalten: Prüfen hat Abweichungen gefunden. "
+                "Bitte die Liste „Fehler“ ansehen. In der Quelle wurde nichts angefasst.")
+    if grund == "verschieben":
+        return ("Die Analyse ist fertig. Verschieben löscht die Originale endgültig und läuft deshalb nie "
+                "von selbst – bitte „Verschieben starten“ drücken und bestätigen.")
+    if grund == "nicht_fertig":
+        return "Der automatische Ablauf hat angehalten: Ein Schritt ist nicht fertig geworden (der Grund steht oben)."
+    if grund == "abgestuerzt":
+        return ("Der automatische Ablauf hat angehalten: Ein Schritt wurde unerwartet beendet. Das Bisherige "
+                "ist gespeichert; „Automatisch weiter“ macht dort weiter.")
+    if grund == "abgebrochen":
+        return "Der automatische Ablauf ist abgebrochen. Das Bisherige ist gespeichert."
+    if grund == "startfehler":
+        return f"Der automatische Ablauf hat angehalten: Der nächste Schritt ließ sich nicht starten ({fehler})."
+    return "Der automatische Ablauf ist beendet."
 
 
 # ------------------------------------- Bestand des Archivs (v0.9) ----

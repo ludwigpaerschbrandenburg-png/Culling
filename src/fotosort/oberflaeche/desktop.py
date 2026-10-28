@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import FotosortFehler, __version__, cli, config, meldungen, testbilder
+from .. import FotosortFehler, __version__, cli, config, meldungen, prozesse, testbilder
 from . import ablauf as ablauf_modul
 from . import meldungsfenster, sichtfenster, stil
 
@@ -349,6 +349,17 @@ class StartSeite(QWidget):
         zeile.addLayout(block)
         zeile.addStretch(1)
         form.addLayout(zeile)
+        # Ablauf (seit v0.13, Entscheidung vom 28.10.2026): alles automatisch
+        # (Standard) oder wie bisher Schritt fuer Schritt.
+        block = QVBoxLayout()
+        block.setSpacing(6)
+        block.addWidget(label(meldungen.OB_ABLAUF_FELD, "feldname"))
+        self.ablauf = Seg([("automatisch", meldungen.OB_ABLAUF_AUTOMATISCH), ("einzeln", meldungen.OB_ABLAUF_EINZELN)])
+        self.ablauf.geaendert.connect(lambda _w: self.f.einstellungen_senden())
+        block.addWidget(self.ablauf)
+        self.ablauf_text = label("", "hinweis", wrap=True)
+        block.addWidget(self.ablauf_text)
+        form.addLayout(block)
         form.addStretch(1)
         aussen.addLayout(form, 1)
 
@@ -413,6 +424,7 @@ class StartSeite(QWidget):
         self.ziel.setText(z.get("ziel") or "")
         self.ziel.setCursorPosition(0)
         self.modus.setzen("verschieben" if z.get("verschieben") else "kopieren")
+        self.ablauf.setzen("automatisch" if z.get("automatisch", True) else "einzeln")
         self.profil.setzen(z.get("profil") or "hdd")
         self.texte(z)
         self.quellen_zeigen(z.get("quellen_neu") or [])
@@ -422,6 +434,13 @@ class StartSeite(QWidget):
         self.modus_text.setText(
             "Jede Datei wird erst nach geprüfter Kopie in der Quelle gelöscht." if self.modus.wert() == "verschieben"
             else "Die Quelle bleibt unverändert; aufgeräumt wird später.")
+        if self.ablauf.wert() == "automatisch":
+            ablauf = meldungen.OB_ABLAUF_TEXT_AUTOMATISCH
+            if self.modus.wert() == "verschieben":
+                ablauf += "\n" + meldungen.OB_KETTE_VERSCHIEBEN_HINWEIS
+        else:
+            ablauf = meldungen.OB_ABLAUF_TEXT_EINZELN
+        self.ablauf_text.setText(ablauf)
         p = next((p for p in z.get("profile", []) if p["name"] == self.profil.wert()), None)
         text = p["text"] if p else ""
         # Entscheidung 1 (v0.8): was die Laufwerkserkennung vorschlaegt
@@ -752,6 +771,11 @@ class Hauptfenster(QMainWindow):
         self.letzter_schritt = ""
         self.abbruch_zeit = 0.0
         self.profil_gewaehlt_ = False
+        # Seit v0.13: Solange eine Frage zum laufenden Schritt offen ist
+        # (Abbrechen? Sofort beenden? Schliessen?), beginnt der automatische
+        # Ablauf keinen neuen Schritt. Und: haelt das Fenster den PC wach?
+        self._frage_offen = False
+        self._wach = False
         self.ansicht = "start"
         self.vorher = "start"
         self.gezeigt = False
@@ -875,8 +899,10 @@ class Hauptfenster(QMainWindow):
             sitzung_endet = QApplication.instance() is not None and QApplication.instance().isSavingSession()
             if not self._schliessen_ohne_frage and not sitzung_endet:
                 schritt = self.kurzname((self.ab.lauf.schritt if self.ab.lauf else "") or self.lauf.get("schritt", ""))
-                ja, _ = frage(self, meldungen.OB_BEENDEN_TITEL, meldungen.ob_beenden_frage(schritt),
-                              ja="Beenden", nein="Weiterarbeiten")
+                with self._frage():
+                    ja, _ = frage(self, meldungen.OB_BEENDEN_TITEL,
+                                  meldungen.ob_beenden_frage(schritt, bool(self.ab.lauf_status().get("kette"))),
+                                  ja="Beenden", nein="Weiterarbeiten")
                 if not ja:
                     ev.ignore()
                     return
@@ -887,8 +913,10 @@ class Hauptfenster(QMainWindow):
                     self.ab.beenden(warten=10.0 if sitzung_endet else 60.0, takt=QApplication.processEvents)
             finally:
                 self._beendet_gerade = False
+        self.ab.kette_loesen()          # kein automatischer Ablauf mehr nach dem Schliessen
         self._hintergrund_anhalten()
         self.poll.stop()
+        self.wach(False)
         self.sichten.schliessen()
         self._marker_schreiben(False)
         if self.instanz is not None:
@@ -1236,15 +1264,22 @@ class Hauptfenster(QMainWindow):
         # Das Profil geht nur mit, wenn der Nutzer es selbst gewaehlt hat - sonst
         # bliebe der Vorschlag der Laufwerkserkennung nach einem Moduswechsel stehen.
         profil = self.start.profil.wert() if self.profil_gewaehlt_ else None
-        a = self._versuchen(self.ab.einstellungen_setzen, self.start.modus.wert() == "verschieben", profil)
+        a = self._versuchen(self.ab.einstellungen_setzen, self.start.modus.wert() == "verschieben", profil,
+                            self.start.ablauf.wert() == "automatisch")
         if a is not None:
             self.zustand["verschieben"] = a["verschieben"]
+            self.zustand["automatisch"] = a["automatisch"]
             self._profil_uebernehmen(a)
 
-    def los(self, ziel_anlegen: bool, ziel_trotzdem: bool = False) -> None:
+    def los(self, ziel_anlegen: bool, ziel_trotzdem: bool = False, wort: str = "") -> None:
         with self.beschaeftigt():
-            a = self._versuchen(self.ab.los, ziel_anlegen, ziel_trotzdem)
+            a = self._versuchen(self.ab.los, ziel_anlegen, ziel_trotzdem, self.ab.automatisch, wort)
         if a is None:
+            return
+        if a.get("frage") == "automatisch":
+            ja, eingabe = self._kette_frage(a)
+            if ja:
+                self.los(ziel_anlegen, ziel_trotzdem, eingabe)
             return
         if a.get("frage") == "ziel_anlegen":
             ja, _ = frage(self, "Ordner anlegen?", a["text"], ja="Anlegen")
@@ -1376,6 +1411,7 @@ class Hauptfenster(QMainWindow):
         self.haupt.phasen.setzen(self.letzter_schritt, 0)
         self.haupt.karten_sperren(True)
         self.lauf_aktionen({"zustand": "startet"})
+        self.wach(True)
         self.poll.start()
         self.lauf_abfragen()
 
@@ -1386,13 +1422,35 @@ class Hauptfenster(QMainWindow):
             self.letzter_schritt = l["schritt"]
         self.lauf_fuellen(l)
         self.rahmen()
-        if l.get("zustand") in ENDE:
+        zustand = l.get("zustand")
+        if zustand == "pause":
+            self.wach(False)
+        elif zustand and zustand not in ENDE:
+            self.wach(True)
+        if zustand in ENDE:
+            ende: dict = {}
+            if l.get("kette"):
+                # Alles automatisch (seit v0.13): gleich den naechsten Schritt -
+                # ohne Ruheansicht und ohne Blinken dazwischen. Erst eine offene
+                # Frage (Abbrechen? Schliessen?) abwarten.
+                if self._frage_offen:
+                    return
+                with self.beschaeftigt():
+                    ende = self._versuchen(self.ab.automatisch_weiter) or {}
+                if ende.get("gestartet"):
+                    self.lauf_starten(ende["gestartet"])
+                    return
+                if ende.get("laeuft"):
+                    return
             if self.poll.isActive():
                 # Der verfolgte Schritt ist eben zu Ende: in der Taskleiste
                 # blinken, falls der Nutzer gerade woanders ist.
                 QApplication.alert(self, 0)
             self.poll.stop()
+            self.wach(False)
             self.ruhe_zeigen(l)
+            if ende.get("text"):
+                self.meldung(ende["text"], gut=ende.get("ende") == "fertig")
 
     def lauf_fuellen(self, l: dict) -> None:
         anteil = l.get("anteil")
@@ -1421,14 +1479,57 @@ class Hauptfenster(QMainWindow):
         self.aktionen_setzen(eintraege)
 
     def abbrechen_fragen(self) -> None:
-        ja, _ = frage(self, "Schritt abbrechen?", "Das Bisherige bleibt gespeichert; der nächste Lauf macht dort weiter.", ja="Abbrechen", nein="Weiterlaufen lassen")
+        with self._frage():
+            ja, _ = frage(self, "Schritt abbrechen?", "Das Bisherige bleibt gespeichert; der nächste Lauf macht dort weiter.", ja="Abbrechen", nein="Weiterlaufen lassen")
         if ja:
             self.steuern("abbrechen")
 
     def sofort_fragen(self) -> None:
-        ja, _ = frage(self, "Sofort beenden?", "Der Schritt reagiert nicht. Angefangene Kopien räumt der nächste Lauf auf.", ja="Sofort beenden")
+        with self._frage():
+            ja, _ = frage(self, "Sofort beenden?", "Der Schritt reagiert nicht. Angefangene Kopien räumt der nächste Lauf auf.", ja="Sofort beenden")
         if ja:
             self.steuern("sofort")
+
+    @contextlib.contextmanager
+    def _frage(self):
+        """Solange eine Frage zum laufenden Schritt offen ist, beginnt der
+        automatische Ablauf keinen neuen Schritt (der Zeitgeber laeuft weiter)."""
+        alt, self._frage_offen = self._frage_offen, True
+        try:
+            yield
+        finally:
+            self._frage_offen = alt
+
+    def wach(self, an: bool) -> None:
+        """Windows schlaeft nicht ein, solange ein Schritt oder der automatische
+        Ablauf arbeitet - auch nicht zwischen zwei Schritten. Der Bildschirm darf aus."""
+        if an != self._wach:
+            self._wach = an
+            prozesse.wach_halten(an)
+
+    def _kette_frage(self, a: dict) -> tuple[bool, str]:
+        """Die eine Frage vor dem automatischen Ablauf. Ein leeres Wort ist eine
+        Meldung wie ein falsches - nie stillschweigend die Frage von vorn."""
+        ja, wort = frage(self, meldungen.OB_KETTE_TITEL, a["text"], eingabe=True, ja=meldungen.OB_KETTE_JA)
+        if ja and not wort.strip():
+            self.meldung(meldungen.ob_wort_falsch(a.get("wort") or meldungen.BESTAETIGUNGSWORT["papierkorb"]))
+            return False, ""
+        return ja, wort
+
+    def kette_starten(self, wort: str = "") -> None:
+        """Knopf „Automatisch weiter ab …“: den automatischen Ablauf beim
+        naechsten offenen Schritt aufnehmen - nach dem Wort."""
+        with self.beschaeftigt():
+            a = self._versuchen(self.ab.automatisch_starten, wort)
+        if a is None:
+            return
+        if a.get("frage") == "automatisch":
+            ja, eingabe = self._kette_frage(a)
+            if ja:
+                self.kette_starten(eingabe)
+            return
+        if a.get("gestartet"):
+            self.lauf_starten(a["gestartet"])
 
     def steuern(self, wunsch: str) -> None:
         a = self._versuchen(self.ab.steuern, wunsch)
@@ -1499,7 +1600,11 @@ class Hauptfenster(QMainWindow):
         v = bool(self.zustand.get("verschieben"))
         s = n["schritt"]
         eintraege = []
-        if s == "scan":
+        if self.zustand.get("automatisch") and s in ("analyse", "kopieren", "pruefen", "aufraeumen") \
+                and not (s == "kopieren" and v):
+            # Alles automatisch (seit v0.13); Verschieben bestaetigt der Nutzer selbst.
+            eintraege.append((meldungen.ob_kette_knopf(self.kurzname(s)), "primary", lambda: self.kette_starten(), True))
+        elif s == "scan":
             eintraege.append(("Startseite: Quellordner angeben", "primary", lambda: self.laden("start"), True))
         elif s == "analyse":
             eintraege.append(("Analyse starten", "primary", lambda: self.schritt_starten("analyse"), True))
@@ -1766,6 +1871,8 @@ class Durchlauf(QObject):
                 f.start.ziel_setzen(self.ziel)
                 f.quelle_hinzufuegen(self.quelle, True)    # Rueckfragen kann niemand beantworten
                 self._foto("02-startseite-ausgefuellt")
+                f.start.ablauf.setzen("einzeln")         # der Durchlauf zeigt jeden Schritt einzeln
+                f.einstellungen_senden()
                 f.los(False, True)
                 self._naechste()
             elif st == 1:          # Scan laeuft -> Uebersicht
@@ -1821,6 +1928,15 @@ class Durchlauf(QObject):
                     if self.fotos is not None:
                         d.grab().save(str(self.fotos / "12-dialog-ordner-anlegen.png"))
                         self._sagen("Foto 12-dialog-ordner-anlegen")
+                    d.reject()
+                    # Die eine Frage von „Alles automatisch“ (seit v0.13), fuer die Anleitung.
+                    d = Dialog(f, meldungen.OB_KETTE_TITEL, meldungen.ob_frage_automatisch([self.quelle], 0, False),
+                               eingabe=True, ja=meldungen.OB_KETTE_JA)
+                    d.show()
+                    QApplication.processEvents()
+                    if self.fotos is not None:
+                        d.grab().save(str(self.fotos / "14-frage-alles-automatisch.png"))
+                        self._sagen("Foto 14-frage-alles-automatisch")
                     d.reject()
                     self._pruefen()
         except Exception as fehler:  # noqa: BLE001 - der Durchlauf meldet, statt abzustuerzen

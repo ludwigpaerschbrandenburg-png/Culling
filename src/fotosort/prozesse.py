@@ -241,3 +241,36 @@ def ist_zombie(pid: int) -> bool:
     except OSError:
         return False
     return stat[stat.rindex(")") + 2:].startswith("Z")
+
+
+# Seit v0.13: der PC schlaeft nicht ein, solange das Programm arbeitet.
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+
+
+def _ausfuehrungszustand():  # pragma: no cover - nur Windows
+    """SetThreadExecutionState aus kernel32, mit 32-Bit-Werten ohne Vorzeichen."""
+    import ctypes
+    from ctypes import wintypes
+
+    funktion = ctypes.windll.kernel32.SetThreadExecutionState
+    funktion.argtypes = [wintypes.DWORD]
+    funktion.restype = wintypes.DWORD
+    return funktion
+
+
+def wach_halten(an: bool) -> bool:
+    """Windows nicht in den Ruhezustand gehen lassen, solange das Programm
+    arbeitet (an=True), oder wieder loslassen (an=False). Der Bildschirm darf
+    ausgehen. Gilt fuer den Strang, der es ruft - im Fenster der Hauptstrang,
+    der den ganzen automatischen Ablauf ueberdauert -, bis zum Loslassen oder
+    bis das Programm endet. Zuklappen, Ausschalten und Neustarts verhindert es
+    nicht. Auf anderen Systemen nichts zu tun. True, wenn Windows gefragt wurde."""
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        funktion = _ausfuehrungszustand()
+        funktion(ES_CONTINUOUS | ES_SYSTEM_REQUIRED if an else ES_CONTINUOUS)
+    except (OSError, AttributeError):
+        return False
+    return True

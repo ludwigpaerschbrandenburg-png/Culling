@@ -563,6 +563,9 @@ Version 0.2.0, Release v0.2.
 ## Phase 8 — Server
 
 - [ ] Dockerfile, Volumes, TrueNAS-Anleitung
+- [ ] **„Alles automatisch“ auch in der Browser-Fassung** (seit v0.13 nur im Fenster): Schalter,
+      die Frage mit dem Wort und `automatisch_weiter` nach jedem Schrittende. Auf dem Server soll
+      der Ablauf weiterlaufen, auch wenn keine Seite offen ist.
 
 ### Aus der Prüfung
 
@@ -940,6 +943,28 @@ meine Bilder nehmen?“ – Ja; vorher drei Kleinigkeiten.
   das nie etwas: Es ging nur um die Anzeige.
 - [x] Volle Tests (1084 grün), CI grün (Linux, Windows 1065 grün, Paket), Release v0.12.1 mit
   `fotosort-windows.zip`. Abschlussprobe im Fenster mit 5000 Testbildern: „Alles richtig“.
+
+## Phase 14 — Alles automatisch (Version 0.13)
+
+**Wunsch des Nutzers vom 28.10.2026:** „Analyse starten sollte automatisch passieren oder als
+Schalter … Ich möchte die Software starten und nach 1–5 Stunden wiederkommen, und es ist fertig –
+nicht die ganze Zeit Ja und Weiter, Weiter, Weiter drücken.“ Entscheidungen: Schalter, Standard
+an; auch das Aufräumen automatisch, nur in den Ordner `_geloescht_` (SPEC §8,
+`docs/entscheidungen.md`).
+
+- [x] Kern (Test zuerst, `tests/test_kette.py`): Einstellung `automatisch` (Standard an, auch für
+  alte Einstellungen), das Wort `verschieben` einmal beim Start (im Kern geprüft),
+  `automatisch_weiter` nach jedem Schrittende. Nur vorwärts; Halt bei Abbruch (auch wenn der Klick
+  erst nach dem Ende eines Schritts ankommt), Absturz, „nicht fertig“, Befunden des Prüfens und
+  vor dem Verschieben. Aufräumen fest in `_geloescht_`, nie endgültig, nie leere Ordner. Die
+  Bestätigung lebt nur im Speicher.
+- [x] Wachhalten: Windows schläft nicht ein, solange gearbeitet wird (`prozesse.wach_halten`).
+- [x] Fenster: Schalter „Ablauf“ auf der Startseite, die Frage mit dem Wort, der nächste Schritt
+  ohne Ruheansicht dazwischen, kein neuer Schritt bei offener Frage, Knopf „Automatisch weiter
+  ab …“, Schlussmeldung „Alles erledigt“.
+- [x] Doku: SPEC §4/§8/§11, `docs/entscheidungen.md`, LIESMICH (Tabelle, Übersicht, Testbilder,
+  Kameranamen, Aufräumen, „Der große Lauf“), `docs/ideen.md`.
+- [ ] Volle Tests, Rundgang mit 5000 Testbildern (Bildschirmfotos), CI, Release v0.13.0.
 
 ## Ohne feste Phase
 

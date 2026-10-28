@@ -19,7 +19,7 @@ Zeichen: ✅ gebaut · ◐ teilweise · ○ fehlt
 - ✅ Komplett offline, nichts geht ins Internet.
 - ○ Die Browser-Fassung gibt es unter Windows nicht mehr, nur später auf TrueNAS.
 - ○ Fortschritt in der Taskleiste (grüner Balken im Symbol).
-- ○ Ruhezustand von Windows verhindern, solange gearbeitet wird.
+- ✅ Ruhezustand von Windows verhindern, solange gearbeitet wird (seit v0.13; der Bildschirm darf ausgehen).
 
 ### B. Tempo / Prozessor
 - ○ **Alle Kerne für Rechenarbeit**: Prüfsummen, Vorschaubilder, Bildanalyse.

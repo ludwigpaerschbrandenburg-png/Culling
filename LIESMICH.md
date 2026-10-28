@@ -121,8 +121,10 @@ Mitternacht und Silvester, WhatsApp-Bilder und Bildschirmfotos, Scans, kaputte K
 3. Danach sind Zielordner (`…\fotosort Testbilder\Ziel`) und Quelle
    (`…\fotosort Testbilder\Quelle`) schon eingetragen. **„Los geht's“** drücken. Die Frage
    „Zielordner ist nicht leer“ mit **„Weiter“** beantworten – im Testziel liegt absichtlich schon
-   etwas. Dann die Schritte wie unten beschrieben durchlaufen lassen: Analyse, Kopieren, Prüfen.
-   Aufräumen geht auch – es betrifft nur die Testbilder.
+   etwas. Beim Ablauf „Alles automatisch“ (Standard) fragt das Programm dann einmal nach dem Wort
+   **`verschieben`**; danach läuft alles von selbst: Analyse, Kopieren, Prüfen und Aufräumen (es
+   betrifft nur die Testbilder). Am Ende steht „Alles erledigt“. Bei „Schritt für Schritt“
+   drücken Sie die Schritte selbst nacheinander.
 4. In der Übersicht **„Testbilder: Ergebnis prüfen“** drücken (oder auf der Startseite
    „Ergebnis prüfen“). Das Programm vergleicht jede Datei im Ziel mit der Liste, sagt, ob alles
    stimmt, und öffnet auf Wunsch den ausführlichen **Prüfbericht** im Browser.
@@ -152,6 +154,7 @@ Auf der Startseite tragen Sie ein:
 | **Zielordner** | „Auswählen…" drücken und `D:\Probe\Archiv` im Windows-Ordnerdialog wählen. Gibt es den Ordner noch nicht, fragt das Programm bei „Los geht's", ob es ihn anlegen soll. |
 | **Quellordner** | „Quelle hinzufügen…" drücken und `D:\Probe\Quelle` wählen. Jede Quelle erscheint als eigene Zeile; „Entfernen“ daneben nimmt sie wieder heraus. Beliebig viele Quellen sind möglich. Getippt wird nirgends. Wählen Sie ein ganzes Laufwerk (`C:\`) oder Ihren Benutzerordner, fragt das Programm nach – meist ist ein Unterordner wie „Bilder" gemeint. |
 | **Modus** | „Kopieren" lassen – die Quelle bleibt unverändert. |
+| **Ablauf** | **„Alles automatisch“** (Standard): Nach „Los geht's“ fragt das Programm einmal nach dem Wort `verschieben` und macht dann alles allein – durchsuchen, analysieren, kopieren, prüfen und am Ende aufräumen, nur in den Ordner `_geloescht_` (zurückholbar, nichts wird endgültig gelöscht). Sie können weggehen; der PC schläft nicht ein, solange das Programm arbeitet. **„Schritt für Schritt“** hält nach jedem Schritt an und wartet auf Ihren Klick – das Richtige, wenn Sie vor dem Kopieren Kameranamen ändern oder vor dem Aufräumen nachsehen wollen. |
 | **Quelle und Ziel liegen auf** | Das Programm sieht selbst nach, worauf Ziel und Quellen liegen (Festplatte, SSD oder Netzlaufwerk), wählt den passenden Knopf vor und schreibt darunter, was es erkannt hat. Der langsamste Teil entscheidet: Liegt eines auf einer Festplatte, heißt es „Festplatte"; nur wenn alles auf SSDs liegt, „SSD"; bei einem Netzlaufwerk „Netzwerk". Lässt sich nichts feststellen, bleibt es bei der sicheren „Festplatte". Sie können den Vorschlag jederzeit ändern – dann bleibt Ihre Wahl. Das Profil bestimmt, wie viele Dateien gleichzeitig kopiert, gelesen und geprüft werden und wie viele ExifTool-Programme bei der Analyse die Quelle lesen. |
 
 Rechts daneben steht eine Karte: Liegt im Zielordner schon ein angefangenes Archiv, zeigt sie
@@ -173,10 +176,15 @@ Danach zeigt das Fenster die **Übersicht**: oben die Pfade (Quellen → Ziel) u
 Phasenleiste **Scan · Analyse · Kopieren · Prüfen · Aufräumen** (die violette Linie zeigt, wie
 weit es ist), links der Balken mit erledigten Dateien, Datenmenge, MB/s und Restzeit, darunter
 die Zähler des letzten Schritts, rechts die Karten **Aufräumen**, **Leere Ordner** und **Letzter
-Bericht**. Unten stehen die Knöpfe: Der umrandete Hauptknopf ist immer der nächste sinnvolle
-Schritt („Analyse starten", „Kopieren starten · 3.912 Dateien", „Prüfen starten"); solange ein
-Schritt läuft, ist er gesperrt, und daneben stehen **Pause** und **Abbrechen**. Nichts läuft
-ohne Ihren Klick. Alles Bisherige bleibt gespeichert. **Fenster zu heißt Programm aus:** Läuft
+Bericht**. Unten stehen die Knöpfe. Bei **„Alles automatisch“** geht es nach jedem Schritt von
+selbst weiter, bis am Ende **„Alles erledigt“** dasteht; hält der Ablauf vorher an (etwa nach
+„Abbrechen“ oder weil „Prüfen“ etwas gefunden hat), sagt eine Meldung, warum, und der Hauptknopf
+heißt **„Automatisch weiter ab …“** (er fragt noch einmal nach dem Wort). Bei **„Schritt für
+Schritt“** ist der umrandete Hauptknopf immer der nächste sinnvolle Schritt („Analyse starten",
+„Kopieren starten · 3.912 Dateien", „Prüfen starten"). Solange ein Schritt läuft, ist er
+gesperrt, und daneben stehen **Pause** und **Abbrechen** – „Abbrechen“ hält auch den
+automatischen Ablauf an. Nichts beginnt ohne Ihren Klick auf „Los geht's“. Alles Bisherige
+bleibt gespeichert. **Fenster zu heißt Programm aus:** Läuft
 gerade ein Schritt, fragt das Fenster kurz nach; bei „Beenden“ hält der Schritt sauber an (in
 der Regel wird die aktuelle Datei noch fertig), dann ist alles aus. Nichts geht verloren: Beim
 nächsten `start.bat` geht es genau dort weiter. Das Programm
@@ -231,7 +239,9 @@ Die Übersicht im Fenster zeigt nach der Analyse die Kameras als Tabelle: links 
 wie es in den Dateien steht, rechts ein Feld mit dem Ordnernamen. **Tippen Sie dort einfach den
 gewünschten Namen hinein** (etwa `Sony A7C` statt `ILCE-7CM2`) und drücken Sie „Ordnernamen
 übernehmen". Der Eintrag wird dauerhaft in die Einstellungen geschrieben (siehe Abschnitt 6),
-und die betroffenen Dateien werden noch einmal analysiert. Im schwarzen Fenster fragt der geführte Ablauf stattdessen:
+und die betroffenen Dateien werden noch einmal analysiert. Bei „Alles automatisch“ erscheint die
+Tabelle erst am Ende – dann ist schon kopiert, und schon kopierte Dateien bleiben in ihrem Ordner.
+Wer Kameranamen vor dem Kopieren festlegen will, nimmt „Schritt für Schritt“. Im schwarzen Fenster fragt der geführte Ablauf stattdessen:
 **Soll ein Kameramodell einen anderen Ordnernamen bekommen?** – Modell eintippen, dann den
 Ordnernamen; Enter allein heißt „nichts ändern".
 
@@ -305,6 +315,9 @@ es ab und stellt nichts um – anschließen und noch einmal starten. Empfehlung:
 Jahr und immer, bevor Sie eine Platte weitergeben oder die Sicherung erneuern.
 
 ### Schritt 5: Quelle aufräumen
+
+Bei „Alles automatisch“ geschieht dieser Schritt am Ende des Ablaufs von selbst – immer in den
+Ordner `_geloescht_`, nie endgültig, und leere Ordner bleiben stehen. Von Hand geht es so:
 
 Das Aufräumen ist die Karte rechts in der Übersicht. Sie zeigt je Quellordner, wie viele
 Dateien eine geprüfte Kopie im Archiv haben und wie groß sie sind; vor dem Prüfen ist die Karte
@@ -394,12 +407,22 @@ Klappt der Probelauf, kommt der Rest. So geht es sicher:
    Windows lädt sie dann beim Lesen erst herunter – das dauert und braucht Platz. Besser
    vorher: Rechtsklick auf den Fotoordner, „Immer auf diesem Gerät beibehalten“, und warten,
    bis überall ein grüner Haken steht.
-5. **Modus „Kopieren“ lassen.** Die Originale bleiben unberührt, bis Sie selbst aufräumen.
-6. **In Ruhe nachsehen.** Nach „Prüfen“ den Bericht öffnen, die Listen „Ohne Datum“ und
-   „Duplikate“ ansehen und im Reiter „Sichten“ durch das Archiv blättern.
-7. **Erst dann aufräumen** – mit dem Standard „_geloescht_“. Die Originale wandern in einen
-   Ordner `_geloescht_<Datum>` in der Quelle; „Zurücklegen…“ macht das rückgängig. Diesen
-   Ordner erst nach einigen Wochen selbst löschen, wenn Sie sicher sind.
+5. **Modus „Kopieren“ lassen, Ablauf „Alles automatisch“.** Nach „Los geht's“ und dem Wort
+   `verschieben` macht das Programm alles allein: durchsuchen, analysieren, kopieren, prüfen,
+   aufräumen. Das kann Stunden dauern – Sie können weggehen. Dabei:
+   - das Fenster offen lassen (es darf klein in der Taskleiste liegen);
+   - einen Laptop am Strom lassen und **nicht zuklappen**;
+   - der Bildschirm darf ausgehen – der PC schläft nicht ein, solange das Programm arbeitet.
+     Ausschalten, Zuklappen und Windows-Neustarts kann kein Programm verhindern; dann geht es
+     beim nächsten Start mit „Weitermachen“ und „Automatisch weiter“ dort weiter.
+6. **Am Ende** kommen die Originale, deren Kopie im Archiv geprüft ist, in einen Ordner
+   `_geloescht_<Datum>` in der Quelle – nichts ist endgültig gelöscht. Hat „Prüfen“ Abweichungen
+   gefunden, räumt das Programm gar nicht auf und sagt es.
+7. **In Ruhe nachsehen.** Den Bericht öffnen, die Listen „Ohne Datum“ und „Duplikate“ ansehen
+   und im Reiter „Sichten“ durch das Archiv blättern. Stimmt etwas nicht, holt „Zurücklegen…“
+   die Originale an den alten Ort. Den Ordner `_geloescht_<Datum>` erst nach einigen Wochen
+   selbst löschen, wenn Sie sicher sind. Wer lieber *vor* dem Aufräumen nachsieht, wählt
+   „Schritt für Schritt“ und räumt danach selbst auf (mit dem Standard „_geloescht_“).
 8. **Danach das Archiv sichern** (zweite Platte oder Netz) und etwa einmal im Jahr
    „Archiv nachprüfen…“ laufen lassen.
 

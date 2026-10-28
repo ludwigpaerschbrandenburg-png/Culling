@@ -7,6 +7,33 @@ Neueste Einträge nach oben.
 
 ---
 
+## 2026-10-28 — Alles automatisch: ein Wort beim Start, dann bis zum Aufräumen
+
+**Entscheidung (des Nutzers):** Im Fenster laufen Scan, Analyse, Kopieren, Prüfen und Aufräumen
+nach „Los geht's“ von selbst nacheinander. Ein Schalter „Ablauf: Alles automatisch | Schritt für
+Schritt“ steht auf der Startseite, Standard ist „Alles automatisch“. Auch das Aufräumen läuft
+automatisch – nur in den Ordner `_geloescht_`, nie endgültig, nie leere Ordner. Einmal beim Start
+wird das Wort `verschieben` verlangt. Verschieben läuft nie von selbst. Hat Prüfen Abweichungen
+gefunden, wird nicht aufgeräumt. Solange gearbeitet wird, schläft Windows nicht ein (SPEC §8).
+
+**Begründung:** Der Nutzer will das Programm starten, nach 1–5 Stunden wiederkommen und alles
+fertig vorfinden, statt nach jedem Schritt „Weiter“ zu drücken. Das Wort beim Start ersetzt die
+Bestätigung, die das Aufräumen sonst verlangt: Ohne Wort gäbe es keinen Schutz vor einem
+versehentlichen Klick, und ein Wort am Ende widerspräche dem Wunsch. Der Ordner `_geloescht_`
+macht das Aufräumen umkehrbar („Zurücklegen…“). Verschieben dagegen löscht endgültig und benutzt
+dasselbe Wort – darum nie automatisch. Findet Prüfen Abweichungen, gilt „im Zweifel anhalten“
+(CLAUDE.md §1). Die Kette geht nur vorwärts, wie `fotosort start`; so gibt es keine Schleife.
+Die Bestätigung lebt nur im Speicher und erlischt bei jedem anderen Start, bei Abbrechen und
+beim Schließen des Fensters.
+
+**Alternativen:** Aufräumen weiter von Hand (vom Programm empfohlen, vom Nutzer verworfen).
+Verschieben mit einer zweiten Bestätigung automatisch (verworfen: endgültiges Löschen nie ohne
+eigenen Klick). Die Kette im Arbeitsprozess statt im Fenster (verworfen: ein Schritt je Prozess
+bleibt, und das Fenster muss ohnehin offen sein). Die Browser-Fassung gleich mitziehen
+(verschoben auf Phase 8 – unter Windows gibt es sie nicht mehr).
+
+---
+
 ## 2026-09-21 — Toleranz beim Vergleich des Änderungsdatums bleibt bei 0,001 s
 
 **Entscheidung:** Die Toleranz in `db._gleiche_zeit` bleibt bei einer Tausendstelsekunde

@@ -43,6 +43,55 @@ LISTEN = {
     "ohne_datum": ("datum_sicher = 0 AND zielpfad != ''", ()),
 }
 SEITENGROESSE = 100
+# Seit v0.13 (Entscheidung des Nutzers vom 28.10.2026): „Alles automatisch“ -
+# die Schritte des automatischen Ablaufs, in dieser Reihenfolge, nur vorwaerts.
+KETTE = SCHRITTE
+
+
+@dataclass
+class _Kette:
+    """Die Bestaetigung fuer einen automatischen Ablauf (das Wort von „Los geht's“).
+    Lebt nur im Speicher des Fensters, nie in einer Datei - ausser der
+    Bestaetigung, die jedes Aufraeumen ohnehin in seinen Auftrag schreibt."""
+    wort: str
+    ziel: str
+    schritt: str        # der zuletzt vom Ablauf gestartete Schritt
+    beginn: float
+
+
+def kette_naechster(fertig: str, zustand: str, hinweis: str, stand: dict, verschieben: bool) -> tuple[str, str]:
+    """Was der automatische Ablauf nach dem Schritt `fertig` tut: ("start",
+    naechster Schritt) oder ("ende", Grund).
+
+    Nur vorwaerts zum ersten spaeteren Schritt mit Arbeit - hoechstens vier
+    Uebergaenge, nie eine Schleife (wie der gefuehrte Modus `fotosort start`).
+    Er endet nach Abbruch oder Absturz, wenn ein Schritt nicht fertig geworden
+    ist (Fehler mit Grund: Platte voll, Archiv belegt, Ziel weg), wenn das
+    Pruefen Abweichungen gefunden hat (dann wird nicht aufgeraeumt) und vor dem
+    Verschieben: Es loescht die Originale endgueltig und laeuft nie von selbst.
+    Einzelne Dateifehler in Scan, Analyse und Kopieren halten ihn nicht auf -
+    die betroffenen Dateien bleiben unberuehrt in der Quelle.
+    """
+    if zustand in (steuerung.ZUSTAND_ABGEBROCHEN, ZUSTAND_ABGESTUERZT):
+        return "ende", zustand
+    if zustand not in (steuerung.ZUSTAND_FERTIG, steuerung.ZUSTAND_FEHLER) or fertig not in KETTE:
+        return "ende", "fremd"
+    if zustand == steuerung.ZUSTAND_FEHLER and hinweis:
+        return "ende", "nicht_fertig"
+    if fertig == "pruefen" and zustand == steuerung.ZUSTAND_FEHLER:
+        return "ende", "pruefen_befunde"
+    arbeit = {
+        "analyse": stand["analyse"] > 0,
+        "kopieren": stand["kopieren"][0] > 0,
+        "pruefen": stand["pruefen"][0] > 0,
+        "aufraeumen": stand["aufraeumen"][0] > 0,
+    }
+    for schritt in KETTE[KETTE.index(fertig) + 1:]:
+        if arbeit[schritt]:
+            if schritt == "kopieren" and verschieben:
+                return "ende", "verschieben"
+            return "start", schritt
+    return "ende", "offen" if any(arbeit.values()) else "fertig"
 
 
 def oberflaeche_ordner() -> Path:
@@ -239,6 +288,10 @@ class Ablauf:
         # Schritt, den es startet, gehoert dann zu ihm und haelt an, sobald das
         # Fenster weg ist (Schliessen = Programm aus). Ohne (Server): None.
         self.fenster_pid: int | None = None
+        # Seit v0.13: Alles automatisch (Standard an) - und die Bestaetigung des
+        # laufenden automatischen Ablaufs, nur im Speicher (_Kette).
+        self.automatisch = True
+        self._kette: _Kette | None = None
         self._laden()
 
     # -- gemerkter Zustand -------------------------------------------------
@@ -249,6 +302,7 @@ class Ablauf:
             self.ziel = str(alt.get("ziel") or "")
         self.quellen = [str(q) for q in alt.get("quellen") or []]
         self.verschieben = bool(alt.get("verschieben", False))
+        self.automatisch = bool(alt.get("automatisch", True))     # bis v0.12 gab es nur Schritt fuer Schritt
         profil = str(alt.get("profil") or "hdd")
         self.profil = profil if profil in kopieren.PROFILE else "hdd"
         if "profil_von_hand" in alt:
@@ -273,7 +327,7 @@ class Ablauf:
         try:
             steuerung.json_schreiben(self.zustand_datei, {
                 "ziel": self.ziel, "quellen": self.quellen, "verschieben": self.verschieben, "profil": self.profil,
-                "profil_von_hand": self.profil_von_hand,
+                "profil_von_hand": self.profil_von_hand, "automatisch": self.automatisch,
             })
         except OSError:
             pass
@@ -317,6 +371,9 @@ class Ablauf:
         if schritt not in SCHRITTE and schritt not in WEITERE_SCHRITTE:
             raise FotosortFehler(meldungen.arbeit_schritt_unbekannt(schritt))
         with self.sperre:
+            # Jeder Start loescht die Bestaetigung eines automatischen Ablaufs;
+            # nur der Ablauf selbst setzt sie nach seinen eigenen Starts wieder.
+            self._kette = None
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self.lauf.schritt if self.lauf else schritt))
             if not self.ziel:
@@ -356,7 +413,7 @@ class Ablauf:
         with self.sperre:
             st = steuerung.json_lesen(self.status_datei) or {}
             if not st and self.lauf is None:
-                return {"aktiv": False, "zustand": "", "schritt": ""}
+                return {"aktiv": False, "zustand": "", "schritt": "", "kette": self._kette is not None}
             zustand = str(st.get("zustand") or ZUSTAND_STARTET)
             schritt = str(st.get("schritt") or (self.lauf.schritt if self.lauf else ""))
             if self.lauf is None and zustand not in ENDZUSTAENDE and pid_lebt(int(st.get("pid") or 0), st.get("prozess_start")):
@@ -406,6 +463,7 @@ class Ablauf:
             rest = st.get("restzeit_s")
             ergebnis = {
                 "aktiv": self.lauf is not None,
+                "kette": self._kette is not None,       # ein automatischer Ablauf ist bestaetigt
                 "schritt": schritt,
                 "schritt_name": self._schritt_name(str(st.get("anzeige_schritt") or "") or schritt),
                 "zustand": zustand,
@@ -447,7 +505,14 @@ class Ablauf:
 
     def _steuern(self, wunsch: str) -> dict:
         with self.sperre:
+            kette = None
+            if wunsch in ("abbrechen", "sofort"):
+                # Zuerst den automatischen Ablauf anhalten - auch wenn der Schritt
+                # eben fertig wurde und der Klick einen Augenblick zu spaet kommt.
+                kette, self._kette = self._kette, None
             if not self.lauf_lebt() or self.lauf is None:
+                if kette is not None:
+                    return {"ok": True, "text": meldungen.OB_KETTE_ANGEHALTEN}
                 raise FotosortFehler(meldungen.ob_kein_lauf())
             if wunsch == "pause":
                 steuerung.wunsch_schreiben(self.steuer_datei, pause=True)
@@ -467,6 +532,11 @@ class Ablauf:
                 raise FotosortFehler(meldungen.ob_kein_lauf())
             return {"ok": True}
 
+    def kette_loesen(self) -> None:
+        """Die Bestaetigung eines automatischen Ablaufs verwerfen (Fenster zu)."""
+        with self.sperre:
+            self._kette = None
+
     def beenden(self, warten: float = 60.0, takt=None) -> bool:
         """Programm schliessen (seit v0.9): einen laufenden Schritt anhalten wie
         mit "Abbrechen" - die aktuelle Datei wird fertig, alles gespeichert - und
@@ -475,6 +545,7 @@ class Ablauf:
         uebersteht die Datenbank, Reste raeumt der naechste Lauf auf. takt():
         wird beim Warten gerufen (das Fenster bleibt bedienbar). True, wenn
         danach nichts mehr laeuft."""
+        self.kette_loesen()             # kein automatischer Ablauf nach dem Schliessen
         if not self.lauf_lebt():
             return True
         try:
@@ -727,6 +798,7 @@ class Ablauf:
             "ziel": self.ziel,
             "quellen_neu": list(self.quellen),
             "verschieben": self.verschieben,
+            "automatisch": self.automatisch,
             "profil": self.profil,
             "profil_von_hand": self.profil_von_hand,
             "profil_erkannt": self.profil_erkannt,
@@ -786,6 +858,7 @@ class Ablauf:
 
     def ziel_setzen(self, ziel: str) -> dict:
         with self.sperre:
+            self._kette = None          # die Bestaetigung galt dem bisherigen Ziel
             self.ziel = _fest(ziel)
             info = self.archiv_info()
             konf_profil = str(info.get("profil") or "")
@@ -794,9 +867,16 @@ class Ablauf:
             self._speichern()
             return {"ziel": self.ziel, "archiv": info, **self._profil_antwort()}
 
-    def einstellungen_setzen(self, verschieben: bool | None = None, profil: str | None = None) -> dict:
+    def einstellungen_setzen(self, verschieben: bool | None = None, profil: str | None = None,
+                             automatisch: bool | None = None) -> dict:
         with self.sperre:
+            if automatisch is not None:
+                self.automatisch = bool(automatisch)
+                if not self.automatisch:
+                    self._kette = None
             if verschieben is not None:
+                if bool(verschieben) != self.verschieben:
+                    self._kette = None      # die Bestaetigung galt dem anderen Modus
                 self.verschieben = bool(verschieben)
             if profil is not None:
                 if profil not in kopieren.PROFILE:
@@ -805,7 +885,7 @@ class Ablauf:
                 self.profil_von_hand = True
                 self.profil_erkannt = ""
             self._speichern()
-            return {"verschieben": self.verschieben, **self._profil_antwort()}
+            return {"verschieben": self.verschieben, "automatisch": self.automatisch, **self._profil_antwort()}
 
     def _bekannte_quellen(self) -> list[str]:
         if not self._archiv_da() or self.lauf_lebt():
@@ -844,12 +924,18 @@ class Ablauf:
             self._speichern()
             return {"quellen_neu": list(self.quellen), **self._profil_antwort()}
 
-    def los(self, ziel_anlegen: bool = False, ziel_trotzdem: bool = False) -> dict:
+    def los(self, ziel_anlegen: bool = False, ziel_trotzdem: bool = False, automatisch: bool = False,
+            wort: str = "") -> dict:
         """Der grosse Knopf: Ziel pruefen, ExifTool pruefen, Scan starten.
 
         Zwei Rueckfragen statt Fehler: {"frage": "ziel_anlegen"}, wenn es den
         Zielordner noch nicht gibt, und {"frage": "ziel_nicht_leer"}, wenn er
         Dateien enthaelt, aber noch kein Archiv ist.
+
+        Seit v0.13 mit automatisch=True (nur das Fenster, wenn „Alles
+        automatisch“ eingestellt ist) als letzte Frage {"frage": "automatisch"}:
+        Danach laufen alle Schritte bis zum Aufraeumen von selbst, deshalb erst
+        nach dem Bestaetigungswort - geprueft hier im Kern.
         """
         with self.sperre:
             if self.lauf_lebt():
@@ -893,11 +979,106 @@ class Ablauf:
                 n = ordner_eintraege(ziel)
                 if n:
                     return {"frage": "ziel_nicht_leer", "n": n, "text": meldungen.ob_frage_ziel_nicht_leer(ziel, n)}
+            if automatisch:
+                aufraeumbar = self.archiv_lesen()["aufraeumen"][0] if archiv_da else 0
+                frage = self._kette_frage(wort, bekannt + geprueft, aufraeumbar)
+                if frage is not None:
+                    return frage
             quellen_arg = (bekannt + geprueft) if geprueft else []
             ergebnis = self.schritt_starten("scan", quellen=quellen_arg, ziel_anlegen=bool(ziel_anlegen))
+            if automatisch:
+                self._kette = _Kette(meldungen.BESTAETIGUNGSWORT["papierkorb"], self.ziel, "scan", time.time())
             self.quellen = []   # nach dem Scan sind sie bekannte Quellen des Archivs
             self._speichern()
             return ergebnis
+
+    # -- Alles automatisch (seit v0.13) --------------------------------------------
+
+    def _kette_frage(self, wort: str, quellen: list[str], aufraeumbar: int, ab_schritt: str = "") -> dict | None:
+        """Das Wort fuer den automatischen Ablauf (dasselbe wie fuer „In Ordner
+        _geloescht_ legen“). Leer: die Frage; falsch: ein Fehler; richtig: None."""
+        erwartet = meldungen.BESTAETIGUNGSWORT["papierkorb"]
+        wort = str(wort or "").strip().lower()
+        if not wort:
+            return {"frage": "automatisch", "wort": erwartet,
+                    "text": meldungen.ob_frage_automatisch(quellen, aufraeumbar, self.verschieben, ab_schritt)}
+        if wort != erwartet:
+            raise FotosortFehler(meldungen.ob_wort_falsch(erwartet))
+        return None
+
+    def _kette_schritt(self, schritt: str, wort: str) -> dict:
+        """Einen Schritt fuer den automatischen Ablauf starten. Aufraeumen nur in
+        den Ordner _geloescht_ und ohne leere Ordner - fest, egal was rechts auf
+        der Karte gewaehlt ist. Verschieben loescht endgueltig: nie von selbst."""
+        if schritt == "kopieren" and self.verschieben:
+            raise FotosortFehler(meldungen.OB_KETTE_VERSCHIEBEN_SELBST)
+        if schritt == "aufraeumen":
+            return self.schritt("aufraeumen", wort=wort, weise=loeschen.WEISE_PAPIERKORB, leere_ordner=False)
+        return self.schritt(schritt)
+
+    def automatisch_starten(self, wort: str = "") -> dict:
+        """Den automatischen Ablauf beim naechsten offenen Schritt aufnehmen
+        (Knopf „Automatisch weiter ab …“, etwa nach einem Abbruch oder nach dem
+        Wiederoeffnen) - nach demselben Wort wie bei „Los geht's“."""
+        with self.sperre:
+            if self.lauf_lebt():
+                raise FotosortFehler(meldungen.ob_laeuft_schon(self.lauf.schritt if self.lauf else ""))
+            stand = self.archiv_lesen()
+            schritt = self._naechster_aus(stand)
+            if schritt not in KETTE[1:]:
+                raise FotosortFehler(meldungen.OB_KETTE_NICHTS)
+            if schritt == "kopieren" and self.verschieben:
+                raise FotosortFehler(meldungen.OB_KETTE_VERSCHIEBEN_SELBST)
+            frage = self._kette_frage(wort, stand["quellen"], stand["aufraeumen"][0], self._schritt_name(schritt))
+            if frage is not None:
+                return frage
+            wort = meldungen.BESTAETIGUNGSWORT["papierkorb"]
+            ergebnis = self._kette_schritt(schritt, wort)
+            self._kette = _Kette(wort, self.ziel, schritt, time.time())
+            return ergebnis
+
+    def automatisch_weiter(self) -> dict:
+        """Nach dem Ende eines Schritts den naechsten des automatischen Ablaufs
+        starten. Das Fenster ruft es bei jedem Schrittende.
+
+        {"gestartet": schritt} - es geht weiter; {"laeuft": schritt} - es laeuft
+        schon etwas (zweiter Aufruf); {"ende": grund, "text": …} - der Ablauf ist
+        vorbei (fertig oder angehalten); {} - kein automatischer Ablauf.
+
+        Die Bestaetigung wird zuerst herausgenommen und nur nach einem gelungenen
+        Start wieder eingesetzt: Ein Fehler beendet den Ablauf genau einmal, statt
+        bei jeder Abfrage des Fensters wiederzukommen."""
+        with self.sperre:
+            kette, self._kette = self._kette, None
+            if kette is None:
+                return {}
+            try:
+                l = self.lauf_status()
+                if self.lauf_lebt():
+                    self._kette = kette
+                    return {"laeuft": str(l.get("schritt") or "")}
+                if (l.get("zustand") not in ENDZUSTAENDE or l.get("schritt") != kette.schritt
+                        or self.ziel != kette.ziel or not self.automatisch):
+                    return self._kette_ende(kette, "fremd")
+                art, schritt = kette_naechster(kette.schritt, str(l["zustand"]), str(l.get("hinweis") or ""),
+                                               self.archiv_lesen(), self.verschieben)
+                if art == "ende":
+                    return self._kette_ende(kette, schritt)
+                ergebnis = self._kette_schritt(schritt, kette.wort)
+                kette.schritt = schritt
+                self._kette = kette
+                return ergebnis
+            except Exception as fehler:  # noqa: BLE001 - einmal melden und anhalten, statt alle 500 ms zu scheitern
+                return self._kette_ende(kette, "startfehler", str(fehler) or type(fehler).__name__)
+
+    def _kette_ende(self, kette: _Kette, grund: str, fehler: str = "") -> dict:
+        offen = ""
+        if grund == "offen":
+            try:
+                offen = self._schritt_name(self._naechster_aus(self.archiv_lesen()))
+            except FotosortFehler:
+                offen = ""
+        return {"ende": grund, "text": meldungen.ob_kette_ende(grund, time.time() - kette.beginn, offen, fehler)}
 
     # -- Archiv verwerfen --------------------------------------------------------
 
@@ -943,6 +1124,7 @@ class Ablauf:
         richtigen Wort wird entfernt, danach ist die Startseite leer.
         """
         with self.sperre:
+            self._kette = None
             if self.lauf_lebt():
                 raise FotosortFehler(meldungen.ob_laeuft_schon(self._schritt_name(self.lauf.schritt if self.lauf else "")))
             ziel, lokal, im_ziel = self._archiv_orte()

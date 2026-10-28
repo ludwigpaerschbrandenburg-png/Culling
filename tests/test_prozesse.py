@@ -247,3 +247,35 @@ def test_beendeter_aber_nicht_abgeholter_prozess_lebt_nicht():
         time.sleep(0.05)
     assert not prozesse.lebt(kind.pid)
     kind.wait()
+
+
+# ------------------------------------------ Wachhalten (seit v0.13) --
+
+
+def test_wach_halten_schickt_windows_die_richtigen_werte(monkeypatch):
+    """Solange gearbeitet wird, darf Windows nicht in den Ruhezustand gehen
+    (der Bildschirm darf aus): ES_CONTINUOUS|ES_SYSTEM_REQUIRED zum Halten,
+    ES_CONTINUOUS allein zum Loslassen - nie ES_DISPLAY_REQUIRED."""
+    werte: list[int] = []
+    monkeypatch.setattr(prozesse.sys, "platform", "win32")
+    monkeypatch.setattr(prozesse, "_ausfuehrungszustand", lambda: lambda wert: werte.append(wert) or 0x80000000)
+    assert prozesse.wach_halten(True) is True
+    assert prozesse.wach_halten(False) is True
+    assert werte == [0x80000001, 0x80000000]
+
+
+def test_wach_halten_ausserhalb_von_windows_tut_nichts(monkeypatch):
+    def nie():
+        raise AssertionError("ausserhalb von Windows gerufen")
+
+    monkeypatch.setattr(prozesse.sys, "platform", "linux")
+    monkeypatch.setattr(prozesse, "_ausfuehrungszustand", nie)
+    assert prozesse.wach_halten(True) is False and prozesse.wach_halten(False) is False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="nur unter Windows")
+def test_wach_halten_echt_unter_windows():
+    try:
+        assert prozesse.wach_halten(True) is True
+    finally:
+        assert prozesse.wach_halten(False) is True

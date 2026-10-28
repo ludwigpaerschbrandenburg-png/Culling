@@ -31,6 +31,14 @@ def _ereignisse(app, sekunden: float) -> None:
         time.sleep(0.02)
 
 
+def _fenster(ordner: Path, automatisch: bool = False) -> desktop.Hauptfenster:
+    """Ein Fenster wie beim Start. Seit v0.13 ist „Alles automatisch“ der
+    Standard; Tests, die Schritt fuer Schritt klicken, stellen das ab."""
+    ab = ablauf_modul.Ablauf(ordner=ordner)
+    ab.einstellungen_setzen(automatisch=automatisch)
+    return desktop.Hauptfenster(ab)
+
+
 def test_fenster_baut_sich_auf_und_schreibt_marker(app, tmp_path):
     ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
     f = desktop.Hauptfenster(ab)
@@ -86,8 +94,8 @@ def test_rueckfragen_und_archiv_verwerfen_im_fenster(app, tmp_path, quelle, ziel
     heim.mkdir(parents=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: heim))
 
-    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
-    f = desktop.Hauptfenster(ab)
+    f = _fenster(tmp_path / "ob")
+    ab = f.ab
     f.show()
     _ereignisse(app, 0.3)
     f.start.ziel_setzen(str(ziel))
@@ -151,7 +159,7 @@ def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle,
     "Weitermachen" - am Ende wie der Referenzlauf."""
     monkeypatch.setattr(desktop, "frage", lambda *a, **k: (True, ""))
     ordner = tmp_path / "ob"
-    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f = _fenster(ordner)
     f.show()
     _ereignisse(app, 0.3)
     f.start.ziel_setzen(str(ziel))
@@ -211,7 +219,7 @@ def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys, monkeypatch
     assert rc == cli.OK, aus
     assert "Durchlauf bestanden" in aus
     bilder = sorted(p.name for p in fotos.glob("*.png"))
-    assert len(bilder) == 13 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "13-sichten.png"
+    assert len(bilder) == 14 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "14-frage-alles-automatisch.png"
     # Die Bildschirmfotos fuer die Anleitung zeigen das Fenster in voller Groesse.
     bild = QImage(str(fotos / "03-uebersicht-nach-scan.png"))
     assert (bild.width(), bild.height()) == (1180, 800)
@@ -702,3 +710,185 @@ def test_fremden_schritt_haelt_das_fenster_nicht_an(app, tmp_path, grosse_quelle
 def test_beenden_frage_verspricht_nichts_falsches():
     text = desktop.meldungen.ob_beenden_frage("Kopieren")
     assert "Nichts geht verloren" in text and "in der Regel" in text
+
+
+# ------------------------------------------ Alles automatisch (seit v0.13) --
+
+
+def _antworten_fuer(fragen: list, wort: str = "verschieben", beenden: bool = True):
+    """Beantwortet jede Frage wie ein Nutzer, der alles automatisch will."""
+    def frage_ersatz(_eltern, titel, text, eingabe=False, ja="Ja", nein="Abbrechen"):
+        fragen.append((titel, text))
+        if titel == meldungen.OB_KETTE_TITEL:
+            return True, wort
+        if titel == meldungen.OB_BEENDEN_TITEL:
+            return beenden, ""
+        return True, ""
+    return frage_ersatz
+
+
+def _inhalte(wurzel: Path) -> list[str]:
+    import hashlib
+    return sorted(hashlib.sha256(p.read_bytes()).hexdigest() for p in wurzel.rglob("*") if p.is_file())
+
+
+def test_schalter_alles_automatisch_auf_der_startseite(app, tmp_path):
+    """Entscheidung des Nutzers vom 28.10.2026: als Schalter, Standard an."""
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.show()
+    _ereignisse(app, 0.3)
+    assert f.start.ablauf.wert() == "automatisch" and ab.automatisch is True
+    assert "_geloescht_" in f.start.ablauf_text.text()
+    f.start.ablauf.knoepfe["einzeln"].click()
+    assert ab.automatisch is False and f.start.ablauf_text.text() == meldungen.OB_ABLAUF_TEXT_EINZELN
+    f.close()
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    f.show()
+    _ereignisse(app, 0.3)
+    assert f.start.ablauf.wert() == "einzeln"                   # gemerkt
+    f.start.ablauf.knoepfe["automatisch"].click()
+    f.start.modus.knoepfe["verschieben"].click()
+    assert f.ab.automatisch is True and f.ab.verschieben is True
+    assert meldungen.OB_KETTE_VERSCHIEBEN_HINWEIS in f.start.ablauf_text.text()
+    f.close()
+
+
+def test_hauptknopf_bei_automatik(app, tmp_path):
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    for verschieben, automatisch, erwartet in (
+            (False, True, "Automatisch weiter ab Kopieren"),
+            (False, False, "Kopieren starten (3 Dateien)"),
+            (True, True, "Verschieben starten (3 Dateien)")):          # Verschieben bestaetigt der Nutzer selbst
+        f.zustand = {"verschieben": verschieben, "automatisch": automatisch}
+        f.ruhe_aktionen({"schritt": "kopieren", "n": 3}, {})
+        assert f.primaer().text() == erwartet
+    f.zustand = {"verschieben": False, "automatisch": True}
+    for schritt, name in (("analyse", "Analyse"), ("pruefen", "Prüfen"), ("aufraeumen", "Aufräumen")):
+        f.ruhe_aktionen({"schritt": schritt}, {})
+        assert f.primaer().text() == f"Automatisch weiter ab {name}"
+    f.close()
+
+
+def test_alles_automatisch_im_fenster(app, tmp_path, quelle, ziel, monkeypatch):
+    """Ein Klick auf „Los geht's“ und einmal das Wort - dann kein Klick mehr bis
+    „Alles erledigt“. Zwischen den Schritten weder Ruheansicht noch Blinken in
+    der Taskleiste; der PC bleibt waehrend des ganzen Ablaufs wach und wird
+    danach losgelassen."""
+    fragen: list = []
+    monkeypatch.setattr(desktop, "frage", _antworten_fuer(fragen, " Verschieben "))
+    gemeldet: list = []
+    monkeypatch.setattr(desktop.QApplication, "alert", lambda fenster, ms=0: gemeldet.append(fenster))
+    wach: list[bool] = []
+    monkeypatch.setattr(desktop.prozesse, "wach_halten", lambda an: wach.append(an) or True)
+    vorher = _inhalte(quelle)
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    f.quelle_hinzufuegen(str(quelle))
+    f.los(False)
+    assert [t for t, _ in fragen] == [meldungen.OB_KETTE_TITEL]
+    assert "_geloescht_" in fragen[0][1] and str(quelle) in fragen[0][1]
+    assert f.ansicht == "haupt" and f.poll.isActive() and wach == [True]
+    _bis_im_fenster(app, lambda: f.in_ruhe() and not f.ab.lauf_lebt(), 300)
+    assert f.ab.naechster()["schritt"] == "fertig"
+    assert "erledigt" in f.meldung_label.text() and f.meldung_label.property("klasse") == "hell"
+    assert gemeldet == [f]                      # einmal blinken - am Ende, nicht nach jedem Schritt
+    assert wach == [True, False]                # waehrend des ganzen Ablaufs wach, danach losgelassen
+    assert len(fragen) == 1                     # nach dem Wort keine Frage mehr
+    assert any(p.name.startswith("_geloescht_") for p in quelle.iterdir())
+    assert _inhalte(quelle) == vorher           # kein Inhalt verloren
+    assert f.primaer().text() == "Bericht öffnen"
+    f.close()
+
+
+def test_ohne_richtiges_wort_startet_im_fenster_nichts(app, tmp_path, quelle, ziel, monkeypatch):
+    antworten = [(False, ""), (True, ""), (True, "ja")]
+    monkeypatch.setattr(desktop, "frage", lambda *a, **k: antworten.pop(0))
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    f.quelle_hinzufuegen(str(quelle))
+    f.los(False)                                         # „Abbrechen“
+    assert f.ab.lauf is None and f.ansicht == "start"
+    f.los(False)                                         # leeres Wort
+    assert f.ab.lauf is None and f.meldung_label.text() == meldungen.ob_wort_falsch("verschieben")
+    f.meldung("")
+    f.los(False)                                         # falsches Wort: der Kern weigert sich
+    assert f.ab.lauf is None and f.meldung_label.text() == meldungen.ob_wort_falsch("verschieben")
+    assert not antworten and not f.ab.status_datei.exists()
+    f.close()
+
+
+def test_offene_abbrechen_frage_haelt_den_ablauf_an(app, tmp_path, quelle, ziel, monkeypatch):
+    """Endet ein Schritt, waehrend „Schritt abbrechen?“ noch offen ist, beginnt
+    kein neuer - und „Abbrechen“ haelt dann den ganzen Ablauf an. Danach nimmt
+    „Automatisch weiter ab …“ ihn nach dem Wort wieder auf."""
+    waehrend_der_frage: list = []
+    fragen: list = []
+
+    def frage_ersatz(_eltern, titel, text, eingabe=False, ja="Ja", nein="Abbrechen"):
+        fragen.append(titel)
+        if titel == meldungen.OB_KETTE_TITEL:
+            return True, "verschieben"
+        for _ in range(3):                    # der Zeitgeber laeuft weiter, solange die Frage offen ist
+            f.lauf_abfragen()
+        waehrend_der_frage.append(f.ab.lauf_lebt())
+        return True, ""                       # „Abbrechen“
+
+    monkeypatch.setattr(desktop, "frage", frage_ersatz)
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=tmp_path / "ob"))
+    f.start.ziel_setzen(str(ziel))
+    f.quelle_hinzufuegen(str(quelle))
+    f.los(False)
+    f.poll.stop()                             # der Scan endet, bevor das Fenster nachsieht
+    ende = time.monotonic() + 120
+    while f.ab.lauf_lebt() and time.monotonic() < ende:
+        time.sleep(0.05)
+    l = f.ab.lauf_status()
+    assert l["zustand"] == "fertig" and l["kette"] is True
+    f.poll.start()
+    f.abbrechen_fragen()
+    assert waehrend_der_frage == [False]
+    assert not f.ab.lauf_lebt() and f.ab.lauf_status()["kette"] is False
+    assert f.ab.naechster()["schritt"] == "analyse" and not f.poll.isActive()
+    assert f.primaer().text() == "Automatisch weiter ab Analyse"
+    f.primaer().click()                       # fragt das Wort und macht weiter
+    assert fragen.count(meldungen.OB_KETTE_TITEL) == 2
+    _bis_im_fenster(app, lambda: f.in_ruhe() and not f.ab.lauf_lebt(), 300)
+    assert f.ab.naechster()["schritt"] == "fertig" and "erledigt" in f.meldung_label.text()
+    f.close()
+
+
+def test_fenster_zu_im_ablauf_verlangt_das_wort_neu(app, tmp_path, quelle, ziel, monkeypatch):
+    """Die Bestaetigung lebt nur im Fenster: Nach „Fenster zu“ und neuem Start
+    fragt „Los geht's“ wieder nach dem Wort."""
+    fragen: list = []
+    monkeypatch.setattr(desktop, "frage", _antworten_fuer(fragen))
+    ordner = tmp_path / "ob"
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.show()
+    _ereignisse(app, 0.3)
+    f.start.ziel_setzen(str(ziel))
+    f.quelle_hinzufuegen(str(quelle))
+    f.los(False)
+    assert f.ab.lauf_lebt()
+    f.close()                                  # mitten im Scan
+    titel = [t for t, _ in fragen]
+    assert titel == [meldungen.OB_KETTE_TITEL, meldungen.OB_BEENDEN_TITEL]
+    assert "automatische Ablauf" in fragen[-1][1]
+    assert not f.isVisible() and not f.ab.lauf_lebt()
+    _ereignisse(app, 0.2)
+
+    f = desktop.Hauptfenster(ablauf_modul.Ablauf(ordner=ordner))
+    f.show()
+    _ereignisse(app, 0.5)
+    assert f.ab.lauf_status()["kette"] is False
+    f.los(False)                               # noch einmal: das Wort wird wieder verlangt
+    titel = [t for t, _ in fragen]
+    assert titel[-1] == meldungen.OB_KETTE_TITEL and titel.count(meldungen.OB_KETTE_TITEL) == 2
+    _bis_im_fenster(app, lambda: f.in_ruhe() and not f.ab.lauf_lebt(), 300)
+    assert f.ab.naechster()["schritt"] == "fertig" and "erledigt" in f.meldung_label.text()
+    f.close()

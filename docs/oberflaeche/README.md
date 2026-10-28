@@ -10,7 +10,7 @@ hell oder dunkel wie eingestellt. So entstehen sie, ohne Bildschirm (Qt offscree
 QT_QPA_PLATFORM=offscreen fotosort fenster --durchlauf <Ziel> <Quelle> --fotos docs/oberflaeche
 ```
 
-Der Durchlauf bedient das Fenster selbst: Startseite → Scan → Analyse → Kopieren (danach ein
+Der Durchlauf bedient das Fenster selbst – „Schritt für Schritt“, damit jede Ansicht ein Bild bekommt: Startseite → Scan → Analyse → Kopieren (danach ein
 Blick in den Reiter „Sichten“) → Prüfen → Aufräumen. Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
 der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen. Dieselbe Prüfung läuft in
 der CI gegen das Windows-Paket.
@@ -18,7 +18,7 @@ der CI gegen das Windows-Paket.
 | Bild | Ansicht |
 |---|---|
 | [01](01-startseite-leer.png) | Startseite, leer; rechts die Karte „Ausprobieren“ mit den Testbildern (seit v0.12) |
-| [02](02-startseite-ausgefuellt.png) | Startseite mit Ziel, Quelle, Modus und Profil |
+| [02](02-startseite-ausgefuellt.png) | Startseite mit Ziel, Quelle, Modus, Profil und Ablauf (seit v0.13 Standard „Alles automatisch“) |
 | [03](03-uebersicht-nach-scan.png) | Übersicht nach dem Scan (Schritte, Zähler, Karten) |
 | [04](04-uebersicht-nach-analyse-kameras.png) | Übersicht nach der Analyse mit Kamera-Tabelle (Alias tippbar) |
 | [05](05-laufender-schritt-kopieren.png) | Laufender Schritt: Balken, Kennzahlen, Pause/Abbrechen |
@@ -30,5 +30,6 @@ der CI gegen das Windows-Paket.
 | [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
 | [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
 | [13](13-sichten.png) | Reiter „Sichten“ (seit v0.8, ausgebaut in v0.11): Ordner des Archivs, Vorschaubilder, Knopfleiste für Sterne, Markierung und Farbe, Vergleichen (die Testbilder sind nur 1 × 1 Pixel groß) |
+| [14](14-frage-alles-automatisch.png) | Die eine Frage von „Alles automatisch“ (seit v0.13): einmal das Wort `verschieben`, dann läuft alles bis zum Aufräumen allein |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).
