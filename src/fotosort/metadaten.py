@@ -340,13 +340,13 @@ class ExifToolPool:
 
     def _startplatz_abwarten(self) -> None:
         """Prozesse gestaffelt starten: der naechste fruehestens STARTABSTAND
-        nach dem vorigen, der erste sofort."""
+        nach dem vorigen, der erste sofort. Gewartet wird unter dem Schloss, und
+        der Abstand zaehlt ab dem tatsaechlichen Start: Kam der vorige zu spaet
+        dran (Zeitscheibe unter Windows), rueckt der naechste nicht naeher."""
         with self._schloss:
-            jetzt = time.monotonic()
-            geplant = max(jetzt, self._naechster_start)
-            self._naechster_start = geplant + STARTABSTAND
-        if geplant > jetzt:
-            time.sleep(geplant - jetzt)
+            while (rest := self._naechster_start - time.monotonic()) > 0:
+                time.sleep(rest)
+            self._naechster_start = time.monotonic() + STARTABSTAND
 
     def _prozess(self) -> _Prozess:
         p = getattr(self._lokal, "prozess", None)
