@@ -876,7 +876,7 @@ Bewerten von den Bildern.“
 - [x] Vorschaubilder lokal zwischengespeichert.
 - [x] Live-Photos (HEIC + MOV) als ein Bild.
 - [x] XMP lesen; XMP nur neu anlegen.
-- [ ] Volle Tests, CI, Release v0.11.
+- [x] Volle Tests, CI, Release v0.11.
 - [ ] Später: Videos abspielen (braucht Qt Multimedia im Paket), Serien und Belichtungsreihen
   stapeln, Tasten frei belegen, Reiter „Sichten“ in der Browser-Fassung.
 
