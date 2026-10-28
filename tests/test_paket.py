@@ -96,7 +96,11 @@ def test_paket_mit_altem_starter(tmp_path, monkeypatch):
 
 def test_kuerzen_laesst_nur_das_noetige(tmp_path):
     """Von PySide6 bleiben QtCore, QtGui, QtWidgets, zwei Anzeige-Plugins, der
-    Windows-Stil und die C++-Laufzeit; kein einziges Programm (.exe)."""
+    Windows-Stil, die Bildformate und die C++-Laufzeit; kein einziges Programm (.exe).
+
+    Die Bildformate seit v0.12: Ohne qjpeg.dll kann Qt unter Windows kein JPEG
+    lesen - der Reiter „Sichten“ (v0.11) zeigte dort keine Fotos, und die
+    Testbilder liessen sich nicht schreiben. Eingebaut hat Qt nur PNG und BMP."""
     bauen = _modul("bauen")
     lib = tmp_path / "lib"
     bleibt = [
@@ -105,6 +109,8 @@ def test_kuerzen_laesst_nur_das_noetige(tmp_path):
         "PySide6/msvcp140.dll", "PySide6/msvcp140_2.dll", "PySide6/vcruntime140_1.dll", "PySide6/concrt140.dll",
         "PySide6/support/deprecated.py", "PySide6/plugins/platforms/qwindows.dll",
         "PySide6/plugins/platforms/qoffscreen.dll", "PySide6/plugins/styles/qmodernwindowsstyle.dll",
+        "PySide6/plugins/imageformats/qjpeg.dll", "PySide6/plugins/imageformats/qtiff.dll",
+        "PySide6/plugins/imageformats/qwebp.dll", "PySide6/plugins/imageformats/qgif.dll",
         "shiboken6/__init__.py", "shiboken6/Shiboken.pyd", "shiboken6/shiboken6.abi3.dll", "shiboken6/msvcp140.dll",
         "blake3/blake3.cp312-win_amd64.pyd", "rich/console.py", "fotosort/cli.py",
         "PySide6_Essentials-6.11.2.dist-info/METADATA",
@@ -114,7 +120,8 @@ def test_kuerzen_laesst_nur_das_noetige(tmp_path):
         "PySide6/QtQuick.pyd", "PySide6/Qt6Quick.dll", "PySide6/QtNetwork.pyd", "PySide6/Qt6Network.dll",
         "PySide6/opengl32sw.dll", "PySide6/vcomp140.dll", "PySide6/QtCore.pyi", "PySide6/pyside6.abi3.lib",
         "PySide6/qml/QtQuick/qmldir", "PySide6/translations/qt_de.qm", "PySide6/resources/icudtl.dat",
-        "PySide6/include/pyside.h", "PySide6/plugins/imageformats/qjpeg.dll", "PySide6/plugins/tls/qopensslbackend.dll",
+        "PySide6/include/pyside.h", "PySide6/plugins/imageformats/qsvg.dll", "PySide6/plugins/imageformats/qpdf.dll",
+        "PySide6/plugins/tls/qopensslbackend.dll",
         "PySide6/plugins/platforms/qminimal.dll", "PySide6/support/__pycache__/deprecated.cpython-310.pyc",
         "shiboken6/include/sbkenum.h", "shiboken6/lib/cmake/Shiboken6/Shiboken6Config.cmake", "shiboken6/Shiboken.pyi",
         "shiboken6/vccorlib140.dll", "rich/__pycache__/console.cpython-312.pyc",
@@ -124,7 +131,14 @@ def test_kuerzen_laesst_nur_das_noetige(tmp_path):
     assert bauen.kuerzen(lib) == len(weg)
     uebrig = sorted(p.relative_to(lib).as_posix() for p in lib.rglob("*") if p.is_file())
     assert uebrig == sorted(bleibt)
-    assert not (lib / "bin").exists() and not (lib / "PySide6" / "plugins" / "imageformats").exists()
+    assert not (lib / "bin").exists()
+
+
+def test_paketpruefung_verlangt_die_bildformate():
+    """Fehlt eines der Bildformate im fertigen Paket, schlaegt die Pruefung an."""
+    pruefen = _modul("pruefen")
+    for name in ("qjpeg", "qtiff", "qwebp", "qgif"):
+        assert f"lib/PySide6/plugins/imageformats/{name}.dll" in pruefen.PFLICHT
 
 
 def test_startdateien_mit_crlf_und_ohne_klammerbloecke(tmp_path):

@@ -54,6 +54,8 @@ PFLICHT = [
     "python/python.exe", "python/pythonw.exe", "python/python312.dll", "python/python312.zip", "python/python312._pth",
     "lib/fotosort_start.py", "lib/fotosort/__init__.py", "lib/fotosort/__main__.py", "lib/fotosort/restzeit.py",
     "lib/PySide6/QtWidgets.pyd", "lib/PySide6/Qt6Widgets.dll", "lib/PySide6/plugins/platforms/qwindows.dll",
+    "lib/PySide6/plugins/imageformats/qjpeg.dll", "lib/PySide6/plugins/imageformats/qtiff.dll",
+    "lib/PySide6/plugins/imageformats/qwebp.dll", "lib/PySide6/plugins/imageformats/qgif.dll",
     "lib/shiboken6/Shiboken.pyd", "lib/rich/console.py", "lib/tzdata/__init__.py",
     "exiftool/VERSION.txt", "exiftool/exiftool_files/perl.exe", "exiftool/exiftool_files/exiftool.pl",
 ]

@@ -2713,3 +2713,317 @@ def aufraeumen_bleiben(je_quelle: dict) -> str:
         zeilen.append(f"  {quelle}: {anzahl(n)} Bilder und Videos")
     return "\n".join(zeilen)
 
+
+
+# ------------------------------------------------ Testbilder (v0.12) ----
+# Phase 13 (Wunsch vom 28.10.2026): ein grosser kuenstlicher Testsatz mit
+# beschrifteten Bildern (testbilder.py). Alles, was auf den Bildern, in der
+# Uebersicht und im Pruefbericht steht.
+
+TB_ORDNERNAME = "fotosort Testbilder"
+
+#: Kategorie -> (Titel, was sie prueft)
+TB_KATEGORIEN: dict[str, tuple[str, str]] = {
+    "kamera": ("Kamerafoto", "Datum und Gerät aus den Kameradaten"),
+    "raw_paar": ("RAW und JPG", "gleicher Name: landen zusammen, die RAW bestimmt"),
+    "raw_allein": ("RAW-Datei", "Rohdaten der Kamera ohne JPG"),
+    "heic": ("iPhone-Foto (HEIC)", "Live-Fotos samt Video, Bearbeitungen (.AAE)"),
+    "video": ("Video", "Ortszeit, Weltzeit (UTC), Sony-Begleitdatei, altes AVI"),
+    "dateiname": ("Datum im Dateinamen", "WhatsApp, Bildschirmfotos, Signal, Telegram"),
+    "xmp_datum": ("Datum aus XMP", "das Datum steht nur in der Begleitdatei .xmp"),
+    "ohne_datum": ("Ohne Datum", "kein Datum zu finden: Ordner _Ohne_Datum"),
+    "kaputt": ("Kaputte Kamerauhr", "1970, 2099, 0000 und Scans vor 1990"),
+    "zeitzone": ("Zeitzonen und Mitternacht", "Weltzeit, New York, Tokio, 23:59 und 00:00"),
+    "scan": ("Scan vom Film", "Scanner zählen als „Analog“"),
+    "png_webp": ("PNG und WebP", "andere Bildformate mit Datum"),
+    "archiv_struktur": ("Vorhandene Archivordner", "andere Schreibweisen, Zusätze, flache Ordner"),
+    "konflikt": ("Gleicher Name", "verschiedener Inhalt: Anhang _1, _2"),
+    "schon_im_archiv": ("Schon im Archiv", "nicht noch einmal ablegen, bleibt in der Quelle"),
+    "gruppe_getrennt": ("Gleicher Name, Jahre auseinander", "gehören nicht zusammen"),
+    "pfade": ("Besondere Namen und Pfade", "Umlaute, Sonderzeichen, Emoji, lange Pfade"),
+    "kameraname": ("Besondere Kameranamen", "verbotene Zeichen, Gerätenamen, nur Hersteller"),
+    "doppelt": ("Doppelt in der Quelle", "gleicher Inhalt: nur einmal ins Archiv"),
+    "begleit": ("Begleitdatei", "XMP, XML, AAE, THM: wandert mit ihrer Hauptdatei"),
+    "sonstiges": ("Keine Bilddatei", "bleibt in der Quelle"),
+    "vorbelegt": ("Lag schon im Archiv", "darf sich nicht verändern"),
+}
+
+TB_ART = {"foto": "Foto", "raw": "RAW", "video": "Video", "sidecar": "Begleitdatei", "sonstiges": "keine Bilddatei"}
+
+TB_FELD_DATEI = "Datei"
+TB_FELD_ORDNER = "Liegt in"
+TB_FELD_GERAET = "Gerät"
+TB_FELD_AUFNAHME = "Aufnahme"
+TB_FELD_SOLL = "Soll nach"
+TB_FELD_WARUM = "Warum"
+TB_FELD_DAZU = "Dazu"
+TB_FUSS = "Künstliches Testbild von fotosort – kein echtes Foto"
+TB_KOPF_VORBELEGT = "Lag schon vorher im Archiv"
+
+_TB_WOCHENTAGE = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+
+
+def tb_kopf(nr: int, gesamt: int) -> str:
+    return f"Testbild {nr:0{len(str(gesamt))}d} von {anzahl(gesamt)}"
+
+
+def tb_zeit(zeit, mit_uhrzeit: bool = True) -> str:
+    """"Dienstag, 14.03.2023, 18:22:05 Uhr" - oder nur das Datum."""
+    tag = f"{_TB_WOCHENTAGE[zeit.weekday()]}, {zeit:%d.%m.%Y}"
+    return f"{tag}, {zeit:%H:%M:%S} Uhr" if mit_uhrzeit else tag
+
+
+def tb_datei(name: str, art: str, form: str) -> str:
+    return f"{name} – {TB_ART.get(art, art)} ({form})"
+
+
+def tb_geraet(geraet: str, ordner: str, alias: bool) -> str:
+    if not geraet:
+        return f"keine Angabe in der Datei → Ordner „{ordner}“"
+    zusatz = " (steht in der Alias-Liste)" if alias else ""
+    return f"{geraet} → Kameraordner „{ordner}“{zusatz}"
+
+
+def tb_soll_archiv(ziel: str) -> str:
+    return f"Ziel/{ziel}"
+
+
+def tb_soll_doppelt(original: str, ziel: str) -> str:
+    return f"nicht noch einmal ins Archiv – derselbe Inhalt wie Quelle/{original}, der als Ziel/{ziel} abgelegt wird"
+
+
+def tb_soll_schon(ziel: str) -> str:
+    return f"bleibt in der Quelle – liegt schon im Archiv als Ziel/{ziel}"
+
+
+TB_SOLL_BLEIBT = "bleibt in der Quelle"
+TB_SOLL_VORBELEGT = "lag schon vorher im Archiv und darf sich nicht verändern"
+
+# Datumsquellen (Feld „Aufnahme“)
+TB_DQ_DTO = "aus den Kameradaten (DateTimeOriginal)"
+TB_DQ_CREATE = "aus den Kameradaten (CreateDate), denn DateTimeOriginal ist kaputt"
+TB_DQ_NAME = "aus dem Dateinamen"
+TB_DQ_NAME_DATUM = "aus dem Dateinamen, nur das Datum (keine Uhrzeit)"
+TB_DQ_PNG = "aus dem PNG-Feld „Creation Time“"
+TB_DQ_AVI = "aus dem AVI-Eintrag IDIT (Ortszeit der Kamera)"
+TB_DQ_SONY_XML = "aus der Sony-Begleitdatei {xml}, mit Zeitzone"
+TB_DQ_SONY_EINGEBETTET = "aus Sonys Daten im Video, mit Zeitzone"
+TB_DQ_KEINS = "keins – nur das Änderungsdatum der Datei, und das zählt nicht"
+
+
+def tb_dq_xmp(xmp: str) -> str:
+    return f"aus der Begleitdatei {xmp}"
+
+
+def tb_dq_zone(zone: str) -> str:
+    return f"aus dem Video (CreationDate), Ortszeit mit Zeitzone {zone}"
+
+
+def tb_dq_utc(utc) -> str:
+    return f"aus dem Video: {utc:%d.%m.%Y %H:%M:%S} Weltzeit (UTC, ohne Zeitzone) → deutsche Zeit"
+
+
+def tb_dq_z(utc, video: bool = False) -> str:
+    wo = "aus dem Video" if video else "aus den Kameradaten"
+    return f"{wo}: {utc:%d.%m.%Y %H:%M:%S} mit Kennung „Z“ (Weltzeit) → deutsche Zeit"
+
+
+def tb_dq_kaputt(wert: str) -> str:
+    return f"„{wert}“ in den Kameradaten – kaputt, zählt nicht"
+
+
+# Begruendungen (Feld „Warum“)
+TB_W_KAMERA = "Datum und Kamera stehen in der Datei: Jahr / Monat / Tag / Kamera."
+TB_W_ALIAS = "Das Modell steht in der Alias-Liste und bekommt dort seinen kurzen Ordnernamen."
+TB_W_RAW_PAAR = ("RAW und JPG mit gleichem Namen gehören zusammen und landen im selben Ordner;"
+                 " die RAW-Datei bestimmt Datum und Kamera.")
+TB_W_RAW_ALLEIN = "Eine RAW-Datei allein wird wie ein Foto einsortiert."
+TB_W_HEIC = "iPhone-Foto: Datum und Modell stehen in der HEIC-Datei."
+TB_W_LIVE = "Live-Foto: Das kurze Video mit gleichem Namen gehört zum Foto und landet im selben Ordner."
+TB_W_LIVE_MITTERNACHT = ("Live-Foto um Mitternacht: Das Video beginnt Sekunden nach dem Foto schon am nächsten Tag,"
+                         " gehört aber zum Foto und landet in dessen Tagesordner.")
+TB_W_AAE = "Die Bearbeitungsdatei .AAE gehört zum Foto mit gleichem Namen und wandert mit."
+TB_W_VIDEO_ZONE = "Das Video nennt seine Ortszeit samt Zeitzone – die gilt, wie sie ist."
+TB_W_VIDEO_UTC = ("Videos ohne Zeitzone speichern Weltzeit (UTC); das Programm rechnet sie in deutsche Zeit um"
+                  " (Sommerzeit +2, Winterzeit +1 Stunde).")
+TB_W_VIDEO_UTC_TAG = ("Videos ohne Zeitzone speichern Weltzeit (UTC); in deutscher Zeit ist es schon der nächste Tag"
+                      " – das zählt.")
+TB_W_VIDEO_UTC_JAHR = ("Silvester: {utc} Weltzeit ist in Deutschland schon Neujahr {jahr} –"
+                       " das Video landet im neuen Jahr.")
+TB_W_VIDEO_SOMMERZEIT = ("Nacht der Zeitumstellung: Das Programm rechnet Weltzeit richtig in deutsche Zeit um,"
+                         " auch in dieser Stunde.")
+TB_W_SONY_XML = ("Sony speichert Datum mit Zeitzone und Modell in der Begleitdatei {xml};"
+                 " sie wandert mit dem Video.")
+TB_W_SONY_EINGEBETTET = "Sony speichert Datum mit Zeitzone und Modell in den Daten im Video."
+TB_W_AVI = "Altes AVI-Video: Datum aus dem IDIT-Eintrag, kein Gerätename in der Datei."
+TB_W_THM = "Die Vorschaudatei .THM gehört zum Video mit gleichem Namen und wandert mit."
+TB_W_3GP = "Altes Handyvideo (3GP): Weltzeit ohne Zeitzone, umgerechnet in deutsche Zeit."
+TB_W_NAME = "Die Datei hat keine Kameradaten; das Datum kommt aus dem Dateinamen, die Kamera ist unbekannt."
+TB_W_NAME_DATUM = ("Die Datei hat keine Kameradaten; der Name nennt nur das Datum. Ohne Uhrzeit bleibt es bei"
+                   " diesem Tag.")
+TB_W_WHATSAPP = "WhatsApp entfernt die Kameradaten; das Datum steht im Dateinamen (nur der Tag)."
+TB_W_XMP = "Die Datei selbst hat kein Datum; die Begleitdatei {xmp} nennt es und wandert mit."
+TB_W_OHNE = ("Kein Datum in der Datei, nicht im Namen und keine Begleitdatei. Das Änderungsdatum gilt als unsicher"
+             " – darum der Ordner _Ohne_Datum.")
+TB_W_OHNE_KAMERA = "Die Kamera ist bekannt, aber es gibt kein Datum – darum _Ohne_Datum mit Kameraordner."
+TB_W_KAPUTT = "Ein Datum vor 1990 oder in der Zukunft gilt als kaputt; ohne anderes Datum: _Ohne_Datum."
+TB_W_KAPUTT_CREATE = "DateTimeOriginal ist kaputt; das zweite Datum der Kamera (CreateDate) ist in Ordnung und zählt."
+TB_W_KAPUTT_SCAN = ("Das Datum des Scans liegt vor 1990 und gilt deshalb als kaputt (Regel gegen falsch gestellte"
+                    " Uhren) – auch wenn es stimmen mag. Darum _Ohne_Datum/Analog.")
+TB_W_Z = ("Die Kennung „Z“ heißt Weltzeit; das Programm rechnet in deutsche Zeit um – hier schon der"
+          " nächste Tag.")
+TB_W_FREMDE_ZONE = ("Aufgenommen in {ort} um {uhrzeit} Ortszeit. Es zählt die Uhr der Kamera, nicht die deutsche"
+                    " Zeit – Ordner vom Tag vor Ort.")
+TB_W_MITTERNACHT = "Kurz vor oder genau um Mitternacht: Es zählt der Tag, den die Kamera nennt."
+TB_W_SCAN = "Scanner zählen als „Analog“ (Alias-Liste); das Datum ist das des Scans."
+TB_W_PNG = "PNG mit Datum im Feld „Creation Time“: Es wird wie ein Kameradatum behandelt."
+TB_W_WEBP = "WebP mit Kameradaten: wie ein JPEG einsortiert."
+TB_W_GRUPPE_GETRENNT = ("Gleicher Name wie {andere}, aber Jahre auseinander: gehört nicht dazu (Zähler der Kamera"
+                        " neu begonnen) – jede Datei kommt in ihren eigenen Ordner.")
+TB_W_PFAD = "Besonderer Name oder Pfad – er muss unverändert ankommen."
+TB_W_LANG = "Sehr tiefer Pfad mit langem Namen: unter Windows über 260 Zeichen, das Programm umgeht die Grenze."
+TB_W_VERSTECKT = "Liegt in einem Ordner, dessen Name mit einem Punkt beginnt – wird ganz normal einsortiert."
+TB_W_KAMERANAME = ("Zeichen, die Windows in Ordnernamen verbietet, werden zu „_“; Leerzeichen und Punkte am Rand"
+                   " fallen weg.")
+TB_W_GERAETENAME = "„CON“ ist unter Windows ein reservierter Name; der Ordner bekommt ein „_“ angehängt."
+TB_W_NUR_HERSTELLER = "Nur der Hersteller steht in der Datei, kein Modell – darum „Unbekannte_Kamera“."
+TB_W_KLEIN = "Groß- und Kleinschreibung zählen in der Alias-Liste nicht."
+TB_W_ANHANG = "Gleicher Name, gleicher Tag, gleiche Kamera, aber anderer Inhalt als {andere}: Anhang „{anhang}“."
+TB_W_ANHANG_ARCHIV = ("Im Archiv liegt schon eine andere Datei mit diesem Namen: Nichts wird überschrieben,"
+                      " die neue bekommt den Anhang „{anhang}“.")
+TB_W_ANHANG_GROSS_KLEIN = ("{andere} unterscheidet sich nur in Groß- und Kleinschreibung – unter Windows derselbe"
+                           " Name: Anhang „{anhang}“.")
+TB_W_ANHANG_GRUPPE = "Die ganze Gruppe (RAW, JPG, XMP) bekommt denselben Anhang „{anhang}“, damit sie zusammenpasst."
+TB_W_SCHON = ("Genau dieses Bild liegt schon im Archiv (gleicher Inhalt). Es wird nicht noch einmal abgelegt und"
+              " bleibt unangetastet in der Quelle.")
+TB_W_SCHON_NEU = "Liegt auf derselben Karte wie schon importierte Bilder, ist aber neu – kommt ins Archiv."
+TB_W_DOPPELT = "Von diesem Bild liegt eine gleiche Kopie in Quelle/{kopie} – ins Archiv kommt es nur einmal."
+TB_W_SONSTIGES = "Keine Foto-, RAW- oder Videoendung: Die Datei wird übersprungen und bleibt in der Quelle."
+TB_W_OHNE_HAUPT = "Begleitdatei ohne Bild mit passendem Namen: Sie wird übersprungen und bleibt in der Quelle."
+TB_W_VORBELEGT = "Diese Datei lag schon vorher im Archiv. Das Programm darf sie nie verändern oder überschreiben."
+
+# Vorhandene Ordner im vorbelegten Archiv (Zusatz zur Begruendung)
+TB_O_ZUSATZ_MONAT = "Im Archiv gibt es den Monatsordner schon mit Zusatz („{ordner}“) – er wird benutzt."
+TB_O_FLACH_MONAT = ("Im Archiv gibt es „{ordner}“ (andere Schreibweise) mit Bildern direkt darin – so ordnet dieses"
+                    " Archiv: das Bild kommt direkt dazu, ohne Tages- und Kameraordner.")
+TB_O_MONAT_ZAHL = "Im Archiv heißt der Januar 2021 „2021/01“ – dieser Ordner wird benutzt."
+TB_O_MONAT_NAME = "Im Archiv heißt der März 2022 „2022/März 2022“ – dieser Ordner wird benutzt."
+TB_O_TAG_ZUSATZ = "Im Archiv gibt es den Tag schon mit Zusatz („{ordner}“) – er wird benutzt."
+TB_O_TAG_FLACH = ("Im Archiv gibt es den Tag schon als „{ordner}“ mit Bildern direkt darin – das Bild kommt direkt"
+                  " dazu, ohne Kameraordner.")
+TB_O_JAHRESBEREICH = "Der Ordner „2015-2016 Schule“ im Archiv ist ein Zeitraum, kein Jahresordner – er bleibt unbenutzt."
+TB_O_KAMERA_GROSS = ("Im Archiv gibt es den Kameraordner schon als „{ordner}“; er wird ohne Rücksicht auf"
+                     " Groß- und Kleinschreibung benutzt.")
+
+# Erzeugen
+TB_SCHRITT_PLANEN = "Testbilder werden geplant …"
+TB_SCHRITT_BILDER = "Testbilder werden gezeichnet und geschrieben"
+TB_SCHRITT_EXIFTOOL = "Kameradaten werden eingetragen (ExifTool)"
+TB_SCHRITT_KOPIEN = "Kopien und vorbelegtes Archiv"
+TB_SCHRITT_HASH = "Prüfsummen werden berechnet"
+TB_SCHRITT_LISTE = "Übersicht und Erwartung werden geschrieben"
+
+
+def tb_ordner_nicht_leer(ordner) -> str:
+    return (f"Der Ordner „{ordner}“ ist nicht leer. Testbilder kommen nur in einen neuen oder leeren Ordner –"
+            " so wird nie etwas überschrieben.")
+
+
+def tb_anzahl_zu_klein(minimum: int) -> str:
+    return f"Mindestens {anzahl(minimum)} Testbilder – sonst fehlen Fälle."
+
+
+def tb_uhr_falsch(heute) -> str:
+    return (f"Die Uhr dieses Computers steht auf {heute:%d.%m.%Y}. Die Testbilder reichen bis Ende September 2026"
+            " und gälten sonst als „Datum in der Zukunft“. Bitte die Uhrzeit des Computers richtig stellen.")
+
+
+def tb_format_fehlt(form: str) -> str:
+    return (f"Qt kann das Bildformat {form.upper()} hier nicht schreiben. Im Windows-Paket gehört es dazu; "
+            "fehlt es, ist das Paket unvollständig.")
+
+
+def tb_exiftool_fehler(text: str) -> str:
+    return f"ExifTool konnte die Kameradaten nicht eintragen:\n{text}"
+
+
+TB_EXIFTOOL_FEHLT = "ExifTool wurde nicht gefunden – ohne ExifTool lassen sich die Kameradaten nicht eintragen."
+TB_ABGEBROCHEN = "Abgebrochen. Der angefangene Testordner bleibt liegen; er kann von Hand gelöscht werden."
+
+
+def tb_fertig(ordner, bilder: int, dateien: int, groesse_bytes: int, sekunden: float) -> str:
+    return (f"Fertig: {anzahl(bilder)} Testbilder ({anzahl(dateien)} Dateien, {groesse(groesse_bytes)}) in "
+            f"{dauer(sekunden)}.\n"
+            f"  Quelle:    {Path(ordner) / 'Quelle'}\n"
+            f"  Ziel:      {Path(ordner) / 'Ziel'} (vorbelegtes Archiv)\n"
+            f"  Übersicht: {Path(ordner) / 'Übersicht.html'}\n"
+            "Jetzt die Quelle in das Ziel sortieren lassen – danach „Ergebnis prüfen“.")
+
+
+# Uebersicht (HTML) und Erwartung (CSV)
+TB_UEBERSICHT_TITEL = "fotosort – Testbilder"
+TB_CSV_KOPF = ("Nr", "Datei in der Quelle", "Art", "Kategorie", "Gerät", "Kameraordner", "Aufnahme", "Datum woher",
+               "Erwartung", "Soll nach", "Warum", "Zusammen mit", "BLAKE3")
+TB_ERWARTUNG = {"archiv": "ins Archiv", "doppelt": "doppelt – nur einmal ins Archiv",
+                "schon_im_archiv": "schon im Archiv – bleibt in der Quelle", "bleibt": "bleibt in der Quelle",
+                "vorbelegt": "lag schon im Archiv"}
+TB_ANLEITUNG = (
+    "So geht der Test:",
+    "1. fotosort öffnen. Als Zielordner „{ziel}“ wählen, als Quelle „{quelle}“ (das Fenster trägt beides"
+    " schon ein, wenn die Testbilder dort angelegt wurden).",
+    "2. „Los“ drücken und die Schritte durchlaufen lassen: Erfassen, Analysieren, Kopieren, Prüfen."
+    " Aufräumen geht auch – es betrifft nur diese Testbilder.",
+    "3. „Ergebnis prüfen“ drücken. Das Programm vergleicht jede Datei im Ziel mit dieser Liste und schreibt"
+    " den Prüfbericht.",
+    "Auf jedem Bild steht, wohin es gehört und warum – einfach im Ziel durch die Ordner klicken.",
+)
+TB_LIESMICH = (
+    "Testbilder für fotosort\n"
+    "=======================\n\n"
+    "Alle Bilder hier sind künstlich – kein echtes Foto. Auf jedem steht, was es ist\n"
+    "und wo es nach dem Sortieren liegen soll.\n\n"
+    "  Quelle\\          die unsortierten Testbilder\n"
+    "  Ziel\\            ein Archiv, in dem schon etwas liegt (andere Schreibweisen, schon\n"
+    "                   importierte Bilder, belegte Namen)\n"
+    "  Übersicht.html   alle Dateien mit Erwartung, zum Lesen im Browser\n"
+    "  Erwartung.csv    dasselbe für Excel\n\n"
+    "Nach dem Sortieren schreibt „Ergebnis prüfen“ den Prüfbericht.html hierher.\n"
+    "Löschen: einfach den ganzen Ordner löschen, wenn der Test vorbei ist.\n"
+)
+
+# Pruefen
+TB_KEIN_TESTORDNER = "Hier liegen keine Testbilder von fotosort (die Datei .fotosort_testbilder.json fehlt)."
+TB_PRUEF_TITEL = "fotosort – Prüfbericht der Testbilder"
+TB_P_RICHTIG = "am erwarteten Platz, Inhalt unverändert"
+TB_P_FEHLT = "fehlt am erwarteten Platz"
+TB_P_ANDERS = "liegt am erwarteten Platz, aber mit anderem Inhalt"
+TB_P_STATTDESSEN = "liegt stattdessen unter Ziel/{ort}"
+TB_P_NOCH_NICHT = "noch nicht im Archiv – das Kopieren ist noch nicht gelaufen oder nicht fertig"
+TB_P_DOPPELT_ARCHIV = "doppelt im Archiv: auch unter Ziel/{ort}"
+TB_P_QUELLE_FEHLT = "fehlt in der Quelle – sie hätte dort bleiben müssen"
+TB_P_QUELLE_ANDERS = "in der Quelle verändert – sie hätte unangetastet bleiben müssen"
+TB_P_VORBELEGT_WEG = "vorbelegte Archivdatei fehlt oder ist verändert"
+TB_P_UNERWARTET = "unerwartete Datei im Archiv"
+TB_P_VERLOREN = "VERLOREN: dieser Inhalt liegt weder in der Quelle noch im Archiv"
+TB_P_XMP_SICHTEN = "XMP-Datei aus „Sichten“ (vom Programm angelegt) – in Ordnung"
+
+
+def tb_pruef_zusammenfassung(richtig: int, erwartet: int, probleme: int, verloren: int) -> str:
+    if verloren:
+        kopf = f"ACHTUNG: {anzahl(verloren)} Inhalte sind verloren gegangen!"
+    elif probleme:
+        kopf = f"{anzahl(probleme)} Abweichungen gefunden."
+    else:
+        kopf = "Alles richtig: Jede Datei liegt dort, wo es auf ihr steht."
+    return (f"{kopf}\n"
+            f"{anzahl(richtig)} von {anzahl(erwartet)} Erwartungen erfüllt."
+            + ("" if verloren else " Kein Bild ist verloren gegangen."))
+
+
+def tb_pruef_zeile(nr: int, quelle: str, text: str) -> str:
+    vorne = f"Testbild {nr}: " if nr else ""
+    return f"{vorne}Quelle/{quelle}: {text}"
+
+
+def tb_pruef_bericht_wo(pfad) -> str:
+    return f"Prüfbericht: {pfad}"

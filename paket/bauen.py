@@ -64,6 +64,14 @@ PYSIDE_PLUGINS = {
     "platforms/qwindows.dll",            # das normale Windows-Fenster
     "platforms/qoffscreen.dll",          # ohne Bildschirm (Paketpruefung in der CI)
     "styles/qmodernwindowsstyle.dll",    # Windows-11-Grundstil unter dem eigenen Stylesheet
+    # Bildformate (seit v0.12): Eingebaut kann Qt nur PNG und BMP. Ohne diese
+    # zeigte der Reiter „Sichten“ keine Fotos, und Testbilder liessen sich
+    # nicht schreiben. Die Formatbibliotheken (libjpeg, libtiff, libwebp)
+    # stecken in den Plugins selbst.
+    "imageformats/qjpeg.dll",
+    "imageformats/qtiff.dll",
+    "imageformats/qwebp.dll",
+    "imageformats/qgif.dll",
 }
 # Microsoft-C++-Laufzeit, von den Qt-Dateien gebraucht; ein frischer PC hat sie oft nicht.
 LAUFZEIT_PRAEFIXE = ("msvcp140", "vcruntime140", "concrt140")
