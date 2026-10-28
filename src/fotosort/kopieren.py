@@ -1534,11 +1534,17 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
             L.in_arbeit.clear()
             continue
         # Auf die naechste fertige Gruppe warten (mit Zeitgrenze, damit
-        # Strg+C jederzeit ankommt).
-        wait([a.zukunft for g in L.offen for a in g], timeout=1.0, return_when=FIRST_COMPLETED)
-        fertig = [g for g in L.offen if all(a.zukunft.done() for a in g)]
+        # Strg+C jederzeit ankommt). Gruppen, die schon fertig sind, aber auf
+        # eine fruehere warten (_wartet_auf_fruehere), zaehlen nicht.
+        ausstehend = [a.zukunft for g in L.offen for a in g if not a.zukunft.done()]
+        if ausstehend:
+            wait(ausstehend, timeout=1.0, return_when=FIRST_COMPLETED)
         vorbereitet: list[tuple[list[_Auftrag], int]] = []
-        for g in fertig:
+        davor: list[list[_Auftrag]] = []        # fruehere Gruppen, die noch offen bleiben
+        for g in list(L.offen):
+            if not all(a.zukunft.done() for a in g) or _wartet_auf_fruehere(g, davor):
+                davor.append(g)
+                continue
             L.offen.remove(g)
             v = L.gruppe_abschliessen(g)
             if v is not None:
@@ -1547,6 +1553,16 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
             L.dbank.stapel_schreiben()      # ein Commit fuer alle Namen dieser Runde
             for rest, anhang in vorbereitet:
                 L.gruppe_fertigstellen(rest, anhang)
+
+
+def _wartet_auf_fruehere(g: list[_Auftrag], davor: list[list[_Auftrag]]) -> bool:
+    """Seit v0.11: Ist eine frueher eingereichte, noch offene Gruppe gleich gross
+    (ohne Sidecars), wird diese hier erst danach abgeschlossen. Sonst entschiede
+    die Fertigstellung, welches von zwei inhaltsgleichen Bildern einer Quelle
+    ins Archiv kommt - jetzt immer das erste in der Reihenfolge der Quelle."""
+    groessen = {int(a.zeile["groesse"]) for a in g if a.zeile["dateityp"] != "sidecar"}
+    return bool(groessen) and any(
+        int(a.zeile["groesse"]) in groessen for f in davor for a in f if a.zeile["dateityp"] != "sidecar")
 
 
 def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:

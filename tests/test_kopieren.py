@@ -773,3 +773,32 @@ def test_profil_auto_auf_der_befehlszeile(baum, quelle, ziel, capsys):
     assert _cli("kopieren", "--ziel", ziel, "--profil", "auto") == cli.OK
     aus = capsys.readouterr().out
     assert "erkannt" in aus
+
+
+def test_bei_gleichen_bildern_bleibt_immer_das_erste(tmp_path, ziel, nachschauen, monkeypatch):
+    """CI-Befund (v0.11, Windows): Von zwei inhaltsgleichen Bildern einer Quelle
+    landete mal das eine, mal das andere im Archiv - je nachdem, welche Kopie
+    zuerst fertig war. Jetzt immer das erste in der Reihenfolge der Quelle,
+    auch wenn seine Kopie laenger dauert."""
+    import time as zeit
+    q = tmp_path / "Q"
+    inhalt = testbaum._JPEG + b"gleich"
+    a = testbaum._schreiben(q / "Reise" / "a.jpg", inhalt)
+    b = testbaum._schreiben(q / "Reise" / "b.jpg", inhalt)
+    _vorbereiten(ziel, q)
+    echt = kopieren._kopieren_worker
+
+    def langsam(quelle, *args, **kw):
+        if Path(quelle).name == "a.jpg":
+            zeit.sleep(1.5)                       # "a" wird spaeter fertig als "b"
+        return echt(quelle, *args, **kw)
+
+    monkeypatch.setattr(kopieren, "_kopieren_worker", langsam)
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    zeilen = _zeilen(nachschauen, ziel)
+    za, zb = zeilen[str(a)], zeilen[str(b)]
+    assert za["status"] == "kopiert", za
+    assert zb["status"] == "duplikat" and zb["zielpfad"] == za["zielpfad"], zb
+    assert Path(za["zielpfad"]).name == "a.jpg"
+    assert sorted(p.name for p in ziel.rglob("*.jpg")) == ["a.jpg"]
+    assert not _parts(ziel)
