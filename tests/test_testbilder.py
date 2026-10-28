@@ -112,6 +112,29 @@ def test_zu_wenige_testbilder():
         testbilder.planen(testbilder.MINDESTANZAHL - 1)
 
 
+def test_schriftprobe_schlaegt_an_wenn_qt_keine_schrift_zeichnet(monkeypatch):
+    """Im Windows-Paket der CI waren einige Testbilder gleich: Dann muss das
+    Anlegen sofort mit klarer Meldung abbrechen, statt unbeschriftete Bilder
+    abzulegen."""
+    testbilder.qt_bereit()
+    testbilder.schrift_pruefen()                      # hier wird Schrift gezeichnet
+    from PySide6.QtGui import QPainter
+    monkeypatch.setattr(QPainter, "drawText", lambda *a, **k: None)
+    with pytest.raises(FotosortFehler, match="keine lesbare Schrift"):
+        testbilder.schrift_pruefen()
+
+
+def test_eindeutigkeit_nur_absichtliche_kopien_duerfen_gleich_sein():
+    a = testbilder.Datei("Quelle/a.jpg", "foto", "jpg", "kamera", nr=1, blake3="aa")
+    b = testbilder.Datei("Quelle/b.jpg", "foto", "jpg", "kamera", nr=2, blake3="bb")
+    kopie = testbilder.Datei("Quelle/zz Doppelt/a.jpg", "foto", "jpg", "doppelt", blake3="aa", kopie_von=a)
+    xmp = [testbilder.Datei(f"Quelle/{n}.xmp", "sidecar", "xmp", "begleit", blake3="xx") for n in "cd"]
+    testbilder._eindeutig_pruefen([a, b, kopie, *xmp])          # erlaubt
+    gleich = testbilder.Datei("Quelle/c.jpg", "foto", "jpg", "kamera", nr=3, blake3="aa")
+    with pytest.raises(FotosortFehler, match="Nr 1 .a.jpg. = Nr 3 .c.jpg."):
+        testbilder._eindeutig_pruefen([a, b, gleich])
+
+
 # --------------------------------------------------------------- Formate ----
 
 
@@ -269,6 +292,30 @@ def test_pruefung_findet_unerwartete_datei_und_duldet_xmp_aus_sichten(sortiert, 
     assert [b.datei for b in p.befunde] == [f"{testbilder.ZIEL}/2024/fremd.jpg"]
     assert p.befunde[0].text == meldungen.TB_P_UNERWARTET
     assert len(p.hinweise) == 1
+
+
+def test_alle_testbilder_sind_verschieden(sortiert):
+    import json
+    daten = json.loads((sortiert / testbilder.MARKE).read_text(encoding="utf-8"))
+    nummern = [e["blake3"] for e in daten["dateien"] if e["nr"]]
+    assert len(nummern) == ANZAHL == len(set(nummern))
+
+
+def test_pruefung_nennt_ein_gleiches_testbild(sortiert, tmp_path):
+    """Wie im Windows-Paket der CI: Zwei Testbilder sind gleich, das Programm
+    legt den Inhalt zu Recht nur einmal ab - die Pruefung sagt, mit welchem."""
+    import json
+    test = _kopie(sortiert, tmp_path)
+    marke = test / testbilder.MARKE
+    daten = json.loads(marke.read_text(encoding="utf-8"))
+    a, b = [e for e in daten["dateien"] if e["erwartung"] == testbilder.ARCHIV and e["art"] == "foto" and e["nr"]][:2]
+    (test / testbilder.ZIEL / b["ziel"]).unlink()
+    b["blake3"] = a["blake3"]
+    marke.unlink()
+    marke.write_text(json.dumps(daten, ensure_ascii=False), encoding="utf-8")
+    p = testbilder.pruefen(test)
+    text = next(x.text for x in p.befunde if x.datei == b["datei"])
+    assert f"Testbild {a['nr']}" in text and "gleich" in text
 
 
 def test_pruefung_findet_verlorenen_inhalt(sortiert, tmp_path):

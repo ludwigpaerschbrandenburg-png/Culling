@@ -3065,3 +3065,17 @@ def ob_tb_fertig(ordner) -> str:
     return (f"Testbilder angelegt in „{ordner}“. Zielordner und Quelle sind eingetragen – jetzt „Los geht's“"
             " drücken (die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten: Dort liegt absichtlich"
             " schon etwas) und alle Schritte durchlaufen lassen. Danach „Ergebnis prüfen“.")
+
+TB_KEINE_SCHRIFT = ("Qt zeichnet hier keine lesbare Schrift (Schriftprobe: zwei verschiedene Texte sehen gleich aus)."
+                    " Die Testbilder wären unbeschriftet und viele gleich – deshalb wird nichts angelegt.")
+
+
+def tb_nicht_eindeutig(paare: str, anzahl_gruppen: int) -> str:
+    return (f"Die Testbilder sind nicht alle verschieden ({anzahl(anzahl_gruppen)}-mal gleicher Inhalt: {paare})."
+            " Das wäre ein Fehler im Testsatz, nicht im Sortieren – der Testordner gilt nicht als fertig.")
+
+
+def tb_p_gleich_wie(nr: int, datei: str) -> str:
+    wer = f"Testbild {nr} ({datei})" if nr else f"die Datei {datei}"
+    return (f"fehlt am erwarteten Platz – derselbe Inhalt liegt schon als {wer} im Archiv;"
+            " die beiden Dateien sind gleich")

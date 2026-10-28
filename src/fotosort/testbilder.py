@@ -37,6 +37,7 @@ import json
 import os
 import random
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -1226,7 +1227,12 @@ def qt_bereit() -> None:
     spaeter kein Fenster mehr entstehen (Qt bricht dann hart ab)."""
     from PySide6.QtWidgets import QApplication
     if QApplication.instance() is None:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        # Ohne Bildschirm (offscreen) nur unter Linux ohne Anzeige: Unter
+        # Windows und macOS zeigt die normale Darstellung kein Fenster, solange
+        # keins geoeffnet wird, und benutzt sicher die Schriften des Systems.
+        if not sys.platform.startswith(("win", "darwin")) and not (
+                os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         global _APP
         _APP = QApplication([])
 
@@ -1360,6 +1366,31 @@ def formate_pruefen() -> None:
             raise FotosortFehler(meldungen.tb_format_fehlt(form))
 
 
+def schrift_pruefen() -> None:
+    """Zeichnet Qt hier lesbare Schrift? Zwei verschiedene Texte muessen
+    verschieden aussehen - sonst waeren die Testbilder unbeschriftet und viele
+    davon gleich (gesehen im Windows-Paket der CI, v0.12)."""
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QImage, QPainter
+
+    def bild(text: str):
+        b = QImage(260, 40, QImage.Format.Format_RGB32)
+        b.fill(QColor("white"))
+        if text:
+            p = QPainter(b)
+            f = QFont()
+            f.setPixelSize(20)
+            p.setFont(f)
+            p.setPen(QColor("black"))
+            p.drawText(QRect(0, 0, 260, 40), int(Qt.AlignmentFlag.AlignCenter), text)
+            p.end()
+        return b
+
+    leer, a, b = bild(""), bild("Testbild 0123 Äpfel"), bild("Testbild 4567 Öfen")
+    if a == leer or b == leer or a == b:
+        raise FotosortFehler(meldungen.TB_KEINE_SCHRIFT)
+
+
 GROESSE_FOTO = (1200, 800)
 GROESSE_VORSCHAU = (960, 640)
 GROESSE_THM = (480, 320)
@@ -1466,6 +1497,7 @@ def erzeugen(ordner: Path, anzahl: int = STANDARD_ANZAHL, exiftool: str | None =
     plan = planen(anzahl)
     qt_bereit()
     formate_pruefen()
+    schrift_pruefen()
     pfade.lang(ordner).mkdir(parents=True, exist_ok=True)
     (pfade.lang(ordner) / QUELLE).mkdir(exist_ok=True)
     (pfade.lang(ordner) / ZIEL).mkdir(exist_ok=True)
@@ -1519,6 +1551,7 @@ def erzeugen(ordner: Path, anzahl: int = STANDARD_ANZAHL, exiftool: str | None =
             t = d.mtime.timestamp()
             os.utime(pfade.lang(_pfad(ordner, d.rel)), (t, t))
     _pruefsummen(ordner, plan.dateien, melden, stop)
+    _eindeutig_pruefen(plan.dateien)
     for d in plan.dateien:
         ergebnis.bytes_ += os.stat(pfade.lang(_pfad(ordner, d.rel))).st_size
     ergebnis.dateien = len(plan.dateien)
@@ -1571,6 +1604,20 @@ def _exiftool_schreiben(ordner: Path, dateien: list[Datei], programm: str, melde
     text = "\n".join(f for f in fehler if f)
     if text:
         raise FotosortFehler(meldungen.tb_exiftool_fehler(text[:2000]))
+
+
+def _eindeutig_pruefen(dateien: list[Datei]) -> None:
+    """Jedes Bild, Video und RAW hat seinen eigenen Inhalt - ausser den
+    absichtlichen Kopien (doppelt in der Quelle, schon im Archiv). Sonst hielte
+    das Programm zu Recht zwei Testbilder fuer ein und dasselbe."""
+    nach_hash: dict[str, list[Datei]] = {}
+    for d in dateien:
+        if d.art in ("foto", "raw", "video") and d.kopie_von is None:
+            nach_hash.setdefault(d.blake3, []).append(d)
+    gleich = [g for g in nach_hash.values() if len(g) > 1]
+    if gleich:
+        paare = "; ".join(" = ".join(f"Nr {d.nr} ({d.name})" if d.nr else d.rel for d in g) for g in gleich[:8])
+        raise FotosortFehler(meldungen.tb_nicht_eindeutig(paare, len(gleich)))
 
 
 def _pruefsummen(ordner: Path, dateien: list[Datei], melden, stop) -> None:
@@ -1818,10 +1865,11 @@ def pruefen(ordner: Path, melden=None, stop: threading.Event | None = None) -> P
     hashes_quelle = {h for (wo, _r), h in hash_von.items() if wo == QUELLE}
 
     p = Pruefung(ordner)
-    erwartete_orte: set[str] = set()
+    eintrag_am_ort: dict[str, dict] = {}
     for e in eintraege:
         if e["erwartung"] in (ARCHIV, VORBELEGT):
-            erwartete_orte.add(unicodedata.normalize("NFC", e["ziel"]))
+            eintrag_am_ort[unicodedata.normalize("NFC", e["ziel"])] = e
+    erwartete_orte = set(eintrag_am_ort)
 
     def befund(e: dict, text: str, schwer: bool = False) -> None:
         p.befunde.append(Befund(e["nr"], e["datei"], text, schwer))
@@ -1847,6 +1895,9 @@ def pruefen(ordner: Path, melden=None, stop: threading.Event | None = None) -> P
                     befund(e, meldungen.TB_P_STATTDESSEN.format(ort=anders_geschrieben))
                 elif orte:
                     befund(e, meldungen.TB_P_STATTDESSEN.format(ort=orte[0]))
+                elif gleiche := [eintrag_am_ort[unicodedata.normalize("NFC", o)] for o in orte_ziel.get(e["blake3"], [])
+                                 if unicodedata.normalize("NFC", o) in eintrag_am_ort]:
+                    befund(e, meldungen.tb_p_gleich_wie(gleiche[0]["nr"], gleiche[0]["datei"]))
                 elif rel_quelle and quelle_genau.get(unicodedata.normalize("NFC", rel_quelle)) == e["blake3"]:
                     befund(e, meldungen.TB_P_NOCH_NICHT)
                 else:
