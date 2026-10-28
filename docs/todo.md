@@ -938,7 +938,8 @@ meine Bilder nehmen?“ – Ja; vorher drei Kleinigkeiten.
   ihn nicht mehr. Die Meldung „abgestürzt“ überschrieb dann sogar seine Endmeldung. Jetzt liest
   das Fenster vor dem Urteil „abgestürzt“ die Statusdatei noch einmal. An den Bildern änderte
   das nie etwas: Es ging nur um die Anzeige.
-- [ ] Volle Tests, CI, Release v0.12.1.
+- [x] Volle Tests (1084 grün), CI grün (Linux, Windows 1065 grün, Paket), Release v0.12.1 mit
+  `fotosort-windows.zip`. Abschlussprobe im Fenster mit 5000 Testbildern: „Alles richtig“.
 
 ## Ohne feste Phase
 
