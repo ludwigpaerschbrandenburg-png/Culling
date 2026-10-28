@@ -907,7 +907,10 @@ Bildern, die du alle sortieren lässt, von meinem PC lokal.“
   Kästchen, gleich lange Beschriftungen sahen gleich aus. Das Sortieren war richtig: Es hat die
   gleichen Bilder als Duplikate erkannt, nichts ging verloren. Jetzt: Schriftprobe mit gleich
   langen Texten, unter Windows Schriften nachladen, Eindeutigkeit nach dem Anlegen prüfen.
-- [ ] Volle Tests, CI, Release v0.12.
+- [x] Volle Tests, CI, Release v0.12: lokal 1049 Tests grün; CI grün unter Linux und Windows;
+  die Paketprüfung legt unter Windows 300 Testbilder an, sortiert und prüft sie („Alles richtig“,
+  340 von 340) und zeichnet wie die Karte im Fenster lesbar im Hintergrund-Strang.
+  Release v0.12 mit `fotosort-windows.zip`.
 - [ ] Beobachtung, nicht geändert: Liegen „Bild.jpg“ und „Bild - Kopie.jpg“ (gleicher Inhalt) im
   selben Ordner, kommt der Inhalt unter dem Namen der Kopie ins Archiv – sie steht in der
   Reihenfolge der Quelle zuerst (Leerzeichen vor Punkt). Ob das Programm hier den Namen ohne
