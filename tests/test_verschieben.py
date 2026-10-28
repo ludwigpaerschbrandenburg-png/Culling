@@ -182,6 +182,8 @@ def test_verschieben_im_rueckfall_ohne_part(baum, quelle, ziel, nachschauen, mon
 
 
 def test_abbruch_im_verschieben_laesst_kopierte_zeilen_stehen(baum, quelle, ziel, nachschauen, kein_gleiches_laufwerk, monkeypatch):
+    import time
+
     _vorbereiten(ziel, quelle)
     original = kopieren.wait
     aufrufe = []
@@ -192,6 +194,17 @@ def test_abbruch_im_verschieben_laesst_kopierte_zeilen_stehen(baum, quelle, ziel
             raise KeyboardInterrupt
         return original(*a, **k)
 
+    # Jede Kopie dauert einen Moment: So wartet der Lauf sicher mehrmals auf
+    # laufende Kopien, und Strg+C kommt mitten im Lauf an. Ohne das waren die
+    # kleinen Dateien manchmal fertig, bevor zum zweiten Mal gewartet wurde -
+    # dann gab es keinen Abbruch (CI, v0.12.1; auch vorher 3 von 15 Laeufen).
+    echt = kopieren._kopieren_worker
+
+    def langsam(*a, **k):
+        time.sleep(0.05)
+        return echt(*a, **k)
+
+    monkeypatch.setattr(kopieren, "_kopieren_worker", langsam)
     monkeypatch.setattr(kopieren, "wait", unterbrechen)
     assert _cli("kopieren", "--ziel", ziel, "--verschieben") == cli.ABGEBROCHEN
     zeilen = _echte(_zeilen(nachschauen, ziel))
