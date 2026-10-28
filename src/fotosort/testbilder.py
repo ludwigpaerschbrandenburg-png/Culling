@@ -1221,12 +1221,14 @@ def planen(anzahl: int = STANDARD_ANZAHL, saat: int = SAAT) -> _Plan:
 
 def qt_bereit() -> None:
     """Qt braucht fuer Schriften eine Anwendung. Ohne Fenster (Befehl
-    "testbilder") eine ohne Bildschirm (offscreen)."""
-    from PySide6.QtGui import QGuiApplication
-    if QGuiApplication.instance() is None:
+    "testbilder") eine ohne Bildschirm (offscreen). Eine vollwertige
+    QApplication, keine QGuiApplication: Sonst koennte im selben Prozess
+    spaeter kein Fenster mehr entstehen (Qt bricht dann hart ab)."""
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         global _APP
-        _APP = QGuiApplication([])
+        _APP = QApplication([])
 
 
 _APP = None
@@ -1648,8 +1650,9 @@ def _uebersicht_html(plan: _Plan, ordner: Path) -> str:
              f"<h1>{e(meldungen.TB_UEBERSICHT_TITEL)}</h1>",
              f"<p class='leise'>{e(meldungen.anzahl(plan.nr))} Testbilder, {e(meldungen.anzahl(len(plan.dateien)))} Dateien"
              f" – fotosort {e(__version__)}</p>"]
-    teile.append("<ol>" + "".join(f"<li>{e(t.format(ziel=ordner / ZIEL, quelle=ordner / QUELLE))}</li>"
-                                  for t in meldungen.TB_ANLEITUNG[1:]) + "</ol>")
+    # Die Schritte tragen ihre Nummer schon im Text - keine zweite Liste darum.
+    teile.append(f"<p><b>{e(meldungen.TB_ANLEITUNG[0])}</b></p>")
+    teile += [f"<p>{e(t.format(ziel=ordner / ZIEL, quelle=ordner / QUELLE))}</p>" for t in meldungen.TB_ANLEITUNG[1:]]
     teile.append("<h2>Was geprüft wird</h2><div class='wrap'><table><tr><th>Kategorie</th><th>Dateien</th><th>Worum es geht</th></tr>")
     for k, (titel, was) in meldungen.TB_KATEGORIEN.items():
         if zaehler.get(k):
@@ -1683,6 +1686,7 @@ class Pruefung:
     befunde: list = field(default_factory=list)
     hinweise: list = field(default_factory=list)
     verloren: int = 0
+    je_kategorie: dict = field(default_factory=dict)    # Kategorie -> (Dateien, ohne Befund)
     bericht: Path | None = None
     sekunden: float = 0.0
 
@@ -1696,12 +1700,52 @@ def ist_testordner(ordner: Path) -> bool:
 
 
 def testordner_von(pfad: Path) -> Path | None:
-    """Der Testordner, zu dem eine Quelle oder ein Ziel gehoert (oder None)."""
+    """Der Testordner, zu dem ein Ziel (oder eine Quelle) direkt gehoert - oder None."""
     pfad = Path(pfad)
     for kandidat in (pfad.parent, pfad):
         if ist_testordner(kandidat):
             return kandidat
     return None
+
+
+def testordner_der_quelle(quelle: Path) -> Path | None:
+    """Der Testordner, in dessen Quelle (oder darueber) dieser Ordner liegt."""
+    try:
+        q = pfade.aufloesen(Path(quelle))
+    except OSError:
+        return None
+    for kandidat in (q, *q.parents):
+        if ist_testordner(kandidat):
+            return kandidat
+    return None
+
+
+def fremdes_ziel(quelle: Path, ziel: Path) -> str | None:
+    """Schutz (Phase 13): Testbilder duerfen nur in ihr eigenes Ziel, nie in
+    ein echtes Archiv - 5000 Testbilder zwischen echten Fotos wieder
+    herauszusuchen waere eine Plage. Liefert den Grund oder None."""
+    test = testordner_der_quelle(quelle)
+    if test is None:
+        return None
+    eigenes = test / ZIEL
+    try:
+        if pfade.aufloesen(Path(ziel)) == pfade.aufloesen(eigenes):
+            return None
+    except OSError:
+        pass
+    return meldungen.tb_fremdes_ziel(quelle, eigenes)
+
+
+def neuer_testordner(eltern: Path) -> Path:
+    """Ein noch nicht vorhandener Unterordner fuer die Testbilder: „fotosort
+    Testbilder“, sonst „fotosort Testbilder (2)“ und so weiter."""
+    eltern = Path(eltern)
+    kandidat = eltern / meldungen.TB_ORDNERNAME
+    k = 1
+    while kandidat.exists():
+        k += 1
+        kandidat = eltern / f"{meldungen.TB_ORDNERNAME} ({k})"
+    return kandidat
 
 
 def _alle_dateien(wurzel: Path, ohne: tuple[str, ...] = ()) -> list[str]:
@@ -1782,8 +1826,10 @@ def pruefen(ordner: Path, melden=None, stop: threading.Event | None = None) -> P
     def befund(e: dict, text: str, schwer: bool = False) -> None:
         p.befunde.append(Befund(e["nr"], e["datei"], text, schwer))
 
+    je: dict[str, list[int]] = {}
     for e in eintraege:
         p.erwartet += 1
+        befunde_vorher = len(p.befunde)
         rel_quelle = e["datei"].split("/", 1)[1] if e["datei"].startswith(QUELLE + "/") else ""
         z = unicodedata.normalize("NFC", e["ziel"])
         if e["erwartung"] in (ARCHIV, VORBELEGT):
@@ -1831,6 +1877,10 @@ def pruefen(ordner: Path, melden=None, stop: threading.Event | None = None) -> P
         if e["blake3"] and not e.get("rest") and e["blake3"] not in orte_ziel and e["blake3"] not in hashes_quelle:
             p.verloren += 1
             befund(e, meldungen.TB_P_VERLOREN, schwer=True)
+        stand = je.setdefault(e.get("kategorie", ""), [0, 0])
+        stand[0] += 1
+        stand[1] += len(p.befunde) == befunde_vorher
+    p.je_kategorie = {k: (gesamt, gut) for k, (gesamt, gut) in je.items()}
 
     # 2. Was liegt im Ziel, das niemand erwartet?
     bekannte = {unicodedata.normalize("NFC", e["ziel"]) for e in eintraege if e["erwartung"] in (ARCHIV, VORBELEGT)}
@@ -1857,6 +1907,15 @@ def _bericht_schreiben(p: Pruefung, manifest: dict) -> Path:
              f"<h1>{e(meldungen.TB_PRUEF_TITEL)}</h1>",
              f"<p class='leise'>{e(datetime.now().strftime('%d.%m.%Y %H:%M'))} – fotosort {e(__version__)}</p>"]
     teile += [f"<p class='{klasse}'>{e(z)}</p>" for z in zusammen.splitlines()]
+    teile.append("<h2>Je Kategorie</h2><div class='wrap'><table><tr><th>Kategorie</th><th>Dateien</th>"
+                 "<th>richtig</th><th>Worum es geht</th></tr>")
+    for k, (titel, was) in meldungen.TB_KATEGORIEN.items():
+        if k in p.je_kategorie:
+            gesamt, gut = p.je_kategorie[k]
+            teile.append(f"<tr><td>{e(titel)}</td><td>{meldungen.anzahl(gesamt)}</td>"
+                         f"<td class='{'gut' if gut == gesamt else 'schlecht'}'>{meldungen.anzahl(gut)}</td>"
+                         f"<td>{e(was)}</td></tr>")
+    teile.append("</table></div>")
     if p.befunde:
         teile.append("<h2>Abweichungen</h2><div class='wrap'><table><tr><th>Nr</th><th>Datei</th><th>Befund</th></tr>")
         for b in p.befunde:

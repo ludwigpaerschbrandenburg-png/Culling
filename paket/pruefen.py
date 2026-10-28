@@ -24,6 +24,9 @@ Nur unter Windows (GitHub Actions) laeuft das Paket wirklich:
      muessen ueber python\\pythonw.exe gelaufen sein.
   6. fotosort.bat: --version, scan, analyse, kopieren, pruefen, status.
   7. Ein Schritt als Arbeitsprozess, gestartet wie vom Fenster (pythonw.exe).
+  8. Testbilder (seit v0.12): 300 beschriftete Testbilder anlegen, mit
+     fotosort.bat sortieren und pruefen - alle muessen dort liegen, wo es
+     auf ihnen steht.
 
 Aufruf:
     python paket/pruefen.py <paketordner> <arbeitsordner>
@@ -468,6 +471,26 @@ def main() -> int:
         fehler.append(f"Arbeitsprozess ueber pythonw.exe: Rueckgabewert {rc}, Stand {stand}")
     if not daten_ordner.is_dir():
         fehler.append("Nutzerdatenordner wurde nicht angelegt")
+
+    # -- 8. Testbilder mit dem Paket: anlegen, sortieren, pruefen (seit v0.12) ------------------------
+    # Der echte Windows-Beweis fuer den grossen Testsatz: Qt schreibt JPEG, TIFF
+    # und WebP mit den mitgelieferten Bildformaten; lange Pfade, Umlaute, Emoji
+    # und Namen, die sich nur in Gross-/Kleinschreibung unterscheiden, landen
+    # dort, wo es auf den Bildern steht.
+    test = arbeit / "Testbilder (Paket)"
+    rc, text = _bat(bat, ["testbilder", str(test), "--anzahl", "300"], umgebung, start_ordner)
+    if rc != 0 or "Fertig:" not in text:
+        fehler.append(f"testbilder: Rueckgabewert {rc}")
+    else:
+        z, q = str(test / "Ziel"), str(test / "Quelle")
+        for argumente in (["scan", "--ziel", z, "--quelle", q], ["analyse", "--ziel", z],
+                          ["kopieren", "--ziel", z], ["pruefen", "--ziel", z]):
+            rc, _text = _bat(bat, argumente, umgebung, start_ordner)
+            if rc != 0:
+                fehler.append(f"Testbilder, {argumente[0]}: Rueckgabewert {rc}")
+        rc, text = _bat(bat, ["testbilder", str(test), "--pruefen"], umgebung, start_ordner)
+        if rc != 0 or "Alles richtig" not in text:
+            fehler.append(f"Testbilder liegen unter Windows nicht dort, wo es auf ihnen steht:\n{text[-3000:]}")
     return _ende(fehler)
 
 

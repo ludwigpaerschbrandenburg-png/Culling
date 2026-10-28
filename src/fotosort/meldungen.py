@@ -2971,10 +2971,11 @@ TB_ANLEITUNG = (
     "So geht der Test:",
     "1. fotosort öffnen. Als Zielordner „{ziel}“ wählen, als Quelle „{quelle}“ (das Fenster trägt beides"
     " schon ein, wenn die Testbilder dort angelegt wurden).",
-    "2. „Los“ drücken und die Schritte durchlaufen lassen: Erfassen, Analysieren, Kopieren, Prüfen."
+    "2. „Los geht's“ drücken (die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten – dort liegt"
+    " absichtlich schon etwas) und die Schritte durchlaufen lassen: Scan, Analyse, Kopieren, Prüfen."
     " Aufräumen geht auch – es betrifft nur diese Testbilder.",
-    "3. „Ergebnis prüfen“ drücken. Das Programm vergleicht jede Datei im Ziel mit dieser Liste und schreibt"
-    " den Prüfbericht.",
+    "3. „Testbilder: Ergebnis prüfen“ drücken. Das Programm vergleicht jede Datei im Ziel mit dieser Liste"
+    " und schreibt den Prüfbericht.",
     "Auf jedem Bild steht, wohin es gehört und warum – einfach im Ziel durch die Ordner klicken.",
 )
 TB_LIESMICH = (
@@ -3027,3 +3028,40 @@ def tb_pruef_zeile(nr: int, quelle: str, text: str) -> str:
 
 def tb_pruef_bericht_wo(pfad) -> str:
     return f"Prüfbericht: {pfad}"
+
+
+def tb_fremdes_ziel(quelle, eigenes_ziel) -> str:
+    return (f"„{quelle}“ enthält Testbilder von fotosort. Sie dürfen nur in ihr eigenes Testziel"
+            f" „{eigenes_ziel}“ sortiert werden – nie in ein echtes Archiv.")
+
+
+def tb_fortschritt(text: str, erledigt: int, gesamt: int) -> str:
+    if not gesamt:
+        return text
+    return f"{text}: {anzahl(erledigt)} von {anzahl(gesamt)}"
+
+
+# Fenster: Karte „Ausprobieren“ auf der Startseite
+OB_TB_KARTE = "Ausprobieren"
+OB_TB_TEXT = ("5.000 künstliche Testbilder: Auf jedem steht, was es ist und wo es nach dem Sortieren liegen"
+              " soll. Gefahrlos – sie kommen in einen eigenen Ordner.")
+OB_TB_ANLEGEN = "Testbilder anlegen…"
+OB_TB_PRUEFEN = "Ergebnis prüfen"
+OB_TB_PRUEFEN_UEBERSICHT = "Testbilder: Ergebnis prüfen"
+OB_TB_ORDNER_WAEHLEN = "Wo sollen die Testbilder hin?"
+OB_TB_TITEL = "Testbilder anlegen?"
+OB_TB_LAEUFT = "Testbilder werden angelegt …"
+OB_TB_PRUEFT = "Das Ergebnis wird geprüft …"
+OB_TB_PRUEF_TITEL = "Ergebnis der Testbilder"
+
+
+def ob_tb_frage(ordner, bilder: int) -> str:
+    return (f"In „{ordner}“ entstehen {anzahl(bilder)} Testbilder (rund {groesse(bilder * 80 * 1024)})"
+            " und ein Archiv, in dem schon etwas liegt. Das dauert ein bis drei Minuten.\n\n"
+            "Danach sind Zielordner und Quelle eingetragen – dann einfach „Los geht's“ drücken.")
+
+
+def ob_tb_fertig(ordner) -> str:
+    return (f"Testbilder angelegt in „{ordner}“. Zielordner und Quelle sind eingetragen – jetzt „Los geht's“"
+            " drücken (die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten: Dort liegt absichtlich"
+            " schon etwas) und alle Schritte durchlaufen lassen. Danach „Ergebnis prüfen“.")

@@ -321,6 +321,14 @@ def befehl_scan(args, konsole) -> int:
         konsole.print(meldungen.keine_quellen_bekannt())
         return FEHLENDE_ANGABE
 
+    # Testbilder nie in ein echtes Archiv (Phase 13) - bevor irgendetwas entsteht.
+    from . import testbilder
+    for q in gewuenscht:
+        grund = testbilder.fremdes_ziel(q, ziel)
+        if grund is not None:
+            konsole.print(grund)
+            return FEHLER
+
     # Vorpruefung ohne Archiv: Kann keine der genannten Quellen durchlaufen
     # werden, soll kein halbes Archiv entstehen (SPEC Abschnitt 4 Phase 1).
     # Die Gruende nennt spaeter ausfuehren_mehrere je Quelle; hier faellt
@@ -1005,6 +1013,11 @@ def _start_quelle_pruefen(antwort: str, ziel: Path, bekannt_auf: set, quellen: l
     auf = pfade.aufloesen(q)
     if auf in bekannt_auf or any(pfade.aufloesen(Path(x)) == auf for x in quellen):
         return (meldungen.ob_quelle_schon_dabei if fenster else meldungen.start_quelle_schon_dabei)(auf)
+    if str(ziel) != os.devnull:
+        # Testbilder nie in ein echtes Archiv (Phase 13). Ohne Ziel (Fenster,
+        # Quelle vor dem Ziel gewaehlt) prueft es "los".
+        from . import testbilder
+        return testbilder.fremdes_ziel(q, ziel)
     return None
 
 
@@ -1375,6 +1388,32 @@ def befehl_messen(args, konsole) -> int:
     return OK
 
 
+def befehl_testbilder(args, konsole) -> int:
+    """Testbilder anlegen oder nach dem Sortieren pruefen (Phase 13) - ohne Archiv."""
+    from . import testbilder
+
+    stand = {"text": None, "zehntel": -1}
+
+    def melden(text: str, erledigt: int, gesamt: int) -> None:
+        zehntel = erledigt * 10 // gesamt if gesamt else -1
+        if text != stand["text"] or zehntel != stand["zehntel"]:
+            stand.update(text=text, zehntel=zehntel)
+            konsole.print(meldungen.tb_fortschritt(text, erledigt, gesamt))
+
+    ordner = Path(args.ordner)
+    if args.pruefen:
+        p = testbilder.pruefen(ordner, melden=melden)
+        konsole.print(testbilder.pruef_text(p))
+        return OK if p.ok else FEHLER
+    gefunden, _wo = exiftool_finden(config.Konfiguration())
+    if not gefunden:
+        konsole.print(meldungen.TB_EXIFTOOL_FEHLT)
+        return FEHLER
+    e = testbilder.erzeugen(ordner, args.anzahl, exiftool=gefunden, melden=melden)
+    konsole.print(meldungen.tb_fertig(e.ordner, e.bilder, e.dateien, e.bytes_, e.sekunden))
+    return OK
+
+
 def befehl_ziel_index(args, konsole) -> int:
     """Ziel-Index zeigen oder vollstaendig neu aufbauen (SPEC Abschnitt 6 und 8).
 
@@ -1615,6 +1654,11 @@ def parser_bauen() -> argparse.ArgumentParser:
     p.add_argument("--auftrag", metavar="DATEI", required=True, help="JSON-Datei mit dem Auftrag")
     _gemeinsam(p)
 
+    p = unterbefehle.add_parser("testbilder", help="kuenstliche, beschriftete Testbilder anlegen oder nach dem Sortieren pruefen")
+    p.add_argument("ordner", metavar="ORDNER", help="neuer oder leerer Ordner (mit --pruefen: der Testordner)")
+    p.add_argument("--anzahl", type=int, default=5000, metavar="N", help="Anzahl der Testbilder (Standard 5000, mindestens 300)")
+    p.add_argument("--pruefen", action="store_true", help="das sortierte Ziel mit der Erwartung vergleichen")
+
     p = unterbefehle.add_parser("messen", help="Lese- und Schreibtempo von Quelle und Ziel messen")
     p.add_argument("--quelle", metavar="PFAD", required=True, help="Quellordner, aus dem gelesen wird")
     p.add_argument("--mb", type=int, default=256, metavar="N", help="Datenmenge je Stufe in MB (Standard 256)")
@@ -1683,7 +1727,8 @@ def main(argv: list[str] | None = None) -> int:
         args.ziel = os.environ.get("FOTOSORT_ZIEL", "").strip() or None
     # Ausnahmen: der gefuehrte Modus und das Fenster fragen nach dem Ziel,
     # statt abzubrechen; der Arbeitsprozess bekommt es aus dem Auftrag.
-    if not args.ziel and args.befehl not in ("start", "fenster", "arbeit"):
+    # Die Testbilder brauchen kein Archiv, nur ihren Ordner.
+    if not args.ziel and args.befehl not in ("start", "fenster", "arbeit", "testbilder"):
         konsole.print(meldungen.ziel_fehlt())
         return FEHLENDE_ANGABE
 
@@ -1722,6 +1767,8 @@ def main(argv: list[str] | None = None) -> int:
             return befehl_wiederherstellen(args, konsole)
         if args.befehl == "zuruecklegen":
             return befehl_zuruecklegen(args, konsole)
+        if args.befehl == "testbilder":
+            return befehl_testbilder(args, konsole)
         raise AssertionError(f"unbekannter Befehl: {args.befehl}")   # argparse laesst das nicht durch
     except FotosortFehler as fehler:
         konsole.print(str(fehler))

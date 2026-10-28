@@ -55,6 +55,8 @@ Culling/ (Repository-Wurzel)
 │  ├─ bestand.py             Bestand des Archivs erfassen (Namen, Größen; nichts gelesen) für „bereits importiert“ (v0.9)
 │  ├─ sichten.py             Reiter „Sichten“: Ordner und Bilder des Archivs, Bewertungen in bewertungen.db (v0.8)
 │  ├─ vorschau.py            eingebettete Vorschau aus RAW/HEIC über einen ExifTool-Prozess, nur lesend (v0.8)
+│  ├─ testbilder.py          großer künstlicher Testsatz: 5000 beschriftete Testbilder, Erwartung nach der SPEC, Prüfung (v0.12)
+│  ├─ testbilder_formate.py  Dateiformate der Testbilder als reine Bytes: EXIF, RAW, HEIC, MOV/MP4, AVI, XMP (v0.12)
 │  ├─ fortschritt.py         laufende Anzeige (Analyse, Kopieren, Prüfen, Aufräumen, Neueinlesen)
 │  ├─ restzeit.py            Restzeit: erst nach 60 s und 3 %, gleitende Minute, 5-s-Takt, abgerundet (Fenster und Konsole)
 │  ├─ bericht.py             Text- und CSV-Bericht

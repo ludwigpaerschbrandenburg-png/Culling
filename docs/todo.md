@@ -880,6 +880,33 @@ Bewerten von den Bildern.“
 - [ ] Später: Videos abspielen (braucht Qt Multimedia im Paket), Serien und Belichtungsreihen
   stapeln, Tasten frei belegen, Reiter „Sichten“ in der Browser-Fassung.
 
+## Phase 13 — Testbilder: 5000 beschriftete Bilder zum Ausprobieren (Version 0.12)
+
+**Auftrag vom 28.10.2026:** „Prüfe bitte mit Testbildern, die du selbst erstellst, bezüglich Datum,
+Aufnahmegerät usw. einen Testlauf mit verschiedenen Eigenschaften und Daten. Mit einer Größe von
+insgesamt 5000 individuellen Bildern. Du schreibst auf das Bild in Schrift, was es ist und wo es
+landen sollte, also Dateityp, Aufnahmegerät, deswegen da und da usw. Ein ausführliches Angebot an
+Bildern, die du alle sortieren lässt, von meinem PC lokal.“
+
+- [x] Erzeuger `testbilder.py` mit eigenen Dateiformaten (`testbilder_formate.py`): JPEG mit EXIF,
+  RAW mit Vorschau, HEIC, MOV/MP4/3GP und AVI mit Standbild, XMP, Sony-XML, AAE; auf jedem Bild die
+  Beschriftung; 18 Kategorien und ein vorbelegtes Archiv; Erwartung unabhängig nach der SPEC.
+- [x] Prüfung `pruefen()`: über BLAKE3 am erwarteten Platz, nichts Unerwartetes, nichts verloren;
+  `Prüfbericht.html` (nie überschrieben).
+- [x] Testlauf im Container: 5000 Testbilder, über die Befehle und über das Fenster samt Aufräumen
+  und leeren Ordnern sortiert – alle 5321 Erwartungen erfüllt.
+- [x] Befehl `fotosort testbilder <Ordner> [--anzahl N] [--pruefen]`.
+- [x] Fenster: Karte „Ausprobieren“ (anlegen mit Fortschritt und Abbrechen, Ergebnis prüfen).
+- [x] Schutz: Testbilder nur in ihr eigenes Ziel, nie in ein echtes Archiv.
+- [x] Gefundener Fehler (Test zuerst): Im Windows-Paket fehlten die Qt-Bildformate – „Sichten“
+  zeigte unter Windows keine Fotos. Jetzt dabei; die Paketprüfung legt unter Windows 300
+  Testbilder an, sortiert und prüft sie.
+- [ ] Volle Tests, CI, Release v0.12.
+- [ ] Beobachtung, nicht geändert: Liegen „Bild.jpg“ und „Bild - Kopie.jpg“ (gleicher Inhalt) im
+  selben Ordner, kommt der Inhalt unter dem Namen der Kopie ins Archiv – sie steht in der
+  Reihenfolge der Quelle zuerst (Leerzeichen vor Punkt). Ob das Programm hier den Namen ohne
+  „Kopie“ vorziehen soll, entscheidet der Nutzer.
+
 ## Ohne feste Phase
 
 - [ ] Nichts offen.

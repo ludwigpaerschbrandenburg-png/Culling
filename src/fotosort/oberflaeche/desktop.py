@@ -22,18 +22,20 @@ import contextlib
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
-    QScrollArea, QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QProgressDialog, QPushButton,
+    QRadioButton, QScrollArea, QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QTextBrowser,
+    QVBoxLayout, QWidget,
 )
 
-from .. import FotosortFehler, __version__, meldungen
+from .. import FotosortFehler, __version__, cli, config, meldungen, testbilder
 from . import ablauf as ablauf_modul
 from . import meldungsfenster, sichtfenster, stil
 
@@ -279,6 +281,13 @@ def frage(eltern, titel: str, text: str, eingabe: bool = False, ja: str = "Ja", 
     return ergebnis, d.feld.text()
 
 
+class _Boten(QObject):
+    """Meldungen eines Hintergrund-Strangs (Testbilder) an das Fenster: Qt
+    stellt sie im Strang des Fensters zu (Signale ueber Strang-Grenzen)."""
+    fortschritt = Signal(str, int, int)
+    fertig = Signal(object, str)          # Ergebnis, Fehlertext
+
+
 # ---------------------------------------------------------------- Seiten --
 
 
@@ -368,6 +377,15 @@ class StartSeite(QWidget):
                   "Fenster zu hält den Schritt sauber an; beim nächsten Öffnen geht es weiter."):
             k2.lay.addWidget(label(t, "hinweis", wrap=True))
         seite.addWidget(k2)
+        # Testbilder (Phase 13): gefahrlos ausprobieren
+        self.testkarte = Karte(meldungen.OB_TB_KARTE, gedaempft=True)
+        self.testkarte.lay.addWidget(label(meldungen.OB_TB_TEXT, "hinweis", wrap=True))
+        self.tb_anlegen = knopf(meldungen.OB_TB_ANLEGEN, "secondary", self.f.testbilder_anlegen)
+        self.tb_pruefen = knopf(meldungen.OB_TB_PRUEFEN, "secondary", self.f.testbilder_pruefen)
+        self.tb_pruefen.setEnabled(False)
+        self.testkarte.lay.addWidget(self.tb_anlegen)
+        self.testkarte.lay.addWidget(self.tb_pruefen)
+        seite.addWidget(self.testkarte)
         seite.addStretch(1)
         rechts = QWidget()
         rechts.setLayout(seite)
@@ -420,6 +438,9 @@ class StartSeite(QWidget):
 
     def archiv_zeigen(self, archiv: dict) -> None:
         _leeren(self.archiv_tags)
+        # „Ergebnis prüfen“ nur, wenn das Ziel zu einem Testordner gehoert.
+        self.tb_pruefen.setEnabled(bool(self.ziel.text())
+                                   and testbilder.testordner_von(Path(self.ziel.text())) is not None)
         self.weitermachen.setEnabled(False)
         self.weitermachen.setText("Weitermachen")
         self.rettung.hide()
@@ -722,6 +743,7 @@ class Hauptfenster(QMainWindow):
         self.konsole = konsole
         self._schliessen_ohne_frage = False
         self._beendet_gerade = False
+        self._hintergrund: tuple | None = None     # Testbilder: (Strang, Stop, Boten, Fortschritt)
         self.instanz: Instanz | None = None
         self.zustand: dict = {}
         self.lauf: dict = {}
@@ -865,6 +887,7 @@ class Hauptfenster(QMainWindow):
                     self.ab.beenden(warten=10.0 if sitzung_endet else 60.0, takt=QApplication.processEvents)
             finally:
                 self._beendet_gerade = False
+        self._hintergrund_anhalten()
         self.poll.stop()
         self.sichten.schliessen()
         self._marker_schreiben(False)
@@ -1090,6 +1113,120 @@ class Hauptfenster(QMainWindow):
         self.zustand["quellen_neu"] = a["quellen_neu"]
         self.start.quellen_zeigen(a["quellen_neu"])
         self._profil_uebernehmen(a)
+
+    # -- Testbilder (Phase 13) ------------------------------------------------
+
+    #: Wie viele Testbilder „Testbilder anlegen…“ anlegt (die Tests nehmen weniger).
+    testbilder_anzahl = testbilder.STANDARD_ANZAHL
+
+    def testbilder_anlegen(self) -> None:
+        """Ordner waehlen, darin einen neuen Testordner anlegen (nie in einen
+        vorhandenen), danach Ziel und Quelle eintragen."""
+        if self._hintergrund is not None:
+            return
+        eltern = QFileDialog.getExistingDirectory(self, meldungen.OB_TB_ORDNER_WAEHLEN, str(Path.home()))
+        if not eltern:
+            return
+        ordner = testbilder.neuer_testordner(Path(eltern))
+        ja, _ = frage(self, meldungen.OB_TB_TITEL, meldungen.ob_tb_frage(ordner, self.testbilder_anzahl), ja="Anlegen")
+        if not ja:
+            return
+        gefunden, wo = cli.exiftool_finden(config.Konfiguration())
+        if not gefunden:
+            self.meldung(meldungen.ob_exiftool_fehlt(wo))
+            return
+        anzahl = self.testbilder_anzahl
+
+        def aufgabe(melden, stop):
+            return testbilder.erzeugen(ordner, anzahl, exiftool=gefunden, melden=melden, stop=stop)
+
+        def fertig(_ergebnis, fehler: str) -> None:
+            if fehler:
+                self.meldung(fehler)
+                return
+            # Testbilder nie mit anderen Quellen mischen: Noch nicht begonnene
+            # Quellen fallen aus der Liste (nur die Auswahl - keine Datei).
+            for q in list(self.ab.quellen):
+                self.quelle_entfernen(q)
+            self.start.ziel_setzen(str(ordner / testbilder.ZIEL))
+            self.quelle_hinzufuegen(str(ordner / testbilder.QUELLE))
+            self.meldung(meldungen.ob_tb_fertig(ordner), gut=True)
+
+        self._im_hintergrund(meldungen.OB_TB_LAEUFT, aufgabe, fertig)
+
+    def testbilder_pruefen(self) -> None:
+        """Das sortierte Ziel mit der Erwartung vergleichen; Ergebnis zeigen,
+        auf Wunsch den Pruefbericht im Browser oeffnen."""
+        test = testbilder.testordner_von(Path(self.start.ziel.text())) if self.start.ziel.text() else None
+        if test is None or self._hintergrund is not None:
+            return
+
+        def aufgabe(melden, stop):
+            return testbilder.pruefen(test, melden=melden, stop=stop)
+
+        def fertig(p, fehler: str) -> None:
+            if fehler:
+                self.meldung(fehler)
+                return
+            self.meldung(meldungen.tb_pruef_zusammenfassung(p.richtig, p.erwartet, len(p.befunde), p.verloren), gut=p.ok)
+            ja, _ = frage(self, meldungen.OB_TB_PRUEF_TITEL, testbilder.pruef_text(p, 8),
+                          ja="Prüfbericht öffnen", nein="Schließen")
+            if ja and p.bericht is not None:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(p.bericht)))
+
+        self._im_hintergrund(meldungen.OB_TB_PRUEFT, aufgabe, fertig)
+
+    def _im_hintergrund(self, titel: str, aufgabe, fertig) -> None:
+        """aufgabe(melden, stop) in einem eigenen Strang, mit Fortschritt und
+        „Abbrechen“; fertig(ergebnis, fehlertext) danach im Fenster-Strang."""
+        stop = threading.Event()
+        boten = _Boten()
+        fortschritt = QProgressDialog(titel, "Abbrechen", 0, 1000, self)
+        fortschritt.setWindowTitle("fotosort")
+        fortschritt.setWindowModality(Qt.WindowModality.WindowModal)
+        fortschritt.setMinimumDuration(0)
+        fortschritt.setAutoClose(False)
+        fortschritt.setAutoReset(False)
+        fortschritt.setMinimumWidth(460)
+        fortschritt.canceled.connect(stop.set)
+
+        def zeigen(text: str, erledigt: int, gesamt: int) -> None:
+            fortschritt.setLabelText(meldungen.tb_fortschritt(text, erledigt, gesamt))
+            fortschritt.setValue(int(erledigt * 1000 / gesamt) if gesamt else 0)
+
+        def ende(ergebnis, fehler: str) -> None:
+            self._hintergrund = None
+            fortschritt.close()
+            fertig(ergebnis, fehler)
+
+        boten.fortschritt.connect(zeigen)
+        boten.fertig.connect(ende)
+
+        def lauf() -> None:
+            try:
+                ergebnis = aufgabe(lambda t, a, b: boten.fortschritt.emit(t, a, b), stop)
+            except FotosortFehler as f:
+                boten.fertig.emit(None, str(f))
+            except Exception as f:  # noqa: BLE001 - das Fenster meldet, statt abzustuerzen
+                boten.fertig.emit(None, f"{type(f).__name__}: {f}")
+            else:
+                boten.fertig.emit(ergebnis, "")
+
+        strang = threading.Thread(target=lauf, name="fotosort-testbilder", daemon=True)
+        self._hintergrund = (strang, stop, boten, fortschritt)
+        strang.start()
+        fortschritt.show()
+
+    def _hintergrund_anhalten(self, sekunden: float = 30.0) -> None:
+        """Fenster zu: die Testbilder-Arbeit anhalten und auf sie warten."""
+        if self._hintergrund is None:
+            return
+        strang, stop, _boten, _fortschritt = self._hintergrund
+        stop.set()
+        ende = time.monotonic() + sekunden
+        while strang.is_alive() and time.monotonic() < ende:
+            QApplication.processEvents()
+            strang.join(0.05)
 
     def profil_gewaehlt(self) -> None:
         self.profil_gewaehlt_ = True
@@ -1383,6 +1520,9 @@ class Hauptfenster(QMainWindow):
         if any(z.get(s, 0) for s in ("geprueft", "duplikat_bestaetigt", "quelle_geloescht", "verschoben")):
             eintraege.append(("Archiv nachprüfen…", "ghost", self.nachpruefen, True))
         eintraege.append(("Archiv neu einlesen…", "ghost", self.neuaufbau, True))
+        ziel = self.zustand.get("ziel") or self.start.ziel.text()
+        if ziel and testbilder.testordner_von(Path(ziel)) is not None:
+            eintraege.append((meldungen.OB_TB_PRUEFEN_UEBERSICHT, "secondary", self.testbilder_pruefen, True))
         eintraege.append(("Einstellungen", "secondary", self.einstellungen_oeffnen, True))
         eintraege.append(("Startseite", "secondary", lambda: self.laden("start"), True))
         self.aktionen_setzen(eintraege)

@@ -17,7 +17,7 @@ der CI gegen das Windows-Paket.
 
 | Bild | Ansicht |
 |---|---|
-| [01](01-startseite-leer.png) | Startseite, leer |
+| [01](01-startseite-leer.png) | Startseite, leer; rechts die Karte „Ausprobieren“ mit den Testbildern (seit v0.12) |
 | [02](02-startseite-ausgefuellt.png) | Startseite mit Ziel, Quelle, Modus und Profil |
 | [03](03-uebersicht-nach-scan.png) | Übersicht nach dem Scan (Schritte, Zähler, Karten) |
 | [04](04-uebersicht-nach-analyse-kameras.png) | Übersicht nach der Analyse mit Kamera-Tabelle (Alias tippbar) |

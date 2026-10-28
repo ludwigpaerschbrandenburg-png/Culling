@@ -60,6 +60,7 @@ def test_alle_unterbefehle_aus_der_spec_gibt_es():
         "messen",
         "fenster",
         "arbeit",
+        "testbilder",       # seit v0.12 (SPEC §8, §11)
     }
 
 

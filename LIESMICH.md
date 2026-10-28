@@ -105,6 +105,36 @@ ExifTool im Anhang am Ende dieser Anleitung.
 Das Programm ist vorsichtig gebaut, aber ein Probelauf zeigt Ihnen, was passiert,
 bevor es um Ihre Bilder geht.
 
+### Am einfachsten zuerst: mit 5000 Testbildern üben
+
+Noch gefahrloser als mit Kopien eigener Fotos geht es mit den **Testbildern** des Programms:
+5000 künstliche Bilder, Videos und RAW-Dateien – kein einziges echtes Foto. **Auf jedem Bild
+steht, was es ist** (Dateityp, Gerät, Aufnahmezeit) **und wo es nach dem Sortieren liegen soll –
+und warum.** Dazu gibt es ein Archiv, in dem schon etwas liegt, damit auch die schwierigen Fälle
+vorkommen: Ordner in anderer Schreibweise, schon importierte Bilder, gleiche Namen, Videos über
+Mitternacht und Silvester, WhatsApp-Bilder und Bildschirmfotos, Scans, kaputte Kamerauhren.
+
+1. `start.bat` doppelklicken.
+2. Rechts auf der Startseite, in der Karte **„Ausprobieren“**, auf **„Testbilder anlegen…“**
+   klicken und einen Ordner wählen, zum Beispiel `D:\` oder den Desktop. Darin entsteht der neue
+   Ordner `fotosort Testbilder` (rund 400 MB). Nach „Anlegen“ dauert es ein bis drei Minuten.
+3. Danach sind Zielordner (`…\fotosort Testbilder\Ziel`) und Quelle
+   (`…\fotosort Testbilder\Quelle`) schon eingetragen. **„Los geht's“** drücken. Die Frage
+   „Zielordner ist nicht leer“ mit **„Weiter“** beantworten – im Testziel liegt absichtlich schon
+   etwas. Dann die Schritte wie unten beschrieben durchlaufen lassen: Analyse, Kopieren, Prüfen.
+   Aufräumen geht auch – es betrifft nur die Testbilder.
+4. In der Übersicht **„Testbilder: Ergebnis prüfen“** drücken (oder auf der Startseite
+   „Ergebnis prüfen“). Das Programm vergleicht jede Datei im Ziel mit der Liste, sagt, ob alles
+   stimmt, und öffnet auf Wunsch den ausführlichen **Prüfbericht** im Browser.
+5. Im Explorer durch `…\fotosort Testbilder\Ziel` klicken: Jedes Bild sagt selbst, ob es am
+   richtigen Platz liegt. RAW-, iPhone- und Videodateien zeigen ihre Beschriftung im Reiter
+   „Sichten“. `Übersicht.html` im Testordner listet alle Dateien mit ihrer Erwartung,
+   `Erwartung.csv` dasselbe für Excel.
+
+Die Testbilder lassen sich nur in ihr eigenes Ziel sortieren, nie in ein echtes Archiv – das
+Programm weigert sich. Ist der Test vorbei: auf der Startseite „Archiv verwerfen…“ (dann vergisst
+das Programm den Testlauf) und danach den ganzen Ordner `fotosort Testbilder` löschen.
+
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
@@ -365,9 +395,12 @@ Alles, was der geführte Ablauf tut, gibt es auch als einzelne Befehle. Dazu ein
 Eingabeaufforderungs-Fenster öffnen (Windows-Taste, `cmd` tippen, Enter), in den
 Ordner wechseln (`cd C:\fotosort`) und `fotosort.bat` mit dem Befehl aufrufen.
 Jeder Befehl braucht `--ziel <Archivordner>`; darüber findet das Programm sein
-Gedächtnis (die Datenbank, Abschnitt 7).
+Gedächtnis (die Datenbank, Abschnitt 7). Nur `testbilder` nicht: Er arbeitet in seinem eigenen
+Ordner.
 
 ```
+fotosort.bat testbilder D:\Testbilder                    (5000 beschriftete Testbilder anlegen; --anzahl N fuer weniger)
+fotosort.bat testbilder D:\Testbilder --pruefen           (nach dem Sortieren: liegt alles, wo es auf den Bildern steht?)
 fotosort.bat scan       --quelle D:\Chaos --quelle E:\Karte --ziel D:\Archiv
 fotosort.bat scan       --ziel D:\Archiv                    (alle bekannten Quellen erneut)
 fotosort.bat analyse    --ziel D:\Archiv                    (ExifTool-Prozesse nach Profil; --prozesse N erzwingt eine Zahl)
