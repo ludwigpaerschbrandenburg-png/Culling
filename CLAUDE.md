@@ -101,3 +101,6 @@ Der Nutzer ist kein Programmierer.
 - Ergebnisse und Bedienung ohne Fachbegriffe erklären.
 - Wenn ein Fachbegriff unvermeidlich ist, in einem Halbsatz erklären, was er bedeutet.
 - Keine Code-Auszüge als Antwort auf „funktioniert es?" — sondern sagen, was passiert ist.
+- **Zwischenstände mit Bildschirmfotos zeigen:** Während der Arbeit immer wieder Screenshots
+  schicken (Fenster, Ergebnisse, Berichte) – durchgehend, nicht erst am Ende. Nur vom
+  künstlichen Testbaum oder den Testbildern, nie von echten Fotos.
