@@ -14,7 +14,10 @@ jobs:
   tests:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Unter Windows dauern die Tests seit v0.12 (Testbilder) 20-26 Minuten, auf
+    # einer langsamen Maschine knapp 40 - mit 40 wurde ein Lauf kurz vor dem
+    # Ende abgebrochen. Einzelne Tests haengen weiter hoechstens 300 s (--timeout).
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
