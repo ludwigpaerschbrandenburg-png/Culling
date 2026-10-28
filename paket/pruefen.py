@@ -26,7 +26,9 @@ Nur unter Windows (GitHub Actions) laeuft das Paket wirklich:
   7. Ein Schritt als Arbeitsprozess, gestartet wie vom Fenster (pythonw.exe).
   8. Testbilder (seit v0.12): 300 beschriftete Testbilder anlegen, mit
      fotosort.bat sortieren und pruefen - alle muessen dort liegen, wo es
-     auf ihnen steht.
+     auf ihnen steht. Dazu eine Probe wie die Karte "Ausprobieren" im
+     Fenster: Qt mit der normalen Darstellung von Windows, gezeichnet in
+     einem Hintergrund-Strang - die Schrift muss lesbar sein.
 
 Aufruf:
     python paket/pruefen.py <paketordner> <arbeitsordner>
@@ -65,6 +67,38 @@ PFLICHT = [
 STATIC = ["index.html", "app.js", "app.css", "styles.css", "fonts.css", "fonts/Inter-latin.woff2",
           "fonts/Inter-Regular.ttf", "fonts/Inter-Medium.ttf", "fonts/Inter-SemiBold.ttf"]
 PSF = "Python Software Foundation"
+# Schritt 8: Testbilder zeichnen wie die Karte "Ausprobieren" im Fenster - in
+# einem Hintergrund-Strang, mit der Anwendung des Fensters (unter Windows die
+# normale Darstellung). Zwei gleich lange Beschriftungen muessen verschieden
+# aussehen (ohne Schrift malt Qt fuer jeden Buchstaben dasselbe Kaestchen).
+HINTERGRUND_GUT = "Schrift im Hintergrund lesbar"
+HINTERGRUND_PROBE = f"""
+import threading
+from PySide6.QtWidgets import QApplication
+from fotosort import testbilder
+
+app = QApplication([])
+ergebnis = []
+
+
+def zeichnen():
+    try:
+        testbilder.qt_bereit()
+        testbilder.schrift_pruefen()
+        e = {{"kopf": "Testbild 0133 von 300", "kategorie": "Ohne Datum", "felder": [("Datei", "download (6).jpg", False)],
+             "farbe": "#4f5b66", "fuss": ""}}
+        a = testbilder.zeichnen(e, 600, 400)
+        b = testbilder.zeichnen(dict(e, kopf="Testbild 0136 von 300", felder=[("Datei", "download (8).jpg", False)]), 600, 400)
+        ergebnis.append("{HINTERGRUND_GUT}" if a != b else "zwei Beschriftungen ergeben dasselbe Bild")
+    except Exception as fehler:
+        ergebnis.append(f"Fehler: {{fehler}}")
+
+
+strang = threading.Thread(target=zeichnen)
+strang.start()
+strang.join()
+print(ergebnis[0], "- Darstellung", app.platformName())
+"""
 
 
 def _lauf(befehl: list[str], umgebung: dict, cwd: Path, zeit: int = 600) -> tuple[int, str]:
@@ -491,6 +525,9 @@ def main() -> int:
         rc, text = _bat(bat, ["testbilder", str(test), "--pruefen"], umgebung, start_ordner)
         if rc != 0 or "Alles richtig" not in text:
             fehler.append(f"Testbilder liegen unter Windows nicht dort, wo es auf ihnen steht:\n{text[-3000:]}")
+    rc, text = _lauf([str(python), "-X", "utf8", "-c", HINTERGRUND_PROBE], umgebung, start_ordner, zeit=120)
+    if rc != 0 or HINTERGRUND_GUT not in text:
+        fehler.append(f"Testbilder im Hintergrund-Strang (Karte im Fenster): Rueckgabewert {rc}\n{text[-2000:]}")
     return _ende(fehler)
 
 

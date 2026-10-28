@@ -124,6 +124,79 @@ def test_schriftprobe_schlaegt_an_wenn_qt_keine_schrift_zeichnet(monkeypatch):
         testbilder.schrift_pruefen()
 
 
+def test_schriftprobe_erkennt_kaestchen_statt_buchstaben(monkeypatch):
+    """Ohne Schriften malt Qt fuer jeden Buchstaben dasselbe Kaestchen - so im
+    Windows-Paket der CI (Qt ohne Bildschirm). Dann sehen gleich lange Texte
+    gleich aus, und Testbilder mit gleich langer Beschriftung waren gleich
+    (Nr 107, 124, 133, 136). Die Schriftprobe muss auch das erkennen."""
+    testbilder.qt_bereit()
+    from PySide6.QtGui import QPainter
+
+    def kaestchen(self, rechteck, _ausrichtung, text):
+        for i in range(len(text)):
+            self.drawRect(rechteck.x() + 12 * i, rechteck.y() + 10, 9, 18)
+
+    monkeypatch.setattr(QPainter, "drawText", kaestchen)
+    with pytest.raises(FotosortFehler, match="keine lesbare Schrift"):
+        testbilder.schrift_pruefen()
+
+
+_OHNE_SCHRIFTEN = """
+import sys
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+from fotosort import FotosortFehler, testbilder
+
+app = QApplication([])
+try:
+    testbilder.schrift_pruefen()
+    print("probe: nichts gemerkt")
+except FotosortFehler:
+    print("probe: abgelehnt")
+if len(sys.argv) > 1:
+    testbilder.schriften_nachladen(Path(sys.argv[1]))
+else:
+    testbilder.qt_bereit()
+print("nachgeladen", len(testbilder._FAMILIEN))
+testbilder.schrift_pruefen()
+e = {"kopf": "Testbild 0133 von 300", "kategorie": "Ohne Datum", "felder": [], "farbe": "#4f5b66", "fuss": ""}
+print("verschieden", testbilder.zeichnen(e, 600, 400) != testbilder.zeichnen(dict(e, kopf="Testbild 0136 von 300"), 600, 400))
+"""
+
+
+def test_ohne_schriften_laedt_qt_sie_nach(tmp_path):
+    """Echtes Qt in einem eigenen Prozess, ohne jede Schrift - wie Qt ohne
+    Bildschirm unter Windows: Die Schriftprobe lehnt ab. Nach dem Nachladen
+    (unter Windows macht qt_bereit das selbst, aus dem Schriftordner von
+    Windows) zeichnet Qt echte Buchstaben, und die Bilder sind verschieden."""
+    import subprocess
+    import sys
+
+    from test_kopieren import SRC
+    umgebung = dict(os.environ, PYTHONPATH=str(SRC), QT_QPA_PLATFORM="offscreen")
+    if sys.platform.startswith("win"):
+        leer = tmp_path / "keine Schriften"   # Qt ohne Bildschirm sucht Schriften nur hier - wie in der CI
+        leer.mkdir()
+        umgebung["QT_QPA_FONTDIR"], zusatz = str(leer), []
+    else:
+        dejavu = next((o for o in (Path("/usr/share/fonts/truetype/dejavu"), Path("/usr/share/fonts/dejavu"),
+                                   Path("/usr/share/fonts/TTF")) if (o / "DejaVuSans.ttf").is_file()), None)
+        if dejavu is None:
+            pytest.skip("Schrift DejaVu Sans ist hier nicht installiert")
+        # fontconfig ohne einen einzigen Schriftordner: Qt findet keine Schrift
+        leer = tmp_path / "fonts.conf"
+        leer.write_text(f"<?xml version='1.0'?><fontconfig><cachedir>{tmp_path / 'cache'}</cachedir></fontconfig>\n",
+                        encoding="utf-8")
+        umgebung["FONTCONFIG_FILE"], zusatz = str(leer), [str(dejavu)]
+    aus = subprocess.run([sys.executable, "-c", _OHNE_SCHRIFTEN, *zusatz], capture_output=True, text=True, timeout=120,
+                         env=umgebung)
+    zeilen = aus.stdout.splitlines()
+    assert "probe: abgelehnt" in zeilen, aus.stdout + aus.stderr
+    assert aus.returncode == 0, aus.stdout + aus.stderr
+    assert any(z.startswith("nachgeladen ") and int(z.split()[1]) > 0 for z in zeilen), aus.stdout
+    assert "verschieden True" in zeilen, aus.stdout + aus.stderr
+
+
 def test_eindeutigkeit_nur_absichtliche_kopien_duerfen_gleich_sein():
     a = testbilder.Datei("Quelle/a.jpg", "foto", "jpg", "kamera", nr=1, blake3="aa")
     b = testbilder.Datei("Quelle/b.jpg", "foto", "jpg", "kamera", nr=2, blake3="bb")

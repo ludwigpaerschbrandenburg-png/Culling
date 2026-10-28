@@ -1235,9 +1235,48 @@ def qt_bereit() -> None:
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         global _APP
         _APP = QApplication([])
+    schriften_nachladen()
 
 
 _APP = None
+
+# Bekannte Schriften fuer schriften_nachladen: Windows, dann Linux
+_SCHRIFTEN = ("segoeui.ttf", "segoeuib.ttf", "arial.ttf", "arialbd.ttf", "DejaVuSans.ttf", "DejaVuSans-Bold.ttf")
+# Die Schriftfamilien, die schriften_nachladen geladen hat - leer: die von Qt
+_FAMILIEN: list[str] = []
+
+
+def schrift(px: float, fett: bool = False):
+    """Die Schrift der Beschriftung, px Pixel hoch."""
+    from PySide6.QtGui import QFont
+    f = QFont()
+    if _FAMILIEN:
+        f.setFamilies(_FAMILIEN)
+    f.setPixelSize(max(6, int(px)))
+    f.setBold(fett)
+    return f
+
+
+def schriften_nachladen(ordner: Path | None = None) -> int:
+    """Qt ohne Bildschirm (offscreen) findet unter Windows keine Schriften und
+    malt dann fuer jeden Buchstaben dasselbe Kaestchen: Gleich lange Texte
+    saehen gleich aus (so im Windows-Paket der CI, v0.12). Dann bekannte
+    Schriften aus ordner nachladen - ohne Angabe unter Windows aus dessen
+    Schriftordner. Gibt zurueck, wie viele Schriftfamilien nachgeladen sind."""
+    from PySide6.QtGui import QFontDatabase
+    if _schrift_lesbar():
+        return 0
+    if ordner is None:
+        if not sys.platform.startswith("win"):
+            return 0
+        ordner = Path(os.environ.get("WINDIR") or "C:/Windows") / "Fonts"
+    for name in _SCHRIFTEN:
+        if (ordner / name).is_file():
+            nr = QFontDatabase.addApplicationFont(str(ordner / name))
+            for familie in QFontDatabase.applicationFontFamilies(nr) if nr >= 0 else []:
+                if familie not in _FAMILIEN:
+                    _FAMILIEN.append(familie)
+    return len(_FAMILIEN)
 
 
 def etikett(d: Datei, gesamt: int) -> dict:
@@ -1282,7 +1321,7 @@ def soll_text(d: Datei) -> str:
 def zeichnen(e: dict, breite: int, hoehe: int):
     """Die Beschriftung als QImage: farbiger Kopf, darunter die Felder."""
     from PySide6.QtCore import QRect, Qt
-    from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter
+    from PySide6.QtGui import QColor, QFontMetrics, QImage, QPainter
 
     s = hoehe / 800.0
     bild = QImage(breite, hoehe, QImage.Format.Format_RGB32)
@@ -1294,12 +1333,6 @@ def zeichnen(e: dict, breite: int, hoehe: int):
     band = int(120 * s)
     p.fillRect(0, 0, breite, band, grund)
     rand = int(40 * s)
-
-    def schrift(px: float, fett: bool = False) -> QFont:
-        f = QFont()
-        f.setPixelSize(max(6, int(px)))
-        f.setBold(fett)
-        return f
 
     p.setPen(QColor("white"))
     p.setFont(schrift(44 * s, True))
@@ -1366,28 +1399,33 @@ def formate_pruefen() -> None:
             raise FotosortFehler(meldungen.tb_format_fehlt(form))
 
 
-def schrift_pruefen() -> None:
-    """Zeichnet Qt hier lesbare Schrift? Zwei verschiedene Texte muessen
-    verschieden aussehen - sonst waeren die Testbilder unbeschriftet und viele
-    davon gleich (gesehen im Windows-Paket der CI, v0.12)."""
+def _schrift_lesbar() -> bool:
+    """Zeichnet Qt hier lesbare Schrift? Zwei verschiedene, gleich lange
+    Texte muessen verschieden aussehen - sonst waeren die Testbilder
+    unbeschriftet oder voller Kaestchen und viele davon gleich (gesehen im
+    Windows-Paket der CI, v0.12). Gleich lang, weil Qt ohne Schriften fuer
+    jeden Buchstaben dasselbe Kaestchen malt."""
     from PySide6.QtCore import QRect, Qt
-    from PySide6.QtGui import QColor, QFont, QImage, QPainter
+    from PySide6.QtGui import QColor, QImage, QPainter
 
     def bild(text: str):
         b = QImage(260, 40, QImage.Format.Format_RGB32)
         b.fill(QColor("white"))
         if text:
             p = QPainter(b)
-            f = QFont()
-            f.setPixelSize(20)
-            p.setFont(f)
+            p.setFont(schrift(20))
             p.setPen(QColor("black"))
             p.drawText(QRect(0, 0, 260, 40), int(Qt.AlignmentFlag.AlignCenter), text)
             p.end()
         return b
 
-    leer, a, b = bild(""), bild("Testbild 0123 Äpfel"), bild("Testbild 4567 Öfen")
-    if a == leer or b == leer or a == b:
+    leer, a, b = bild(""), bild("Testbild 0123 Äpfel"), bild("Testbild 4567 Rüben")
+    return not (a == leer or b == leer or a == b)
+
+
+def schrift_pruefen() -> None:
+    """Ohne lesbare Schrift sofort mit klarer Meldung abbrechen."""
+    if not _schrift_lesbar():
         raise FotosortFehler(meldungen.TB_KEINE_SCHRIFT)
 
 

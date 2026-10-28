@@ -141,6 +141,22 @@ def test_paketpruefung_verlangt_die_bildformate():
         assert f"lib/PySide6/plugins/imageformats/{name}.dll" in pruefen.PFLICHT
 
 
+def test_paketpruefung_zeichnet_testbilder_im_hintergrund():
+    """Die Karte „Ausprobieren“ zeichnet in einem Hintergrund-Strang. Die
+    Paketpruefung probiert das unter Windows mit der normalen Darstellung;
+    hier laeuft dieselbe Probe (ohne Bildschirm), damit sie in der CI nicht
+    an einem Tippfehler scheitert."""
+    import os
+
+    pruefen = _modul("pruefen")
+    src = Path(__file__).resolve().parent.parent / "src"
+    aus = subprocess.run([sys.executable, "-X", "utf8", "-c", pruefen.HINTERGRUND_PROBE], capture_output=True,
+                         text=True, encoding="utf-8", timeout=120,
+                         env=dict(os.environ, PYTHONPATH=str(src), QT_QPA_PLATFORM="offscreen"))
+    assert aus.returncode == 0, aus.stdout + aus.stderr
+    assert pruefen.HINTERGRUND_GUT in aus.stdout, aus.stdout + aus.stderr
+
+
 def test_startdateien_mit_crlf_und_ohne_klammerbloecke(tmp_path):
     """cmd.exe braucht CRLF fuer Sprungmarken; Klammerbloecke wuerden an einem
     Pfad wie "...\\fotosort-windows (1)\\..." zerbrechen."""

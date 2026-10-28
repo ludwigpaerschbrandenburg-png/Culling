@@ -901,6 +901,12 @@ Bildern, die du alle sortieren lässt, von meinem PC lokal.“
 - [x] Gefundener Fehler (Test zuerst): Im Windows-Paket fehlten die Qt-Bildformate – „Sichten“
   zeigte unter Windows keine Fotos. Jetzt dabei; die Paketprüfung legt unter Windows 300
   Testbilder an, sortiert und prüft sie.
+- [x] Gefundener Fehler im Erzeuger (Test zuerst): Unter Windows waren beim ersten Lauf der
+  Paketprüfung vier von 300 Testbildern Byte für Byte gleich einem anderen (Nr. 107, 124, 133,
+  136) – Qt ohne Bildschirm findet dort keine Schriften und malt für jeden Buchstaben dasselbe
+  Kästchen, gleich lange Beschriftungen sahen gleich aus. Das Sortieren war richtig: Es hat die
+  gleichen Bilder als Duplikate erkannt, nichts ging verloren. Jetzt: Schriftprobe mit gleich
+  langen Texten, unter Windows Schriften nachladen, Eindeutigkeit nach dem Anlegen prüfen.
 - [ ] Volle Tests, CI, Release v0.12.
 - [ ] Beobachtung, nicht geändert: Liegen „Bild.jpg“ und „Bild - Kopie.jpg“ (gleicher Inhalt) im
   selben Ordner, kommt der Inhalt unter dem Namen der Kopie ins Archiv – sie steht in der

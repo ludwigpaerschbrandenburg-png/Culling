@@ -135,6 +135,8 @@ Die Testbilder lassen sich nur in ihr eigenes Ziel sortieren, nie in ein echtes 
 Programm weigert sich. Ist der Test vorbei: auf der Startseite „Archiv verwerfen…“ (dann vergisst
 das Programm den Testlauf) und danach den ganzen Ordner `fotosort Testbilder` löschen.
 
+### Danach: mit Kopien eigener Fotos
+
 1. Einen Ordner `D:\Probe\Quelle` anlegen und **Kopien** von etwa 50 Fotos und
    Videos hineinlegen, gern durcheinander und in Unterordnern.
 2. Einen leeren Ordner `D:\Probe\Archiv` anlegen. Das wird das Ziel.
