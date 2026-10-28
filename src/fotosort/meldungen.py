@@ -3076,9 +3076,10 @@ TB_ANLEITUNG = (
     "So geht der Test:",
     "1. fotosort öffnen. Als Zielordner „{ziel}“ wählen, als Quelle „{quelle}“ (das Fenster trägt beides"
     " schon ein, wenn die Testbilder dort angelegt wurden).",
-    "2. „Los geht's“ drücken (die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten – dort liegt"
-    " absichtlich schon etwas) und die Schritte durchlaufen lassen: Scan, Analyse, Kopieren, Prüfen."
-    " Aufräumen geht auch – es betrifft nur diese Testbilder.",
+    "2. „Los geht's“ drücken und die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten – dort liegt"
+    " absichtlich schon etwas. Beim Ablauf „Alles automatisch“ einmal das Wort „verschieben“ eintippen: Dann"
+    " laufen Scan, Analyse, Kopieren, Prüfen und Aufräumen von selbst (das Aufräumen betrifft nur diese"
+    " Testbilder). Bei „Schritt für Schritt“ die Schritte selbst nacheinander starten.",
     "3. „Testbilder: Ergebnis prüfen“ drücken. Das Programm vergleicht jede Datei im Ziel mit dieser Liste"
     " und schreibt den Prüfbericht.",
     "Auf jedem Bild steht, wohin es gehört und warum – einfach im Ziel durch die Ordner klicken.",
@@ -3168,8 +3169,9 @@ def ob_tb_frage(ordner, bilder: int) -> str:
 
 def ob_tb_fertig(ordner) -> str:
     return (f"Testbilder angelegt in „{ordner}“. Zielordner und Quelle sind eingetragen – jetzt „Los geht's“"
-            " drücken (die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten: Dort liegt absichtlich"
-            " schon etwas) und alle Schritte durchlaufen lassen. Danach „Ergebnis prüfen“.")
+            " drücken, die Frage „Zielordner ist nicht leer“ mit „Weiter“ beantworten (dort liegt absichtlich"
+            " schon etwas) und bei „Alles automatisch“ einmal „verschieben“ eintippen. Dann läuft alles von"
+            " selbst. Danach „Ergebnis prüfen“.")
 
 TB_KEINE_SCHRIFT = ("Qt zeichnet hier keine lesbare Schrift (Schriftprobe: zwei verschiedene Texte sehen gleich aus)."
                     " Die Testbilder wären unbeschriftet und viele gleich – deshalb wird nichts angelegt.")
