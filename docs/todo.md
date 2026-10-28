@@ -932,6 +932,12 @@ meine Bilder nehmen?“ – Ja; vorher drei Kleinigkeiten.
   („Doppelte bestätigt“, „aus der Quelle entfernt“, „geprüft“).
 - [x] LIESMICH: „Der große Lauf mit allen Fotos“ – Sicherung vorher, Platz, Handy-Fotos zuerst
   auf den PC, OneDrive, Modus „Kopieren“, nachsehen, erst dann aufräumen, Archiv sichern.
+- [x] Gefunden in der Windows-CI (Test zuerst): Endete ein Schritt genau in dem Augenblick, in
+  dem das Fenster nach ihm sah, hieß er „abgestürzt“ statt „fertig“ – das Fenster hatte
+  „läuft“ gelesen, der Arbeitsprozess meldete sich gleich danach ab, und der zweite Blick fand
+  ihn nicht mehr. Die Meldung „abgestürzt“ überschrieb dann sogar seine Endmeldung. Jetzt liest
+  das Fenster vor dem Urteil „abgestürzt“ die Statusdatei noch einmal. An den Bildern änderte
+  das nie etwas: Es ging nur um die Anzeige.
 - [ ] Volle Tests, CI, Release v0.12.1.
 
 ## Ohne feste Phase

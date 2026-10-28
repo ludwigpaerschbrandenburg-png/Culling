@@ -366,6 +366,16 @@ class Ablauf:
                                  steuerung.json_lesen(self.auftrag_datei) or {}, st.get("prozess_start"))
             lebt = self.lauf_lebt()
             if not lebt and zustand not in ENDZUSTAENDE:
+                # Erst jetzt, da der Prozess weg ist oder sein Ende gemeldet hat,
+                # steht sein letztes Wort sicher in der Statusdatei. Hat er sich
+                # gleich nach dem ersten Lesen mit "fertig" abgemeldet, war es
+                # kein Absturz (Windows-CI, v0.12.1: ein fertiger Lauf hiess sonst
+                # "abgestuerzt", und das ueberschrieb seine Endmeldung).
+                zuletzt = steuerung.json_lesen(self.status_datei) or {}
+                if zuletzt.get("zustand") in ENDZUSTAENDE:
+                    st, zustand = zuletzt, str(zuletzt["zustand"])
+                    schritt = str(st.get("schritt") or schritt)
+            if not lebt and zustand not in ENDZUSTAENDE:
                 # Verschwunden, ohne sich abzumelden (Absturz, Stromausfall,
                 # Task-Manager) - oder ein Prozess, den niemand mehr kennt.
                 zustand = ZUSTAND_ABGESTUERZT

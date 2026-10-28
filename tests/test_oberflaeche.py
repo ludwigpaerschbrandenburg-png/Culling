@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import testbaum
-from fotosort import cli, db, sichten, steuerung
+from fotosort import cli, db, prozesse, sichten, steuerung
 from fotosort.oberflaeche import ablauf as ablauf_modul
 from fotosort.oberflaeche import server as server_modul
 from test_kopieren import _zeilen
@@ -670,6 +670,89 @@ def test_verschwundener_prozess_gilt_als_abgestuerzt(tmp_path):
     assert "unerwartet" in l["zustand_text"]
     assert steuerung.json_lesen(ordner / "status.json")["zustand"] == "abgestuerzt"
     assert ablauf_modul.pid_lebt(0) is False and ablauf_modul.pid_lebt(os.getpid()) is True
+
+
+def _fertig_genau_jetzt(monkeypatch, status: Path, dann=lambda: None) -> list:
+    """Der Arbeitsprozess meldet sich genau zwischen zwei Blicken des Fensters
+    ab: Gleich nach dem ersten Lesen von "laeuft" schreibt er "fertig" (und
+    endet mit "dann")."""
+    echt = steuerung.json_lesen
+    gemeldet: list = []
+
+    def lesen(pfad):
+        daten = echt(pfad)
+        if Path(pfad) == status and not gemeldet and (daten or {}).get("zustand") == "laeuft":
+            gemeldet.append(1)
+            steuerung.json_schreiben(status, dict(daten, zustand="fertig", rc=0, aktualisiert=time.time()))
+            dann()
+        return daten
+
+    monkeypatch.setattr(steuerung, "json_lesen", lesen)
+    return gemeldet
+
+
+def _status_laeuft(status: Path, pid: int, start: float | None) -> None:
+    jetzt = time.time()
+    steuerung.json_schreiben(status, {
+        "schritt": "kopieren", "zustand": "laeuft", "pid": pid, "prozess_start": start, "beginn": jetzt,
+        "aktualisiert": jetzt, "dateien": 9, "gesamt": 10, "bytes": 900, "gesamt_bytes": 1000, "sekunden": 1.0,
+        "lauf": 1, "rc": None, "hinweis": "",
+    })
+
+
+def test_uebernommener_lauf_der_gerade_endet_gilt_nicht_als_abgestuerzt(tmp_path, monkeypatch):
+    """Windows-CI (v0.12.1): Ein Fenster hatte einen pausierten Lauf
+    uebernommen; der Lauf ging zu Ende - und hiess "abgestuerzt". Das Fenster
+    las "laeuft", der Arbeitsprozess schrieb sofort danach "fertig", und der
+    zweite Blick (lebt er noch?) sah "fertig" = lebt nicht mehr. Aus dem alten
+    "laeuft" wurde ein Absturz - und der ueberschrieb die Endmeldung."""
+    ordner = tmp_path / "ob"
+    ordner.mkdir()
+    status = ordner / "status.json"
+    _status_laeuft(status, os.getpid(), prozesse.startzeit(os.getpid()))
+    ab = ablauf_modul.Ablauf(ordner=ordner)
+    assert ab.lauf is not None and ab.lauf.prozess is None        # uebernommen wie von einem frueheren Fenster
+    gemeldet = _fertig_genau_jetzt(monkeypatch, status)
+    l = ab.lauf_status()
+    assert gemeldet
+    assert l["zustand"] == "fertig" and l["aktiv"] is False and ab.lauf is None
+    assert steuerung.json_lesen(status)["zustand"] == "fertig"
+
+
+def test_eigener_lauf_der_gerade_endet_gilt_nicht_als_abgestuerzt(tmp_path, monkeypatch):
+    """Dasselbe mit dem Prozess, den dieses Fenster selbst gestartet hat: Er
+    schreibt "fertig" und ist schon weg, bevor das Fenster nach ihm fragt."""
+    ordner = tmp_path / "ob"
+    ordner.mkdir()
+    status = ordner / "status.json"
+    prozess = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        ab = ablauf_modul.Ablauf(ordner=ordner)
+        _status_laeuft(status, prozess.pid, None)
+        ab.lauf = ablauf_modul.Lauf("kopieren", prozess, prozess.pid, time.time(), {})
+        gemeldet = _fertig_genau_jetzt(monkeypatch, status, dann=prozess.wait)
+        l = ab.lauf_status()
+    finally:
+        prozess.wait()
+    assert gemeldet
+    assert l["zustand"] == "fertig" and l["aktiv"] is False and ab.lauf is None
+    assert steuerung.json_lesen(status)["zustand"] == "fertig"
+
+
+def test_lauf_ohne_endmeldung_gilt_weiter_als_abgestuerzt(tmp_path):
+    """Gegenprobe: Ist der eigene Prozess weg und steht in der Statusdatei
+    noch "laeuft", war es ein Absturz - daran aendert der zweite Blick nichts."""
+    ordner = tmp_path / "ob"
+    ordner.mkdir()
+    status = ordner / "status.json"
+    prozess = subprocess.Popen([sys.executable, "-c", "pass"])
+    prozess.wait()
+    ab = ablauf_modul.Ablauf(ordner=ordner)
+    _status_laeuft(status, prozess.pid, None)
+    ab.lauf = ablauf_modul.Lauf("kopieren", prozess, prozess.pid, time.time(), {})
+    l = ab.lauf_status()
+    assert l["zustand"] == "abgestuerzt" and l["aktiv"] is False and ab.lauf is None
+    assert steuerung.json_lesen(status)["zustand"] == "abgestuerzt"
 
 
 # ------------------------------------------------------------ Fenster --
