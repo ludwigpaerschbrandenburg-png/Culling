@@ -81,7 +81,7 @@ jobs:
             1. `fotosort-windows.zip` herunterladen. Tipp: vor dem Entpacken Rechtsklick auf die ZIP-Datei, "Eigenschaften", unten "Zulassen" anhaken, OK - dann fragt Windows beim Start nicht nach.
             2. Entpacken, zum Beispiel nach `C:\fotosort`.
             3. Im entpackten Ordner `start.bat` doppelklicken - es oeffnet sich das Programmfenster mit Knoepfen und Ordnerauswahl.
-            4. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - danach fuehrt das Fenster Schritt fuer Schritt.
+            4. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - bei "Alles automatisch" (Standard) einmal das Wort "verschieben" eintippen, dann laeuft alles von selbst bis zum Aufraeumen in den Ordner _geloescht_.
             5. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
 
             Gestartet wird nur das offizielle, signierte Python von python.org (Ordner `python`) und ExifTool (Ordner `exiftool`, Version siehe `exiftool\VERSION.txt`) - keine eigenen exe-Dateien. Meldet ein Virenscanner trotzdem etwas: LIESMICH, Abschnitt "Wenn der Virenscanner anschlaegt".

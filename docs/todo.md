@@ -964,7 +964,9 @@ an; auch das Aufräumen automatisch, nur in den Ordner `_geloescht_` (SPEC §8,
   ab …“, Schlussmeldung „Alles erledigt“.
 - [x] Doku: SPEC §4/§8/§11, `docs/entscheidungen.md`, LIESMICH (Tabelle, Übersicht, Testbilder,
   Kameranamen, Aufräumen, „Der große Lauf“), `docs/ideen.md`.
-- [ ] Volle Tests, Rundgang mit 5000 Testbildern (Bildschirmfotos), CI, Release v0.13.0.
+- [x] Volle Tests (1122 grün), Rundgang mit 5000 Testbildern im Fenster: nur „Los geht's“, „Weiter“
+  und das Wort, dann alle fünf Schritte von selbst; „Ergebnis prüfen“: 5.321 von 5.321 richtig, kein
+  Bild verloren. CI grün (Linux, Windows 1104 grün, Paket), Release v0.13.0 mit `fotosort-windows.zip`.
 
 ## Ohne feste Phase
 
