@@ -120,3 +120,23 @@ def sidecar_gehoert_zu(sidecar_name: str, haupt_name: str, konf) -> bool:
             if _muster(str(glob)).match(zusatz):
                 return True
     return False
+
+
+# Namen, die Windows, macOS und Browser einer Kopie geben. Von inhaltsgleichen
+# Dateien kommt die ohne solchen Zusatz ins Archiv (Entscheidung vom 28.10.2026,
+# SPEC Abschnitt 4 Phase 3).
+_KOPIE_VORN = re.compile(r"^(?:kopie|copy)(\s*\(\d+\))?\s+(?:von|of)\s+\S", re.IGNORECASE)
+_KOPIE_NUMMER = re.compile(r"(?:\s+-)?\s+(?:kopie|copy)(?:\s*\(\d+\)|\s+\d+)$|\s*\(\d+\)$", re.IGNORECASE)
+_KOPIE = re.compile(r"(?:\s+-)?\s+(?:kopie|copy)$", re.IGNORECASE)
+
+
+def kopie_rang(name: str) -> int:
+    """0 ohne Kopie-Zusatz, 1 Kopie („Bild - Kopie.jpg“, „Kopie von Bild.jpg“,
+    „Bild copy.jpg“), 2 Kopie mit Nummer („Bild - Kopie (2).jpg“, „Bild (1).jpg“)."""
+    stamm = _stamm(name).strip()
+    vorn = _KOPIE_VORN.match(stamm)
+    if vorn:
+        return 2 if vorn.group(1) else 1
+    if _KOPIE_NUMMER.search(stamm):
+        return 2
+    return 1 if _KOPIE.search(stamm) else 0

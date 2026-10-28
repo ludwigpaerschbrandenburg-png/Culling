@@ -1,6 +1,6 @@
 """fotosort - sortiert Fotos und Videos nach Aufnahmedatum und Kamera."""
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 
 
 class FotosortFehler(Exception):

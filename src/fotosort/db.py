@@ -81,7 +81,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: Anhebungen des Schemas: von Version -> SQL-Anweisungen, die eine Datenbank
 #: dieser Version auf Version + 1 heben. Eine aeltere Datenbank wird beim
@@ -105,6 +105,10 @@ MIGRATIONEN: dict[int, tuple[str, ...]] = {
         " AND NOT EXISTS (SELECT 1 FROM abgelegt a WHERE a.zielpfad = dateien.zielpfad"
         "   AND dateien.gefunden_in_lauf IS NOT NULL AND a.lauf >= dateien.gefunden_in_lauf)",
     ),
+    # v0.12.1: Rang des Kopie-Namens der Gruppe (dateitypen.kopie_rang) - von
+    # inhaltsgleichen Dateien kommt die ohne „ - Kopie“ ins Archiv. Noch nicht
+    # kopierte Zeilen bekommen ihn zu Beginn des Kopierens nachgetragen.
+    7: ("ALTER TABLE dateien ADD COLUMN kopie_rang INTEGER NOT NULL DEFAULT 0",),
 }
 VOR_SCHEMA = "fotosort.db.vor_schema_"   # Sicherung vor einer Anhebung, nie geloescht
 
@@ -140,7 +144,8 @@ CREATE TABLE IF NOT EXISTS dateien (
     umbenannt               INTEGER NOT NULL DEFAULT 0,
     gefunden_in_lauf        INTEGER,
     zuletzt_gesehen_in_lauf INTEGER,
-    schon_im_archiv         INTEGER NOT NULL DEFAULT 0
+    schon_im_archiv         INTEGER NOT NULL DEFAULT 0,
+    kopie_rang              INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
@@ -157,6 +162,8 @@ DROP INDEX IF EXISTS dateien_wurzel;
 DROP INDEX IF EXISTS dateien_zielpfad;
 CREATE INDEX IF NOT EXISTS dateien_hash ON dateien (hash);
 CREATE INDEX IF NOT EXISTS dateien_gruppe ON dateien (quellwurzel, gruppe, quellpfad);
+-- Kopier-Reihenfolge (seit v0.12.1): erst Namen ohne Kopie-Zusatz.
+CREATE INDEX IF NOT EXISTS dateien_kopie_reihe ON dateien (quellwurzel, kopie_rang, gruppe, quellpfad);
 -- Wo das Programm selbst eine Datei abgelegt hat (kopiert oder verschoben),
 -- und in welchem Lauf (seit v0.9, fuer "bereits importiert").
 CREATE TABLE IF NOT EXISTS abgelegt (
@@ -232,6 +239,12 @@ def text_pfad(text):
     if isinstance(text, str) and text.startswith(_ROH_KENNZEICHEN):
         return os.fsdecode(unquote_to_bytes(text[len(_ROH_KENNZEICHEN) :]))
     return text
+
+
+def _kopie_rang(gespeichert: str) -> int:
+    """Rang des Kopie-Namens (dateitypen.kopie_rang) aus dem gespeicherten Pfad
+    der Hauptdatei einer Gruppe - alle Zeilen der Gruppe bekommen denselben."""
+    return dateitypen.kopie_rang(Path(text_pfad(gespeichert)).name) if gespeichert else 0
 
 
 # ------------------------------------------------------------ Archiv-ID ----
@@ -1105,14 +1118,31 @@ class Datenbank:
         self.verbindung.execute(
             "UPDATE dateien SET kamera = ?, kamera_modell = ?, aufnahme_zeit = ?,"
             " datum_quelle = ?, datum_sicher = ?, datum_hinweis = ?, gruppe = ?,"
-            " zielpfad = ?, status = ?, fehlergrund = ? WHERE quellpfad = ?",
+            " zielpfad = ?, status = ?, fehlergrund = ?, kopie_rang = ? WHERE quellpfad = ?",
             (
                 kamera, kamera_modell, aufnahme_zeit, datum_quelle, int(datum_sicher),
                 datum_hinweis, pfad_text(gruppe), pfad_text(zielpfad) if zielpfad else "",
-                status, fehlergrund, pfad_text(quellpfad),
+                status, fehlergrund, _kopie_rang(pfad_text(gruppe) or pfad_text(quellpfad)), pfad_text(quellpfad),
             ),
         )
         self._vielleicht_schreiben()
+
+    def kopie_rang_nachtragen(self) -> int:
+        """Den Rang des Kopie-Namens (seit v0.12.1) fuer alle noch nicht
+        kopierten Zeilen nachtragen - auch in einem Archiv, das noch mit einem
+        aelteren Stand analysiert wurde. Gibt die Zahl geaenderter Zeilen zurueck."""
+        self.stapel_schreiben()
+        aenderungen = [
+            (rang, z["quellpfad"])
+            for z in self.verbindung.execute(
+                "SELECT quellpfad, gruppe, kopie_rang FROM dateien WHERE status = 'analysiert'")
+            if (rang := _kopie_rang(z["gruppe"] or z["quellpfad"])) != z["kopie_rang"]
+        ]
+        if aenderungen:
+            self._beginnen()
+            self.verbindung.executemany("UPDATE dateien SET kopie_rang = ? WHERE quellpfad = ?", aenderungen)
+            self.stapel_schreiben()
+        return len(aenderungen)
 
     def modelle_liste(self) -> list[tuple[str, str, int]]:
         """(Kameramodell, Ordnername, Anzahl) der analysierten, noch nicht
@@ -1222,18 +1252,22 @@ class Datenbank:
         z = self.verbindung.execute(sql, werte).fetchone()
         return int(z[0]), int(z[1])
 
-    def zu_kopieren(self, quellwurzel, ab_gruppe: str = "", ab_pfad: str = "", grenze: int = 2000) -> list[sqlite3.Row]:
-        """Naechste Zeilen einer Quelle in Kopierreihenfolge (Gruppe, Pfad).
+    def zu_kopieren(self, quellwurzel, ab_rang: int = -1, ab_gruppe: str = "", ab_pfad: str = "",
+                    grenze: int = 2000) -> list[sqlite3.Row]:
+        """Naechste Zeilen einer Quelle in Kopierreihenfolge (Rang des
+        Kopie-Namens, Gruppe, Pfad): Von inhaltsgleichen Dateien kommt die
+        zuerst eingereichte ins Archiv - so die ohne „ - Kopie“ (seit v0.12.1).
 
-        Gruppen bleiben zusammen, weil nach gruppe sortiert wird; der
-        Aufrufer traegt (gruppe, quellpfad) der letzten Zeile als Anker weiter.
+        Gruppen bleiben zusammen, weil alle Zeilen einer Gruppe denselben Rang
+        haben und nach gruppe sortiert wird; der Aufrufer traegt (kopie_rang,
+        gruppe, quellpfad) der letzten Zeile als Anker weiter.
         """
         self.stapel_schreiben()
         return self.verbindung.execute(
             "SELECT * FROM dateien WHERE quellwurzel = ? AND status = 'analysiert'"
-            " AND zielpfad != '' AND (gruppe, quellpfad) > (?, ?)"
-            " ORDER BY gruppe, quellpfad LIMIT ?",
-            (pfad_text(quellwurzel), ab_gruppe, ab_pfad, int(grenze)),
+            " AND zielpfad != '' AND (kopie_rang, gruppe, quellpfad) > (?, ?, ?)"
+            " ORDER BY kopie_rang, gruppe, quellpfad LIMIT ?",
+            (pfad_text(quellwurzel), int(ab_rang), ab_gruppe, ab_pfad, int(grenze)),
         ).fetchall()
 
     def gruppe_zeilen(self, quellwurzel, gruppe: str) -> list[sqlite3.Row]:

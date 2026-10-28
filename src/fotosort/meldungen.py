@@ -2688,6 +2688,15 @@ def ob_vermutlich_importiert(quelle) -> str:
     return f"vermutlich bereits importiert – {quelle}"
 
 
+# Zeilen der Uebersicht nach Pruefen und Aufraeumen: verstaendliche Woerter
+# statt der Statuswoerter aus der Datenbank (v0.12.1).
+OB_ZEILE_GEPRUEFT = "geprüft (Kopie stimmt)"
+OB_ZEILE_DUPLIKAT_BESTAETIGT = "Doppelte bestätigt (Partnerdatei stimmt)"
+OB_ZEILE_QUELLE_ENTFERNT = "aus der Quelle entfernt (gesamt)"
+OB_ZEILE_IM_GELOESCHT_ORDNER = "davon im Ordner _geloescht_"
+OB_ZEILE_NOCH_IN_DER_QUELLE = "noch in der Quelle (geprüft)"
+
+
 def ereignis_ordner_datum(zeitraum, tag) -> str:
     if zeitraum.art == "jahr":
         genannt = f"{zeitraum.jahr}"
@@ -2898,6 +2907,8 @@ TB_W_SCHON = ("Genau dieses Bild liegt schon im Archiv (gleicher Inhalt). Es wir
               " bleibt unangetastet in der Quelle.")
 TB_W_SCHON_NEU = "Liegt auf derselben Karte wie schon importierte Bilder, ist aber neu – kommt ins Archiv."
 TB_W_DOPPELT = "Von diesem Bild liegt eine gleiche Kopie in Quelle/{kopie} – ins Archiv kommt es nur einmal."
+TB_W_KOPIE_NAME = ("Daneben liegt „{kopie}“ mit gleichem Inhalt (so benennt Windows eine Kopie im selben Ordner) – "
+                   "ins Archiv kommt das Bild nur einmal, unter dem Namen ohne „Kopie“.")
 TB_W_SONSTIGES = "Keine Foto-, RAW- oder Videoendung: Die Datei wird übersprungen und bleibt in der Quelle."
 TB_W_OHNE_HAUPT = "Begleitdatei ohne Bild mit passendem Namen: Sie wird übersprungen und bleibt in der Quelle."
 TB_W_VORBELEGT = "Diese Datei lag schon vorher im Archiv. Das Programm darf sie nie verändern oder überschreiben."

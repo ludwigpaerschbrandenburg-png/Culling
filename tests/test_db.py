@@ -82,6 +82,7 @@ def test_dateien_hat_alle_spalten_aus_der_spec(datenbank):
         "gefunden_in_lauf",
         "zuletzt_gesehen_in_lauf",
         "schon_im_archiv",          # seit v0.9 (bereits importiert, nie aus der Quelle entfernt)
+        "kopie_rang",               # seit v0.12.1 (Name ohne „ - Kopie“ kommt ins Archiv)
     }
 
 
@@ -829,15 +830,52 @@ def test_echte_anhebung_von_v08_bringt_die_spalte_schon_im_archiv(tmp_path):
     d.datei_gesehen("/q/a.jpg", "/q", 100, 1000.0, "foto", lauf)
     d.stapel_schreiben()
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
+    d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")      # gab es in v0.8 noch nicht
     d.verbindung.execute("PRAGMA user_version=6")
     d.schliessen()
     d = db.Datenbank.oeffnen(ordner)
     try:
-        assert d.angehoben_von == 6 and db.SCHEMA_VERSION == 7
+        assert d.angehoben_von == 6 and db.SCHEMA_VERSION == 8
         assert d.zeile("/q/a.jpg")["schon_im_archiv"] == 0
+        assert d.zeile("/q/a.jpg")["kopie_rang"] == 0
     finally:
         d.schliessen()
     assert db.vor_schema_pfad(db.datenbank_pfad(ordner), 6).is_file()
+
+
+def test_echte_anhebung_von_v012_bringt_die_spalte_kopie_rang(tmp_path):
+    """Version 0.12.1: Eine Datenbank aus v0.12 (Schema 7) bekommt die Spalte
+    kopie_rang (0 fuer alle vorhandenen Zeilen) samt Index; vorher aufgehoben.
+    Kopieren traegt den Rang danach fuer noch nicht kopierte Zeilen nach."""
+    ordner = tmp_path / "v012"
+    d = db.Datenbank.oeffnen(ordner)
+    lauf = d.lauf_beginnen("scan")
+    for name in ("Bild.jpg", "Bild - Kopie.jpg", "Fertig - Kopie.jpg"):
+        d.datei_gesehen(f"/q/{name}", "/q", 100, 1000.0, "foto", lauf)
+    d.stapel_schreiben()
+    d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")
+    d.verbindung.execute("UPDATE dateien SET status = 'analysiert', gruppe = quellpfad, zielpfad = '/z/x.jpg'")
+    d.verbindung.execute("UPDATE dateien SET status = 'kopiert' WHERE quellpfad = '/q/Fertig - Kopie.jpg'")
+    d.verbindung.execute("PRAGMA user_version=7")
+    d.verbindung.commit()
+    d.schliessen()
+    d = db.Datenbank.oeffnen(ordner)
+    try:
+        assert d.angehoben_von == 7
+        assert {z["kopie_rang"] for z in d.verbindung.execute("SELECT kopie_rang FROM dateien")} == {0}
+        indizes = {z["name"] for z in d.verbindung.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert "dateien_kopie_reihe" in indizes
+        assert d.kopie_rang_nachtragen() == 1
+        assert d.zeile("/q/Bild - Kopie.jpg")["kopie_rang"] == 1
+        assert d.zeile("/q/Bild.jpg")["kopie_rang"] == 0
+        assert d.zeile("/q/Fertig - Kopie.jpg")["kopie_rang"] == 0      # schon kopiert: bleibt
+        assert d.kopie_rang_nachtragen() == 0
+        assert [z["quellpfad"] for z in d.zu_kopieren("/q")] == ["/q/Bild.jpg", "/q/Bild - Kopie.jpg"]
+    finally:
+        d.schliessen()
+    assert db.vor_schema_pfad(db.datenbank_pfad(ordner), 7).is_file()
 
 
 def test_bereits_importiert_heisst_vor_dem_durchgang_im_archiv(datenbank):
@@ -909,6 +947,8 @@ def test_anhebung_von_v08_markiert_vorher_vorhandene_duplikate(tmp_path):
             (partner, k, qp))
     d.verbindung.execute("DROP TABLE abgelegt")
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
+    d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")      # gab es in v0.8 noch nicht
     d.verbindung.execute("PRAGMA user_version=6")
     d.verbindung.commit()
     d.schliessen()

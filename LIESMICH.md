@@ -261,6 +261,11 @@ Inhalts), und erst am Ende bekommt sie ihren richtigen Namen. Ausgabe:
 - **kopiert** – so viele Dateien liegen jetzt im Archiv.
 - **Duplikate** – Dateien, deren Inhalt schon im Archiv lag. Sie werden nicht ein
   zweites Mal kopiert; das Programm merkt sich, zu welcher Archivdatei sie gehören.
+  Liegen gleiche Bilder unter verschiedenen Namen in der Quelle, etwa `Bild.jpg` und
+  `Bild - Kopie.jpg` (so nennt Windows eine Kopie im selben Ordner), kommt das Bild unter
+  dem Namen **ohne „Kopie“** ins Archiv (seit v0.12.1). Das gilt auch für „Kopie von …“,
+  „ - Copy“ und eine Nummer in Klammern wie „Bild (1).jpg“. Gibt es nur die Kopie, behält
+  sie ihren Namen.
 - **Namenskonflikte** – zwei verschiedene Bilder mit gleichem Namen; das zweite bekommt
   den Anhang `_1`. Es wird nie etwas überschrieben. Als gleich gelten Namen auch dann, wenn
   sie sich nur in Groß- und Kleinschreibung unterscheiden (`IMG_0001.JPG` und `img_0001.jpg`) –
@@ -370,6 +375,37 @@ kleinen Datei auf dem Rechner (Abschnitt 7), nicht in den Bildern. Einzige Ausna
 neuen XMP-Dateien, und die nur, wenn Sie „XMP-Dateien anlegen…" drücken und bestätigen. Die
 kleinen Vorschaubilder hebt das Programm auf dem Rechner auf (nicht im Archiv), damit ein
 Ordner beim nächsten Mal sofort da ist.
+
+### Der große Lauf mit allen Fotos
+
+Klappt der Probelauf, kommt der Rest. So geht es sicher:
+
+1. **Vorher sichern.** Alle Fotos zusätzlich auf eine zweite Festplatte kopieren. Das Programm
+   löscht nie etwas ohne Beweis – eine Sicherung schützt aber auch vor einer kaputten Platte
+   oder einem Versehen.
+2. **Platz im Ziel.** Das Archiv braucht so viel freien Platz wie die Fotos selbst (im Modus
+   „Kopieren“ bleiben die Originale ja liegen). Nach dem Scan steht die Datenmenge in der
+   Übersicht; reicht der Platz nicht, sagt das Programm es, bevor es kopiert.
+3. **Handy-Fotos zuerst auf den PC.** Ein Handy am USB-Kabel ist für Windows kein normales
+   Laufwerk; dort kann das Programm nicht lesen. Die Fotos erst mit dem Explorer in einen
+   Ordner auf dem PC kopieren und diesen Ordner als Quelle nehmen. Eine Speicherkarte im
+   Kartenleser hat einen Laufwerksbuchstaben und geht direkt.
+4. **OneDrive.** Zeigt der Explorer bei den Fotos ein Wolken-Symbol, liegen sie nur online.
+   Windows lädt sie dann beim Lesen erst herunter – das dauert und braucht Platz. Besser
+   vorher: Rechtsklick auf den Fotoordner, „Immer auf diesem Gerät beibehalten“, und warten,
+   bis überall ein grüner Haken steht.
+5. **Modus „Kopieren“ lassen.** Die Originale bleiben unberührt, bis Sie selbst aufräumen.
+6. **In Ruhe nachsehen.** Nach „Prüfen“ den Bericht öffnen, die Listen „Ohne Datum“ und
+   „Duplikate“ ansehen und im Reiter „Sichten“ durch das Archiv blättern.
+7. **Erst dann aufräumen** – mit dem Standard „_geloescht_“. Die Originale wandern in einen
+   Ordner `_geloescht_<Datum>` in der Quelle; „Zurücklegen…“ macht das rückgängig. Diesen
+   Ordner erst nach einigen Wochen selbst löschen, wenn Sie sicher sind.
+8. **Danach das Archiv sichern** (zweite Platte oder Netz) und etwa einmal im Jahr
+   „Archiv nachprüfen…“ laufen lassen.
+
+Eine große Sammlung darf in Etappen gehen: „Fenster zu“ hält sauber an, beim nächsten Start geht
+es dort weiter. Mehrere Quellen (alter Fotoordner, Handy-Ordner, Speicherkarte) können Sie
+zusammen oder nacheinander ins selbe Archiv sortieren.
 
 ### Der Ablauf im schwarzen Fenster (Alternative ohne Oberfläche)
 
@@ -728,6 +764,8 @@ neben der alten den Anhang `_1`.
 ## 9. Wichtige Hinweise
 
 - **Erst mit Kopien üben.** Ein Probeordner mit 50 Dateien reicht.
+- **Mit allen Fotos:** die Schritt-für-Schritt-Liste in Abschnitt 2, „Der große Lauf mit allen
+  Fotos“ (Sicherung vorher, Handy und OneDrive, erst nachsehen, dann aufräumen).
 - **Beim ersten Aufräumen den Standard nehmen** (Ordner `_geloescht_<Datum>`), nicht
   `--endgueltig`. Den Ordner löschen Sie selbst, wenn Sie das Archiv gesehen haben.
 - **Nie zwei Läufe gleichzeitig** auf dasselbe Archiv. Das Programm sperrt das Archiv,

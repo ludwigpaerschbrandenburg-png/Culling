@@ -1215,8 +1215,8 @@ class Ablauf:
                 elif schritt == "pruefen":
                     zeilen.append(["geprüft in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
                     zeilen.append(["gelesene Datenmenge", meldungen.groesse(int(zahlen.get("bytes", 0)))])
-                    zeilen.append(["geprueft (Kopie stimmt)", meldungen.anzahl(zaehler.get("geprueft", 0))])
-                    zeilen.append(["duplikat_bestaetigt", meldungen.anzahl(zaehler.get("duplikat_bestaetigt", 0))])
+                    zeilen.append([meldungen.OB_ZEILE_GEPRUEFT, meldungen.anzahl(zaehler.get("geprueft", 0))])
+                    zeilen.append([meldungen.OB_ZEILE_DUPLIKAT_BESTAETIGT, meldungen.anzahl(zaehler.get("duplikat_bestaetigt", 0))])
                     n = ereignis("pruefung_fehlgeschlagen")
                     zeilen.append(["Prüfung fehlgeschlagen (wird neu kopiert)", meldungen.anzahl(n)])
                     if ereignis(nachpruefen.ART_NACHGEPRUEFT):
@@ -1230,10 +1230,10 @@ class Ablauf:
                         zeilen.append(["noch nicht geprüft", meldungen.anzahl(zaehler.get("kopiert", 0))])
                 elif schritt == "aufraeumen":
                     zeilen.append(["entfernt in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
-                    zeilen.append(["quelle_geloescht (gesamt)", meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
+                    zeilen.append([meldungen.OB_ZEILE_QUELLE_ENTFERNT, meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
                     n = ereignis("quelle_in_geloescht_ordner")
                     if n:
-                        zeilen.append(["davon nach _geloescht_", meldungen.anzahl(n)])
+                        zeilen.append([meldungen.OB_ZEILE_IM_GELOESCHT_ORDNER, meldungen.anzahl(n)])
                     n = ereignis("leerer_ordner_entfernt")
                     if n:
                         zeilen.append(["leere Ordner entfernt", meldungen.anzahl(n)])
@@ -1244,7 +1244,7 @@ class Ablauf:
                     if n:
                         zeilen.append(["Quelle seit Kopieren geändert", meldungen.anzahl(n)])
                     if zaehler.get("geprueft", 0):
-                        zeilen.append(["noch in der Quelle (geprueft)", meldungen.anzahl(zaehler.get("geprueft", 0))])
+                        zeilen.append([meldungen.OB_ZEILE_NOCH_IN_DER_QUELLE, meldungen.anzahl(zaehler.get("geprueft", 0))])
                 elif schritt == "zuruecklegen":
                     zeilen.append(["zurückgelegt", meldungen.anzahl(ereignis(zuruecklegen.ART_ZURUECKGELEGT) + ereignis(zuruecklegen.ART_KOPIERT))])
                     n = ereignis(zuruecklegen.ART_KOPIERT)

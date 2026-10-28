@@ -300,11 +300,32 @@ class _Quelle:
     wurzel: str            # Text wie in der Datenbank
     pfad: Path
     laufwerk: str
+    ab_rang: int = -1
     ab_gruppe: str = ""
     ab_pfad: str = ""
     seite: deque = field(default_factory=deque)
     erschoepft: bool = False
     rest: list = field(default_factory=list)   # angefangene Gruppe am Seitenende
+
+    def _nachladen(self, dbank: db.Datenbank) -> None:
+        zeilen = dbank.zu_kopieren(self.wurzel, self.ab_rang, self.ab_gruppe, self.ab_pfad, SEITE)
+        if len(zeilen) < SEITE:
+            self.erschoepft = True
+        if zeilen:
+            z = zeilen[-1]
+            self.ab_rang, self.ab_gruppe, self.ab_pfad = int(z["kopie_rang"]), z["gruppe"], z["quellpfad"]
+        if self.rest:
+            # Fortsetzung der angefangenen Gruppe vorn anfuegen.
+            zeilen = self.rest + list(zeilen)
+            self.rest = []
+        self.seite.extend(zeilen)
+
+    def kopf_rang(self, dbank: db.Datenbank) -> int | None:
+        """Kopie-Rang der naechsten Gruppe, ohne sie zu nehmen; None, wenn die
+        Quelle erschoepft ist. Alle Zeilen einer Gruppe haben denselben Rang."""
+        if not self.seite and not self.erschoepft:
+            self._nachladen(dbank)
+        return int(self.seite[0]["kopie_rang"]) if self.seite else None
 
     def naechste_gruppe(self, dbank: db.Datenbank) -> list | None:
         while True:
@@ -321,16 +342,7 @@ class _Quelle:
                     gruppe, self.rest = self.rest, []
                     return gruppe
                 return None
-            zeilen = dbank.zu_kopieren(self.wurzel, self.ab_gruppe, self.ab_pfad, SEITE)
-            if len(zeilen) < SEITE:
-                self.erschoepft = True
-            if zeilen:
-                self.ab_gruppe, self.ab_pfad = zeilen[-1]["gruppe"], zeilen[-1]["quellpfad"]
-            if self.rest:
-                # Fortsetzung der angefangenen Gruppe vorn anfuegen.
-                zeilen = self.rest + list(zeilen)
-                self.rest = []
-            self.seite.extend(zeilen)
+            self._nachladen(dbank)
             if not self.seite and self.erschoepft:
                 return None
 
@@ -1477,7 +1489,9 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
             konsole.print(meldungen.kopieren_neu_nach_fehler(e.neu_nach_fehler))
 
         # 2. Vorpruefungen. Gezaehlt wird nur, was aus erreichbaren Quellen
-        #    ansteht - sonst waeren Platzpruefung und Anzeige zu hoch.
+        #    ansteht - sonst waeren Platzpruefung und Anzeige zu hoch. Der
+        #    Kopie-Rang wird fuer aeltere Analysen nachgetragen (v0.12.1).
+        dbank.kopie_rang_nachtragen()
         je_laufwerk = _quellen(dbank, lauf, e)
         erreichbar = [q.wurzel for quellen in je_laufwerk.values() for q in quellen]
         e.geplant, e.geplant_bytes = dbank.zu_kopieren_summe(erreichbar)
@@ -1520,6 +1534,11 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
             gruppe = _naechste(L, reihe)
             if gruppe is None:
                 break
+            if zurueckgestellt and _rang(gruppe) > min(_rang(g) for g in zurueckgestellt):
+                # Ein Original wartet auf seinen Zielnamen: keine Kopie davor
+                # einreichen, sonst kaeme sie statt seiner ins Archiv (v0.12.1).
+                zurueckgestellt.append(gruppe)
+                break
             if not L.gruppe_einreichen(*gruppe):
                 zurueckgestellt.append(gruppe)
         L.bereit_abschicken()
@@ -1555,6 +1574,11 @@ def _schleife(L: _Lauf, je_laufwerk: dict[str, list[_Quelle]]) -> None:
                 L.gruppe_fertigstellen(rest, anhang)
 
 
+def _rang(gruppe: tuple) -> int:
+    """Kopie-Rang einer gezogenen Gruppe (Quelle, Zeilen)."""
+    return int(gruppe[1][0]["kopie_rang"])
+
+
 def _wartet_auf_fruehere(g: list[_Auftrag], davor: list[list[_Auftrag]]) -> bool:
     """Seit v0.11: Ist eine frueher eingereichte, noch offene Gruppe gleich gross
     (ohne Sidecars), wird diese hier erst danach abgeschlossen. Sonst entschiede
@@ -1575,16 +1599,31 @@ def _naechste(L: _Lauf, reihe: deque) -> tuple[_Quelle, list] | None:
                 continue
             return _Quelle(z["quellwurzel"], Path(db.text_pfad(z["quellwurzel"])), ""), [z]
         return q, zeilen
-    while reihe:
-        quellen = reihe[0]
-        reihe.rotate(-1)            # dieses Laufwerk liegt jetzt hinten
-        while quellen:
-            if quellen[0].wurzel in L.weg:
-                quellen.pop(0)          # mitten im Lauf verschwunden: nichts mehr beginnen
-                continue
-            gruppe = quellen[0].naechste_gruppe(L.dbank)
-            if gruppe is not None:
-                return quellen[0], gruppe
-            quellen.pop(0)
-        reihe.pop()                 # erschoepft: das hintere Laufwerk entfernen
-    return None
+    # Seit v0.12.1 zuerst der kleinste Kopie-Rang ueber alle Quellen (Namen
+    # ohne „ - Kopie“ vor den Kopien); bei gleichem Rang wie bisher: Laufwerke
+    # abwechselnd, je Laufwerk die Quellen nacheinander.
+    lebend = [(quellen, _kopf(L, quellen)) for quellen in reihe]
+    lebend = [(quellen, kopf) for quellen, kopf in lebend if kopf is not None]
+    reihe.clear()
+    if not lebend:
+        return None
+    rang = min(kopf[0] for _quellen, kopf in lebend)
+    stelle = next(i for i, (_quellen, kopf) in enumerate(lebend) if kopf[0] == rang)
+    reihe.extend(quellen for i, (quellen, _kopf_) in enumerate(lebend) if i != stelle)
+    reihe.append(lebend[stelle][0])     # dieses Laufwerk liegt jetzt hinten
+    q = lebend[stelle][1][1]
+    return q, q.naechste_gruppe(L.dbank)
+
+
+def _kopf(L: _Lauf, quellen: list[_Quelle]) -> tuple[int, _Quelle] | None:
+    """(Rang, Quelle) der naechsten Gruppe eines Laufwerks: die erste Quelle
+    mit dem kleinsten Kopie-Rang. Erschoepfte und mitten im Lauf
+    verschwundene Quellen fallen heraus - dort wird nichts mehr begonnen."""
+    bester = None
+    for q in list(quellen):
+        rang = None if q.wurzel in L.weg else q.kopf_rang(L.dbank)
+        if rang is None:
+            quellen.remove(q)
+        elif bester is None or rang < bester[0]:
+            bester = (rang, q)
+    return bester

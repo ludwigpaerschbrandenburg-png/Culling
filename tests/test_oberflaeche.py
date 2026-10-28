@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -62,6 +63,13 @@ def _fehler(client, pfad: str, daten: dict | None = None) -> str:
     r = client.post(pfad, json=daten or {})
     assert r.status_code == 400, r.text
     return r.json()["fehler"]
+
+
+def _roh(zeilen) -> list[str]:
+    """Bezeichnungen der Uebersicht, die ein internes Statuswort zeigen statt
+    verstaendlichem Deutsch (der Ordnername _geloescht_ ist erlaubt)."""
+    roh = re.compile(r"\b(geprueft|duplikat_bestaetigt|quelle_geloescht|kopieren_laeuft|uebersprungen)\b")
+    return [str(z[0]) for z in zeilen if roh.search(str(z[0]))]
 
 
 def _echte(zeilen: dict) -> dict:
@@ -388,6 +396,10 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     assert l["zustand"] == "fertig", l
     zf = client.get("/api/zusammenfassung?schritt=pruefen").json()
     assert zf["zaehler"]["geprueft"] > 0 and zf["zaehler"]["kopiert"] == 0
+    # Verstaendliche Woerter statt interner Statuswoerter (v0.12.1).
+    assert not _roh(zf["zeilen"]), zf["zeilen"]
+    assert any(z[0] == "geprüft (Kopie stimmt)" for z in zf["zeilen"])
+    assert any(z[0] == "Doppelte bestätigt (Partnerdatei stimmt)" for z in zf["zeilen"])
 
     # Listen: seitenweise, nie alles auf einmal.
     for art in ("fehler", "duplikate", "ohne_datum"):
@@ -418,7 +430,11 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     assert all(not Path(q).exists() for q in nachher)
     assert any(p.is_dir() and p.name.startswith("_geloescht_") for p in quelle.iterdir())
     zf = client.get("/api/zusammenfassung?schritt=aufraeumen").json()
-    assert any(z[0].startswith("quelle_geloescht") for z in zf["zeilen"])
+    assert any(z[0] == "aus der Quelle entfernt (gesamt)" for z in zf["zeilen"])
+    assert any(z[0] == "davon im Ordner _geloescht_" for z in zf["zeilen"])
+    assert not _roh(zf["zeilen"]), zf["zeilen"]
+    for schritt in ("scan", "analyse", "kopieren"):
+        assert not _roh(client.get(f"/api/zusammenfassung?schritt={schritt}").json()["zeilen"])
     assert client.get("/api/naechster").json()["schritt"] == "fertig"
 
     # Bericht und Einstellungen per Knopf: neu schreiben, zuletzt geschriebenen oeffnen, CSV.

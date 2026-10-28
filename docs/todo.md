@@ -911,10 +911,28 @@ Bildern, die du alle sortieren lässt, von meinem PC lokal.“
   die Paketprüfung legt unter Windows 300 Testbilder an, sortiert und prüft sie („Alles richtig“,
   340 von 340) und zeichnet wie die Karte im Fenster lesbar im Hintergrund-Strang.
   Release v0.12 mit `fotosort-windows.zip`.
-- [ ] Beobachtung, nicht geändert: Liegen „Bild.jpg“ und „Bild - Kopie.jpg“ (gleicher Inhalt) im
-  selben Ordner, kommt der Inhalt unter dem Namen der Kopie ins Archiv – sie steht in der
-  Reihenfolge der Quelle zuerst (Leerzeichen vor Punkt). Ob das Programm hier den Namen ohne
-  „Kopie“ vorziehen soll, entscheidet der Nutzer.
+- [x] Beobachtung: Liegen „Bild.jpg“ und „Bild - Kopie.jpg“ (gleicher Inhalt) im selben Ordner,
+  kam der Inhalt unter dem Namen der Kopie ins Archiv. Entschieden am 28.10.2026: Der Name ohne
+  „Kopie“ kommt ins Archiv – umgesetzt in Phase 13a.
+
+## Phase 13a — Bereit für alle eigenen Fotos (Version 0.12.1)
+
+**Frage vom 28.10.2026:** „Wurden alle Bilder richtig sortiert, und kann ich das Programm für alle
+meine Bilder nehmen?“ – Ja; vorher drei Kleinigkeiten.
+
+- [x] Name ohne „Kopie“ (Entscheidung des Nutzers vom 28.10.2026, Test zuerst): Von
+  inhaltsgleichen Dateien kommt die ohne Kopie-Zusatz ins Archiv („ - Kopie“, „ - Copy“,
+  „Kopie von“, „Copy of“, Nummer in Klammern). Rang des Kopie-Namens als erste Stufe der
+  Kopier-Reihenfolge, über alle Quellen und Laufwerke; neue Spalte `kopie_rang`
+  (Schema-Version 8, ältere Archive bekommen ihn beim Kopieren nachgetragen). In den
+  Testbildern liegt dazu je eine „<Name> - Kopie.jpg“ neben dem Original. Bekannt und
+  unverändert: Beim Verschieben durch Umbenennen auf demselben Laufwerk wird nichts gelesen –
+  gleiche Dateien in der Quelle behalten dort beide ihren Namen.
+- [x] Übersicht im Fenster in verständlichem Deutsch statt interner Statuswörter
+  („Doppelte bestätigt“, „aus der Quelle entfernt“, „geprüft“).
+- [x] LIESMICH: „Der große Lauf mit allen Fotos“ – Sicherung vorher, Platz, Handy-Fotos zuerst
+  auf den PC, OneDrive, Modus „Kopieren“, nachsehen, erst dann aufräumen, Archiv sichern.
+- [ ] Volle Tests, CI, Release v0.12.1.
 
 ## Ohne feste Phase
 

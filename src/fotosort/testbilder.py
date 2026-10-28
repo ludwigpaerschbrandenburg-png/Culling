@@ -1136,19 +1136,28 @@ class _Plan:
 
     def doppelte(self) -> None:
         """Gleicher Inhalt zweimal in der Quelle: Kopien in einem Ordner, der in
-        der Reihenfolge der Quelle hinter allen anderen kommt."""
+        der Reihenfolge der Quelle hinter allen anderen kommt - und eine
+        Windows-Kopie „<Name> - Kopie.jpg“ neben dem Original. Sie steht in der
+        Reihenfolge der Quelle vor ihm; ins Archiv kommt trotzdem der Name ohne
+        „Kopie“ (Entscheidung vom 28.10.2026)."""
         kandidaten = [d for d in self.dateien if d.kategorie == "kamera" and d.form == "jpg"]
         anzahl = max(3, len(kandidaten) // 100)
         for i, original in enumerate(self.rng.sample(kandidaten, min(anzahl, len(kandidaten)))):
             stamm, endung = original.name.rsplit(".", 1)
-            name = (original.name, f"Kopie von {original.name}", f"{stamm} (2).{endung}")[i % 3]
-            d = self.neu(f"{QUELLE}/zz Doppelt/{name}", "foto", "jpg", "doppelt", False, geraet=original.geraet,
+            if i % 4 == 0:
+                rel = f"{original.ordner}/{stamm} - Kopie.{endung}"
+                warum = meldungen.TB_W_KOPIE_NAME.format(kopie=f"{stamm} - Kopie.{endung}")
+            else:
+                name = (original.name, f"Kopie von {original.name}", f"{stamm} (2).{endung}")[i % 4 - 1]
+                rel = f"{QUELLE}/zz Doppelt/{name}"
+                warum = meldungen.TB_W_DOPPELT.format(kopie=rel[len(QUELLE) + 1:])
+            d = self.neu(rel, "foto", "jpg", "doppelt", False, geraet=original.geraet,
                          kamera=original.kamera, alias=original.alias, aufnahme=original.aufnahme,
                          datumsquelle=original.datumsquelle)
             d.kopie_von = original
             d.erwartung = DOPPELT
             d.ziel = original.ziel
-            d.warum = meldungen.TB_W_DOPPELT.format(kopie=d.rel[len(QUELLE) + 1:])
+            d.warum = warum
             d.mtime = original.mtime
             original.warum = f"{original.warum} {d.warum}"
 
