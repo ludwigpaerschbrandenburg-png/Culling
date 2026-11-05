@@ -653,8 +653,9 @@ class WohinSeite(QWidget):
             self._ohne_daten(meldungen.wohin_lesefehler(fehler))
             return
         self.laeuft.hide()
-        if self.daten is not None and daten.ziel != self.daten.ziel:
-            self.links, self.rechts = (), ()
+        if self.daten is None or daten.ziel != self.daten.ziel:
+            # Erstes Lesen dieses Archivs: bei nur einer Quelle gleich ihre Unterordner.
+            self.links, self.rechts = wohin.start_links(daten), ()
         self.daten = daten
         self._zeigen()
 

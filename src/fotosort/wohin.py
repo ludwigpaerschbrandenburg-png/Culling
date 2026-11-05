@@ -388,6 +388,16 @@ def ansicht(daten: Daten, links: tuple[str, ...] = (), rechts: tuple[str, ...] =
                    sum(k.n for k in l_knoten), sum(k.bytes for k in l_knoten), l_index, r_index)
 
 
+def start_links(daten: Daten) -> tuple[str, ...]:
+    """Womit die linke Seite beginnt: Bei nur einer Quelle mit Unterordnern
+    gleich mit deren Unterordnern (sonst stuende dort ein einziger Block),
+    sonst mit allen Quellen."""
+    wurzeln = {e.wurzel for e in daten.eintraege}
+    if len(wurzeln) == 1 and any(e.quelle for e in daten.eintraege):
+        return (next(iter(wurzeln)),)
+    return ()
+
+
 def _schluessel(kette: tuple, ziel: tuple | None, schicksal: str, links: tuple, rechts: tuple):
     """(linker, rechter) Schluessel einer Zeile in dieser Ansicht - oder None,
     wenn sie nicht hineingehoert."""

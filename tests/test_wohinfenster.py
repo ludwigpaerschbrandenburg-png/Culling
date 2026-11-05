@@ -113,8 +113,14 @@ def test_reiter_zeigt_den_plan_und_danach_das_ergebnis(app, tmp_path, quelle, zi
     assert w.kachel_rahmen["geplant"].isVisibleTo(w)
     assert w.tabelle.rowCount() == len(a.baender)
     assert sum(w.tabelle.item(z, 3).wert for z in range(w.tabelle.rowCount())) == gesamt
+    # Nur eine Quelle: links stehen gleich ihre Unterordner; die Pfadleiste
+    # nennt die Quelle und fuehrt zu „Alle Quellen“ zurueck.
+    assert w.links == (db.pfad_text(quelle),)
+    assert {"2026", "Urlaub 2026 Ümläute"} <= {k.name for k in a.links}
+    assert quelle.name in w.pfad_links.text() and meldungen.WOHIN_QUELLEN in w.pfad_links.text()
+    w.pfad_klick("links", 0)
+    assert w.links == () and w.ansicht.links[0].name == quelle.name
     # Die Quelle heisst nach ihrem Ordner; der ganze Pfad steht im Hinweis.
-    assert a.links[0].name == quelle.name
     assert str(quelle) in w.grafik.tipp_text(("links", 0))
 
     _schritte(quelle, ziel, "kopieren")
@@ -160,7 +166,9 @@ def test_hineinklicken_und_pfadleiste(app, tmp_path, quelle, ziel):
     assert w.ansicht.rechts and all(k.name.startswith("2026") for k in w.ansicht.rechts)
     assert not any(k.art in wohin.KAESTEN for k in w.ansicht.rechts)
     assert "2026" in w.pfad_rechts.text() and meldungen.WOHIN_ARCHIV in w.pfad_rechts.text()
-    # Links hinein: die Unterordner der Quelle.
+    # Links: zurueck zu allen Quellen, dann per Klick wieder hinein.
+    w.pfad_links.linkActivated.emit("0")
+    assert w.links == ()
     QTest.mouseClick(g, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _knoten_punkt(g, "links", 0))
     assert w.links == (db.pfad_text(quelle),)
     assert {"2026", "Urlaub 2026 Ümläute"} <= {k.name for k in w.ansicht.links}
@@ -203,7 +211,9 @@ def test_band_waehlen_zeigt_seine_dateien(app, tmp_path, quelle, ziel, monkeypat
     w.k_archiv.click()
     assert geoeffnet == [ziel.joinpath(*a.rechts[band.rechts].schluessel)] and geoeffnet[0].is_dir()
     w.k_quelle.click()
-    assert geoeffnet[-1] == quelle
+    links = a.links[band.links]               # der Quellordner des Bandes (seit „eine Quelle“ ein Unterordner)
+    erwartet = Path(db.text_pfad(links.schluessel[0]), *links.schluessel[1:]) if links.art == wohin.ORDNER else quelle
+    assert geoeffnet[-1] == erwartet and erwartet.is_dir() and erwartet.is_relative_to(quelle)
     # Auswahl aufheben.
     w.k_weg.click()
     assert w.band is None and g.gewaehlt is None and not w.band_karte.isVisibleTo(w)

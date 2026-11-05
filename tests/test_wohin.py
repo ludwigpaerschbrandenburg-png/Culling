@@ -155,6 +155,30 @@ def test_gleichnamige_quellen_mit_ganzem_pfad(tmp_path):
         d.schliessen()
 
 
+def test_eine_quelle_beginnt_bei_ihren_unterordnern(tmp_path, beispiel):
+    """Bei nur einer Quelle stuende links ein einziger Block - aufschlussreicher
+    sind gleich ihre Unterordner. Bei mehreren Quellen oder ohne Unterordner
+    beginnt die Ansicht oben."""
+    d, ziel, karte, alt = beispiel
+    assert wohin.start_links(wohin.lesen(d, ziel)) == ()                 # zwei Quellen
+    ziel2 = tmp_path / "Archiv2"
+    d2 = db.Datenbank.oeffnen(tmp_path / "archiv2")
+    try:
+        q = tmp_path / "Eine"
+        _zeile(d2, q / "Handy" / "a.jpg", q, "kopiert", ziel2 / "2019" / "a.jpg")
+        _zeile(d2, q / "Kamera" / "b.jpg", q, "kopiert", ziel2 / "2020" / "b.jpg")
+        d2.verbindung.commit()
+        daten = wohin.lesen(d2, ziel2)
+        assert wohin.start_links(daten) == (db.pfad_text(q),)
+        assert [k.name for k in wohin.ansicht(daten, wohin.start_links(daten)).links] == ["Handy", "Kamera"]
+        d2.verbindung.execute("DELETE FROM dateien")
+        _zeile(d2, q / "c.jpg", q, "kopiert", ziel2 / "2019" / "c.jpg")   # nur direkt in der Quelle
+        d2.verbindung.commit()
+        assert wohin.start_links(wohin.lesen(d2, ziel2)) == ()
+    finally:
+        d2.schliessen()
+
+
 def test_hineinklicken_links_und_rechts(beispiel):
     d, ziel, karte, alt = beispiel
     daten = wohin.lesen(d, ziel)
