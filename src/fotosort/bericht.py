@@ -107,7 +107,17 @@ def begrenzen(ordner: Path, behalten: int = BEHALTEN) -> None:
             eigene = False
         if eigene:
             je_stamm.setdefault(m.group(1), []).append(Path(ordner) / e.name)
-    staemme = sorted(je_stamm)
+    def reihenfolge(stamm: str) -> tuple:
+        # Nach der Zeit im Namen; in derselben Sekunde nach dem, was zuletzt
+        # geschrieben wurde - ein Lauf-Bericht ("_lauf5") und „Neu schreiben“
+        # koennen in dieselbe Sekunde fallen (v0.14, in der CI gesehen).
+        try:
+            zuletzt = max(os.stat(pfade.lang(d)).st_mtime_ns for d in je_stamm[stamm])
+        except (OSError, ValueError):
+            zuletzt = 0
+        return (stamm[len("bericht_"):len("bericht_") + 17], zuletzt, stamm)
+
+    staemme = sorted(je_stamm, key=reihenfolge)
     for stamm in staemme[:-behalten] if len(staemme) > behalten else []:
         for datei in je_stamm[stamm]:
             try:

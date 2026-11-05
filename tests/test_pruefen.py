@@ -413,6 +413,29 @@ def test_lange_listen_werden_im_text_gekuerzt():
     assert len(eintraege) == 1001 and "500 weitere" in eintraege[-1] and "CSV" in eintraege[-1]
 
 
+def test_zwei_berichte_in_derselben_sekunde_der_spaetere_bleibt_lesbar(tmp_path):
+    """In der CI gesehen (v0.14): Ein Lauf schreibt "bericht_<Zeit>_lauf5", in
+    derselben Sekunde schreibt der Knopf „Neu schreiben“ "bericht_<Zeit>". Nach
+    dem Namen sortiert galt der Lauf-Bericht als neuer - die Tabelle des
+    wirklich neuesten wurde gepackt, und der Knopf „Tabelle“ schrieb dann noch
+    einen Bericht. Massgeblich ist, welcher zuletzt geschrieben wurde."""
+    import os
+    import time
+    ordner = tmp_path / "berichte"
+    ordner.mkdir()
+    zeit = "bericht_2030-01-01_120000"
+    for i, stamm in enumerate((f"{zeit}_lauf5", zeit)):      # erst der Lauf, dann der Knopf
+        for endung in (".txt", "_dateien.csv", "_ereignisse.csv"):
+            datei = ordner / f"{stamm}{endung}"
+            datei.write_text("x\n", encoding="utf-8")
+            t = time.time() - 10 + i                          # der zweite eine Sekunde spaeter
+            os.utime(datei, (t, t))
+    bericht.begrenzen(ordner)
+    assert (ordner / f"{zeit}_dateien.csv").exists()                  # der neueste bleibt lesbar
+    assert (ordner / f"{zeit}_lauf5_dateien.csv.gz").exists()         # der aeltere wird gepackt
+    assert not (ordner / f"{zeit}_lauf5_dateien.csv").exists()
+
+
 def test_packen_folgt_keiner_verknuepfung_und_ersetzt_nichts(tmp_path):
     """Pruefer-Befund (v0.8): Die Zwischendatei beim Packen wird exklusiv
     angelegt - eine Verknuepfung unter ihrem Namen fuehrt nie in eine fremde
