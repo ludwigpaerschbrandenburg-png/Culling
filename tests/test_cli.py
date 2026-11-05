@@ -248,17 +248,13 @@ def test_status_zeigt_alle_elf_status_und_die_phase(capsys, quelle, ziel):
     assert "Letzter Lauf" in ausgabe
 
 
-def test_status_phase_folgt_dem_niedrigsten_status(capsys, quelle, ziel, archiv_basis):
+def test_status_phase_folgt_dem_naechsten_schritt(capsys, quelle, ziel, archiv_basis):
+    """Seit v0.14 (Befund F8): die Phase des naechsten Schritts mit Arbeit,
+    dieselbe Regel wie der Knopf im Fenster."""
     _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
-    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
-    datenbank = db.Datenbank.oeffnen(archiv_basis / kennung)
-    try:
-        datenbank.verbindung.execute(
-            "UPDATE dateien SET status='analysiert' WHERE status='gefunden'"
-        )
-        datenbank.stapel_schreiben()
-    finally:
-        datenbank.schliessen()
+    _, ausgabe = _laufen(capsys, "status", "--ziel", str(ziel))
+    assert "Aktuelle Phase: 2" in ausgabe
+    _laufen(capsys, "analyse", "--ziel", str(ziel))
     _, ausgabe = _laufen(capsys, "status", "--ziel", str(ziel))
     assert "Aktuelle Phase: 3" in ausgabe
 
@@ -654,7 +650,7 @@ def test_status_ohne_stufe_aber_mit_dateien(capsys, quelle, ziel, archiv_basis):
 
     rueckgabe, ausgabe = _laufen(capsys, "status", "--ziel", str(ziel))
     assert rueckgabe == cli.OK
-    assert "Aktuelle Phase: 1" in ausgabe
+    assert "Alles erledigt" in ausgabe          # seit v0.14: nichts mehr zu tun (Befund F8)
     assert "keine Dateien erfasst" not in ausgabe
 
 
@@ -842,5 +838,10 @@ def test_tippfehler_im_befehl_vorschlag_auf_deutsch(capsys):
     fehler = capsys.readouterr().err
     assert "Fehler:" in fehler and "unbekannt: 'statsu'" in fehler
     assert "invalid choice" not in fehler and "maybe you meant" not in fehler
-    if sys.version_info >= (3, 14):
-        assert "meinten Sie 'status'?" in fehler
+    assert "meinten Sie 'status'?" in fehler            # seit v0.14 mit jedem Python
+    # Der interne Befehl des Arbeitsprozesses ist keine Moeglichkeit (Befund F16).
+    assert "'arbeit'" not in fehler and "'scan'" in fehler
+    with pytest.raises(SystemExit):
+        cli.main(["xyzzy"])
+    fehler = capsys.readouterr().err
+    assert "unbekannt: 'xyzzy' (moeglich:" in fehler and "'arbeit'" not in fehler

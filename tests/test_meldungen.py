@@ -130,13 +130,14 @@ def test_config_unbekannte_werte_nennt_alle_namen():
 
 
 def test_status_phase_folgt_der_regel_aus_der_spec():
-    assert "1" in meldungen.status_phase(None)
-    assert "2" in meldungen.status_phase("gefunden")
-    assert "3" in meldungen.status_phase("analysiert")
-    assert "3" in meldungen.status_phase("kopieren_laeuft")
-    assert "4" in meldungen.status_phase("kopiert")
-    assert "5" in meldungen.status_phase("geprueft")
-    assert "6" in meldungen.status_phase("quelle_geloescht")
+    """Seit v0.14 (SPEC §8): die Phase des naechsten Schritts mit Arbeit."""
+    assert "1 - Scan" in meldungen.status_phase_schritt("scan")
+    assert "2 - Analyse" in meldungen.status_phase_schritt("analyse")
+    assert "3 - Kopieren" in meldungen.status_phase_schritt("kopieren")
+    assert "abgebrochen" in meldungen.status_phase_schritt("kopieren", abgebrochen=True)
+    assert "4 - Pruefen" in meldungen.status_phase_schritt("pruefen")
+    assert "5 - Quelle aufraeumen" in meldungen.status_phase_schritt("aufraeumen")
+    assert "Alles erledigt" in meldungen.status_phase_schritt("fertig")
 
 
 def test_durchsatz_und_dauer():
@@ -164,12 +165,12 @@ def test_durchsatz_der_analyse_mit_deutschem_komma(bearbeitet, sekunden, erwarte
 # ----------------------------------------- Neue Texte aus der Abnahme ----
 
 
-def test_status_phase_ohne_stufe_aber_mit_dateien():
-    ohne = meldungen.status_phase(None, dateien_erfasst=False)
-    mit = meldungen.status_phase(None, dateien_erfasst=True)
-    assert "keine Dateien erfasst" in ohne
-    assert "keine Dateien erfasst" not in mit
-    assert "Phase: 1" in mit
+def test_status_phase_ohne_arbeit_aber_mit_dateien():
+    """Stehen alle Dateien in einem Endzustand (uebersprungen, verschoben ...),
+    ist nicht "Scan offen", sondern alles erledigt (Befund F8, v0.14)."""
+    assert "keine Dateien erfasst" in meldungen.status_phase_schritt("scan")
+    fertig = meldungen.status_phase_schritt("fertig")
+    assert "keine Dateien erfasst" not in fertig and "Scan offen" not in fertig
 
 
 def test_scan_besonderheiten_nennt_nicht_lesbare_ordner():

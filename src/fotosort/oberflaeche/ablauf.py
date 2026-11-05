@@ -1261,7 +1261,12 @@ class Ablauf:
                     erwartet = meldungen.BESTAETIGUNGSWORT["papierkorb"]
                     if str(wort or "").strip().lower() != erwartet:
                         raise FotosortFehler(meldungen.ob_wort_falsch(erwartet))
-                return self.schritt_starten("kopieren", verschieben=self.verschieben, profil=self.profil)
+                # Das im Fenster getippte Wort geht mit: Der Kern fragt beim
+                # Verschieben selbst noch einmal nach (seit v0.14, Befund F11).
+                if not self.verschieben:
+                    return self.schritt_starten("kopieren", verschieben=False, profil=self.profil)
+                return self.schritt_starten("kopieren", verschieben=True, profil=self.profil,
+                                            bestaetigung={"dateien": str(wort or "").strip().lower()})
             if schritt == "pruefen":
                 return self.schritt_starten("pruefen", profil=self.profil)
             if schritt == "aufraeumen":

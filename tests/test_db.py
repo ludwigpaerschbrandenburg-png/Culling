@@ -859,7 +859,8 @@ def test_echte_anhebung_von_v012_bringt_die_spalte_kopie_rang(tmp_path):
     d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN war_duplikat")   # gab es vor v0.14 nicht
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")
-    d.verbindung.execute("UPDATE dateien SET status = 'analysiert', gruppe = quellpfad, zielpfad = '/z/x.jpg'")
+    d.verbindung.execute("UPDATE dateien SET status = 'analysiert', gruppe = quellpfad, zielpfad = '/z/x.jpg',"
+                         " datum_sicher = 1")   # mit sicherem Datum: es zaehlt nur der Name (v0.14: RANG_OHNE_DATUM)
     d.verbindung.execute("UPDATE dateien SET status = 'kopiert' WHERE quellpfad = '/q/Fertig - Kopie.jpg'")
     d.verbindung.execute("PRAGMA user_version=7")
     d.verbindung.commit()

@@ -535,3 +535,185 @@ def test_f6_anhebung_traegt_fruehere_duplikate_nach(tmp_path):
     finally:
         d.schliessen()
     assert db.vor_schema_pfad(db.datenbank_pfad(ordner), 8).is_file()
+
+
+# ------------------------ F7: "Stand vom" beim Wiederherstellen ----
+
+
+def test_f7_wiederherstellen_nennt_den_stand_der_sicherung(baum, quelle, ziel, archiv_basis, capsys):
+    """F7: "Stand vom" zeigte den Zeitpunkt des Wiederherstellens (die Kopie
+    bekam eine neue Aenderungszeit), nicht den der Sicherung."""
+    import os
+    from datetime import datetime
+    from test_kopieren import _vorbereiten
+    from test_zielindex import _lokal_loeschen
+    _vorbereiten(ziel, quelle)
+    sicherung = db.sicherung_pfad(ziel)
+    alt = datetime(2026, 1, 2, 3, 4, 5).timestamp()
+    os.utime(sicherung, (alt, alt))
+    _lokal_loeschen(ziel, archiv_basis)
+    capsys.readouterr()
+    assert _cli("wiederherstellen", "--ziel", ziel) == cli.OK
+    assert "Stand vom 2026-01-02 03:04:05" in capsys.readouterr().out
+
+
+# ------------------------------ F8: Phase in "status" passend zum Stand ----
+
+
+@pytest.mark.parametrize("zeilen, erwartet", [
+    ([("verschoben", 0, "h")], "Alles erledigt"),
+    ([("quelle_geloescht", 0, "h"), ("duplikat", 0, "h")], "Pruefen offen"),
+    ([("duplikat_bestaetigt", 1, "h")], "Alles erledigt"),          # bereits importiert: bleibt in der Quelle
+    ([("geprueft", 0, "h")], "Quelle aufraeumen offen"),
+    ([("gefunden", 0, "")], "Analyse offen"),
+    ([("uebersprungen", 0, "")], "Alles erledigt"),
+])
+def test_f8_status_nennt_den_naechsten_schritt(tmp_path, ziel, zeilen, erwartet, capsys):
+    """F8: "status" nahm die niedrigste Stufe und meldete nach dem Verschieben
+    "Scan offen", nach einem Verschieben ueber Laufwerke "Leere Ordner
+    entfernen offen", obwohl Pruefen offen war. Jetzt folgt die Phase dem
+    naechsten Schritt mit Arbeit - wie im Fenster."""
+    quelle = tmp_path / "Quelle"
+    quelle.mkdir()
+    (quelle / "x.jpg").write_bytes(testbaum._JPEG)
+    assert _cli("scan", "--quelle", quelle, "--ziel", ziel) == cli.OK
+    kennung = db.archiv_id_datei(ziel).read_text(encoding="utf-8").strip()
+    import os
+    d = db.Datenbank.oeffnen(Path(os.environ["FOTOSORT_DATENBANK"]) / kennung)
+    try:
+        d.verbindung.execute("DELETE FROM dateien")
+        for i, (status, schon, h) in enumerate(zeilen):
+            d.verbindung.execute(
+                "INSERT INTO dateien (quellpfad, quellwurzel, dateityp, status, schon_im_archiv, hash, zielpfad, groesse)"
+                " VALUES (?, ?, 'foto', ?, ?, ?, ?, 5)",
+                (db.pfad_text(quelle / f"{i}.jpg"), db.pfad_text(quelle), status, schon, h,
+                 db.pfad_text(ziel / "2019" / f"{i}.jpg") if status not in ("gefunden", "uebersprungen") else ""))
+        d.verbindung.commit()
+    finally:
+        d.schliessen()
+    capsys.readouterr()
+    assert _cli("status", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert erwartet in aus, aus
+    assert "Scan offen" not in aus
+
+
+# --------------------- F11: Verschieben im Textfenster nur mit Wort ----
+
+
+def test_f11_verschieben_ohne_wort_verschiebt_nichts(baum, quelle, ziel, nachschauen, capsys, monkeypatch):
+    """F11: "fotosort kopieren --verschieben" entfernte die Originale ohne
+    Bestaetigungswort - sogar ohne Terminal (Eingabe aus /dev/null). Die
+    Anleitung sagt: Im schwarzen Fenster gelten dieselben Woerter wie im
+    Programmfenster. Jetzt: ohne das Wort "verschieben" wird nichts verschoben."""
+    from test_kopieren import _vorbereiten
+    _vorbereiten(ziel, quelle)
+    vorher = _zeilen(nachschauen, ziel)
+    capsys.readouterr()
+    # Ohne Terminal (keine Eingabe moeglich): verweigert.
+    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.FEHLER
+    aus = capsys.readouterr().out
+    assert "verschieben" in aus and "nichts verschoben" in aus.lower(), aus
+    # Falsches Wort: ebenfalls nichts.
+    monkeypatch.setenv("FOTOSORT_EINGABE_ERZWINGEN", "1")
+    monkeypatch.setattr("builtins.input", lambda: "ja")
+    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.FEHLER
+    assert _zeilen(nachschauen, ziel) == vorher
+    assert all(Path(db.text_pfad(p)).exists() for p, z in vorher.items() if z["dateityp"] != "sonstiges")
+    # Der Probelauf sagt, dass die Originale die Quelle verlassen wuerden.
+    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben", "--dry-run"]) == cli.OK
+    assert "Quelle" in capsys.readouterr().out
+    # Mit dem richtigen Wort wird verschoben.
+    monkeypatch.setattr("builtins.input", lambda: "verschieben")
+    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.OK
+    assert any(z["status"] == "verschoben" for z in _zeilen(nachschauen, ziel).values())
+
+
+# ------------------------------ F13: Zahlen in "Stand des Archivs" ----
+
+
+def test_f13_stand_des_archivs_zahl_und_groesse_passen_zusammen(baum, quelle, ziel, capsys):
+    """F13: "kopiert (Pruefen offen): 0 Dateien, 366 B" - die Zahl zaehlte nur
+    kopiert, die Groesse auch geprueft. Nach dem Verschieben stand
+    "kopiert: 0 Dateien, 8,8 KB"."""
+    from fotosort import meldungen
+    _bis_geprueft(quelle, ziel)
+    capsys.readouterr()
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    zeile = next(z for z in aus.splitlines() if "kopiert (Pruefen offen)" in z)
+    assert zeile.strip().endswith("0 Dateien, 0 B"), zeile
+    z = {"status": {"verschoben": 3}, "kopiert_bytes": 0, "verschoben_bytes": 9000, "je_quelle": {}}
+    text = meldungen.kopieren_zusammenfassung(z)
+    assert "verschoben" in text and "3 Dateien" in text
+
+
+# ------------------------ F12: abgerissene Ausgabe (Pipe zu) ----
+
+
+def test_f12_abgerissene_ausgabe_bricht_den_lauf_nicht_ab(quelle, ziel, nachschauen):
+    """F12: Lief die Ausgabe in ein anderes Programm ("| tee") und war dieses
+    weg (Strg+C trifft beide), scheiterte schon die naechste Ausgabezeile -
+    der Lauf endete nicht sauber, .part-Dateien blieben liegen. Jetzt geht
+    eine abgerissene Ausgabe still verloren, die Arbeit wird ordentlich beendet."""
+    import os
+    import subprocess
+    import sys
+    umgebung = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
+    prozess = subprocess.Popen([sys.executable, "-m", "fotosort", "scan", "--quelle", str(quelle), "--ziel", str(ziel)],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=umgebung)
+    prozess.stdout.close()                    # der Leser ist weg
+    fehler = prozess.stderr.read().decode("utf-8", "replace")
+    rc = prozess.wait(timeout=300)
+    assert rc == cli.OK, fehler
+    with nachschauen(ziel) as d:
+        lauf = d.letzter_lauf()
+        assert lauf["ende"] and lauf["befehl"].startswith("fotosort scan")
+    assert "Traceback" not in fehler, fehler
+
+
+# ---------------- Beobachtung: das datierte von zwei gleichen Bildern ----
+
+
+def test_von_gleichen_bildern_kommt_das_datierte_ins_archiv(tmp_path, ziel, nachschauen):
+    """Beobachtung des Testers (v0.14): Von inhaltsgleichen Dateien kam die
+    zuerst gefundene ins Archiv - auch wenn sie kein Datum hatte und eine
+    gleiche mit Datum im Namen daneben lag. Das Bild landete dann unter
+    _Ohne_Datum, die datierte Kopie wurde als Duplikat aufgeraeumt. Jetzt
+    kommt die datierte ins Archiv; die undatierte ist ihr Duplikat."""
+    quelle = tmp_path / "Quelle"
+    (quelle / "a").mkdir(parents=True)
+    (quelle / "b").mkdir()
+    inhalt = testbaum._JPEG + b"gleich"
+    (quelle / "a" / "bild.jpg").write_bytes(inhalt)                 # kein Datum (nur Aenderungszeit)
+    (quelle / "b" / "2026-01-01 Urlaub.jpg").write_bytes(inhalt)     # Datum im Namen
+    from test_kopieren import _vorbereiten
+    _vorbereiten(ziel, quelle)
+    datiert, ohne = _eine(nachschauen, ziel, "2026-01-01 Urlaub.jpg"), _eine(nachschauen, ziel, "bild.jpg")
+    assert datiert["datum_sicher"] == 1 and ohne["datum_sicher"] == 0
+    assert _cli("kopieren", "--ziel", ziel) == cli.OK
+    datiert, ohne = _eine(nachschauen, ziel, "2026-01-01 Urlaub.jpg"), _eine(nachschauen, ziel, "bild.jpg")
+    assert datiert["status"] == "kopiert", (datiert["status"], ohne["status"])
+    assert "_Ohne_Datum" not in Path(db.text_pfad(datiert["zielpfad"])).parts
+    assert ohne["status"] == "duplikat" and ohne["zielpfad"] == datiert["zielpfad"]
+
+
+# ------------------------ F16: "status" sagt, was gerade gilt ----
+
+
+def test_f16_status_prueft_die_quelle_jetzt_und_erklaert_die_status(tmp_path, ziel, capsys):
+    """F16: "status" nannte eine Quelle "erreichbar", obwohl das Kopieren sie
+    gerade als nicht erreichbar gemeldet hatte (der Vermerk stammte vom
+    letzten Scan), und zeigte rohe Statuswoerter wie duplikat_bestaetigt."""
+    quelle = tmp_path / "Karte"
+    quelle.mkdir()
+    (quelle / "a.jpg").write_bytes(testbaum._JPEG)
+    assert _cli("scan", "--quelle", quelle, "--ziel", ziel) == cli.OK
+    capsys.readouterr()
+    assert _cli("status", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "noch nicht analysiert" in aus                      # Erklaerung neben "gefunden"
+    quelle.rename(tmp_path / "Karte gezogen")
+    assert _cli("status", "--ziel", ziel) == cli.OK
+    aus = capsys.readouterr().out
+    assert "gerade nicht erreichbar" in aus and "(erreichbar)" not in aus, aus

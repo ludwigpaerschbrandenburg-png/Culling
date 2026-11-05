@@ -1282,7 +1282,7 @@ class Hauptfenster(QMainWindow):
                 self.los(ziel_anlegen, ziel_trotzdem, eingabe)
             return
         if a.get("frage") == "ziel_anlegen":
-            ja, _ = frage(self, "Ordner anlegen?", a["text"], ja="Anlegen")
+            ja, _ = frage(self, "Ordner anlegen?", a["text"], ja=meldungen.OB_ANLEGEN_JA, nein=meldungen.OB_ANLEGEN_NEIN)
             if ja:
                 self.los(True, ziel_trotzdem)
             return
@@ -1873,7 +1873,9 @@ class Durchlauf(QObject):
                 self._foto("02-startseite-ausgefuellt")
                 f.start.ablauf.setzen("einzeln")         # der Durchlauf zeigt jeden Schritt einzeln
                 f.einstellungen_senden()
-                f.los(False, True)
+                # Ein fehlendes Ziel wird angelegt: Die Frage "Ordner anlegen?"
+                # kann im Durchlauf niemand beantworten (Befund F14, v0.14).
+                f.los(True, True)
                 self._naechste()
             elif st == 1:          # Scan laeuft -> Uebersicht
                 if f.in_ruhe():
@@ -1922,7 +1924,8 @@ class Durchlauf(QObject):
             elif st == 9:
                 if f.in_ruhe():
                     self._foto("11-uebersicht-nach-aufraeumen-fertig")
-                    d = Dialog(f, "Ordner anlegen?", meldungen.ob_frage_ziel_anlegen(str(Path(self.ziel).with_name(Path(self.ziel).name + "_neu"))), ja="Anlegen")
+                    d = Dialog(f, "Ordner anlegen?", meldungen.ob_frage_ziel_anlegen(str(Path(self.ziel).with_name(Path(self.ziel).name + "_neu"))),
+                               ja=meldungen.OB_ANLEGEN_JA, nein=meldungen.OB_ANLEGEN_NEIN)
                     d.show()
                     QApplication.processEvents()
                     if self.fotos is not None:

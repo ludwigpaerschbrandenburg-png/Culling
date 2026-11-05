@@ -494,27 +494,30 @@ def _lauf_sauber_abbrechen(datenbank, lauf: int) -> None:
         pass
 
 
+def _jetzt_erreichbar(wurzel: str) -> bool:
+    try:
+        return pfade.lang(Path(db.text_pfad(wurzel))).is_dir()
+    except OSError:
+        return False
+
+
 def befehl_status(args, konsole) -> int:
     archiv = archiv_oeffnen(args, konsole, anlegen=False)
     datenbank = archiv.datenbank
     try:
         zaehler = datenbank.zaehler_je_status()
         konsole.print(meldungen.status_zaehler(zaehler))
-        niedrigster = None
-        for stufe in db.STUFEN:
-            if zaehler.get(stufe, 0) > 0:
-                niedrigster = stufe
-                break
         konsole.print("")
-        konsole.print(
-            meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
-        )
+        konsole.print(meldungen.status_phase_schritt(datenbank.naechster_schritt(),
+                                                     zaehler.get("kopieren_laeuft", 0) > 0))
         konsole.print("")
+        quellen = datenbank.quellen_liste()
         konsole.print(
             meldungen.status_je_quelle(
-                datenbank.quellen_liste(),
+                quellen,
                 datenbank.zaehler_je_quelle(),
                 datenbank.zaehler_je_status_und_quelle(),
+                {z["wurzel"]: _jetzt_erreichbar(z["wurzel"]) for z in quellen},
             )
         )
         zeile = datenbank.letzter_lauf()
@@ -663,7 +666,17 @@ def befehl_kopieren(args, konsole) -> int:
         kopieren.worker_zahlen(archiv.konf, args.profil, args.kopier_worker, args.hash_worker)
         if probelauf:
             konsole.print(meldungen.kopieren_plan(kopieren.planen(archiv.ziel, datenbank)))
+            if verschieben:
+                konsole.print(meldungen.KOPIEREN_PROBELAUF_VERSCHIEBEN)
             return OK
+        if verschieben and not getattr(args, "verschieben_bestaetigt", False):
+            # Verschieben entfernt die Originale: wie im Fenster nur mit dem Wort
+            # (Befund F11, v0.14). Ohne Terminal ist die Antwort nein.
+            n, b = datenbank.zu_kopieren_summe()
+            if n and not _bestaetigung_lesen(konsole, meldungen.start_verschieben_frage(n, b),
+                                             meldungen.BESTAETIGUNGSWORT["papierkorb"]):
+                konsole.print(meldungen.KOPIEREN_VERSCHIEBEN_NICHT_BESTAETIGT)
+                return FEHLER
         lauf = datenbank.lauf_beginnen(_befehlszeile())
         try:
             ergebnis = kopieren.ausfuehren(
@@ -1013,9 +1026,21 @@ def _start_archiv_lesen(args, konsole) -> dict:
         d.schliessen()
 
 
-def _start_phase_text(zaehler: dict) -> str:
-    niedrigster = next((s for s in db.STUFEN if zaehler.get(s, 0) > 0), None)
-    return meldungen.status_phase(niedrigster, dateien_erfasst=sum(zaehler.values()) > 0)
+def _start_phase_text(stand: dict | None) -> str:
+    """Wie "status" (seit v0.14): die Phase des naechsten Schritts mit Arbeit."""
+    if not stand:
+        return meldungen.status_phase_schritt("scan")
+    if stand["analyse"] > 0:
+        schritt = "analyse"
+    elif stand["kopieren"][0] > 0:
+        schritt = "kopieren"
+    elif stand["pruefen"][0] > 0:
+        schritt = "pruefen"
+    elif stand["aufraeumen"][0] > 0:
+        schritt = "aufraeumen"
+    else:
+        schritt = "fertig" if sum(stand["zaehler"].values()) else "scan"
+    return meldungen.status_phase_schritt(schritt, stand["zaehler"].get("kopieren_laeuft", 0) > 0)
 
 
 def _start_quelle_pruefen(antwort: str, ziel: Path, bekannt_auf: set, quellen: list[str],
@@ -1166,9 +1191,8 @@ def befehl_start(args, konsole) -> int:
             konsole.print(meldungen.profil_erkannt(profil, details))
 
         # 3. Zusammenfassung
-        zaehler = stand["zaehler"] if stand else {}
         konsole.print(meldungen.start_zusammenfassung(
-            ziel, bekannt + neue_quellen, verschieben, profil, _start_phase_text(zaehler)))
+            ziel, bekannt + neue_quellen, verschieben, profil, _start_phase_text(stand)))
         if not _weiter(konsole, meldungen.start_frage_ok()):
             konsole.print(meldungen.start_abgebrochen())
             return ABGEBROCHEN
@@ -1236,7 +1260,7 @@ def befehl_start(args, konsole) -> int:
                 return schlechtester
             rc = befehl_kopieren(_start_namensraum(
                 args, "kopieren", verschieben=verschieben, dry_run=False, profil=profil,
-                kopier_worker=None, hash_worker=None), konsole)
+                kopier_worker=None, hash_worker=None, verschieben_bestaetigt=verschieben), konsole)
             if not pruefen_rueckgabe(rc):
                 return schlechtester
             stand = _start_archiv_lesen(args, konsole)
@@ -1307,6 +1331,9 @@ def befehl_arbeit(args, konsole) -> int:
             ns.profil = auftrag.get("profil")
             ns.kopier_worker = None
             ns.hash_worker = None
+            # Das im Fenster getippte Wort (Verschieben, seit v0.14): Der Kern
+            # prueft es selbst - wie beim Aufraeumen.
+            bestaetigung_vorgabe = dict(auftrag.get("bestaetigung") or {})
             rc = befehl_kopieren(ns, konsole)
         elif schritt == "pruefen":
             ns.profil = auftrag.get("profil")
@@ -1566,9 +1593,36 @@ def _argparse_deutsch() -> None:
     argparse._ = uebersetzen
 
 
+#: Befehle nur fuer das Programm selbst (der Arbeitsprozess des Fensters) -
+#: in keiner Liste von Moeglichkeiten (Befund F16, v0.14).
+_INTERNE_BEFEHLE = ("arbeit",)
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, nur bei einem unbekannten Befehl: die Liste ohne interne
+    Befehle, und der Vorschlag "meinten Sie ...?" mit jedem Python (argparse
+    selbst kennt ihn erst ab 3.14)."""
+
+    def _check_value(self, action, value):
+        if (isinstance(action, argparse._SubParsersAction) and action.choices is not None
+                and value not in action.choices):
+            import difflib
+            sichtbar = [str(c) for c in action.choices if c not in _INTERNE_BEFEHLE]
+            werte = {"value": str(value), "choices": ", ".join(repr(c) for c in sichtbar)}
+            vorschlag = difflib.get_close_matches(str(value), sichtbar, 1)
+            if vorschlag:
+                werte["closest"] = vorschlag[0]
+                vorlage = meldungen.ARGPARSE[
+                    "invalid choice: %(value)r, maybe you meant %(closest)r? (choose from %(choices)s)"]
+            else:
+                vorlage = meldungen.ARGPARSE["invalid choice: %(value)r (choose from %(choices)s)"]
+            raise argparse.ArgumentError(action, vorlage % werte)
+        return super()._check_value(action, value)
+
+
 def parser_bauen() -> argparse.ArgumentParser:
     _argparse_deutsch()
-    eltern = argparse.ArgumentParser(
+    eltern = _Parser(
         prog="fotosort",
         description="Sortiert Fotos und Videos nach Aufnahmedatum und Kamera.",
     )
@@ -1687,6 +1741,52 @@ def parser_bauen() -> argparse.ArgumentParser:
     return eltern
 
 
+class _RobusteAusgabe:
+    """Wie sys.stdout (oder sys.stderr) - nur dass eine abgerissene Leitung den
+    Lauf nicht mehr aus dem Tritt bringt: Laeuft die Ausgabe in ein anderes
+    Programm ("| tee", "| more") und ist dieses weg (Strg+C trifft beide),
+    wird ab da still verworfen. Vorher scheiterte schon die naechste Zeile,
+    und ein abgebrochener Lauf endete nicht sauber (Befund F12, v0.14).
+    Das Ziel wird bei jedem Schreiben neu nachgeschlagen: Ohne Konsole lenkt
+    _ohne_konsole_umleiten sys.stdout spaeter in eine Datei um."""
+
+    def __init__(self, fehlerausgabe: bool = False) -> None:
+        self._fehlerausgabe = fehlerausgabe
+        self._weg = False
+
+    def _ziel(self):
+        return sys.stderr if self._fehlerausgabe else sys.stdout
+
+    @staticmethod
+    def _abgerissen(fehler: OSError) -> bool:
+        import errno
+        return isinstance(fehler, BrokenPipeError) or fehler.errno in (errno.EPIPE, errno.EINVAL)
+
+    def write(self, text: str) -> int:
+        if self._weg:
+            return len(text)
+        try:
+            return self._ziel().write(text)
+        except OSError as fehler:
+            if not self._abgerissen(fehler):
+                raise
+            self._weg = True
+            return len(text)
+
+    def flush(self) -> None:
+        if self._weg:
+            return
+        try:
+            self._ziel().flush()
+        except OSError as fehler:
+            if not self._abgerissen(fehler):
+                raise
+            self._weg = True
+
+    def __getattr__(self, name):
+        return getattr(self._ziel(), name)
+
+
 def _konsole(fehlerausgabe: bool = False):
     """Die Ausgabe-Konsole.
 
@@ -1699,7 +1799,7 @@ def _konsole(fehlerausgabe: bool = False):
     from rich.console import Console
 
     return Console(
-        soft_wrap=True, highlight=False, markup=False, stderr=fehlerausgabe
+        soft_wrap=True, highlight=False, markup=False, file=_RobusteAusgabe(fehlerausgabe)
     )
 
 

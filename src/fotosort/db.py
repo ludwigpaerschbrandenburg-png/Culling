@@ -262,10 +262,20 @@ def text_pfad(text):
     return text
 
 
-def _kopie_rang(gespeichert: str) -> int:
-    """Rang des Kopie-Namens (dateitypen.kopie_rang) aus dem gespeicherten Pfad
-    der Hauptdatei einer Gruppe - alle Zeilen der Gruppe bekommen denselben."""
-    return dateitypen.kopie_rang(Path(text_pfad(gespeichert)).name) if gespeichert else 0
+#: Seit v0.14: Dateien ohne sicheres Datum kommen beim Kopieren nach allen
+#: datierten an die Reihe. Von inhaltsgleichen Dateien kommt so die datierte
+#: ins Archiv (in ihren Datumsordner), die undatierte wird ihr Duplikat -
+#: vorher landete das Bild unter _Ohne_Datum, wenn die undatierte zuerst kam.
+RANG_OHNE_DATUM = 3
+
+
+def _kopie_rang(gespeichert: str, datum_sicher=1) -> int:
+    """Kopier-Reihenfolge der Gruppe: der Rang des Kopie-Namens
+    (dateitypen.kopie_rang, 0-2) aus dem gespeicherten Pfad der Hauptdatei,
+    ohne sicheres Datum RANG_OHNE_DATUM dazu - alle Zeilen der Gruppe bekommen
+    denselben."""
+    name = dateitypen.kopie_rang(Path(text_pfad(gespeichert)).name) if gespeichert else 0
+    return name + (0 if datum_sicher else RANG_OHNE_DATUM)
 
 
 # ------------------------------------------------------------ Archiv-ID ----
@@ -444,6 +454,8 @@ def sicherung_holen(sicherung: Path, ordner: Path) -> Sicherungsstand:
     if neu.exists():
         neu.unlink()   # eigener Zwischenstand eines frueheren Versuchs
     try:
+        # "Stand vom": die Zeit der Sicherung, nicht die der Kopie (Befund F7, v0.14).
+        geaendert = datetime.fromtimestamp(os.stat(pfade.lang(sicherung)).st_mtime).isoformat(timespec="seconds")
         shutil.copyfile(pfade.lang(sicherung), pfade.lang(neu))
         stand = sicherung_lesen(neu)
     except BaseException:
@@ -452,7 +464,7 @@ def sicherung_holen(sicherung: Path, ordner: Path) -> Sicherungsstand:
         except OSError:
             pass
         raise
-    return Sicherungsstand(Path(sicherung), stand.geaendert, stand.dateien, stand.quellen, stand.laeufe, stand.letzter_lauf)
+    return Sicherungsstand(Path(sicherung), geaendert, stand.dateien, stand.quellen, stand.laeufe, stand.letzter_lauf)
 
 
 def lokaler_stand(ordner: Path) -> str:
@@ -1167,7 +1179,8 @@ class Datenbank:
             (
                 kamera, kamera_modell, aufnahme_zeit, datum_quelle, int(datum_sicher),
                 datum_hinweis, pfad_text(gruppe), pfad_text(zielpfad) if zielpfad else "",
-                status, fehlergrund, _kopie_rang(pfad_text(gruppe) or pfad_text(quellpfad)), pfad_text(quellpfad),
+                status, fehlergrund, _kopie_rang(pfad_text(gruppe) or pfad_text(quellpfad), datum_sicher),
+                pfad_text(quellpfad),
             ),
         )
         self._vielleicht_schreiben()
@@ -1180,8 +1193,8 @@ class Datenbank:
         aenderungen = [
             (rang, z["quellpfad"])
             for z in self.verbindung.execute(
-                "SELECT quellpfad, gruppe, kopie_rang FROM dateien WHERE status = 'analysiert'")
-            if (rang := _kopie_rang(z["gruppe"] or z["quellpfad"])) != z["kopie_rang"]
+                "SELECT quellpfad, gruppe, kopie_rang, datum_sicher FROM dateien WHERE status = 'analysiert'")
+            if (rang := _kopie_rang(z["gruppe"] or z["quellpfad"], z["datum_sicher"])) != z["kopie_rang"]
         ]
         if aenderungen:
             self._beginnen()
@@ -1581,15 +1594,20 @@ class Datenbank:
         self.stapel_schreiben()
         v = self.verbindung
         status = {z[0]: int(z[1]) for z in v.execute("SELECT status, COUNT(*) FROM dateien GROUP BY status")}
+        # Zahl und Groesse ueber dieselben Zeilen (Befund F13, v0.14).
         kopiert_bytes = int(v.execute(
-            "SELECT COALESCE(SUM(groesse), 0) FROM dateien WHERE status IN ('kopiert', 'geprueft')"
+            "SELECT COALESCE(SUM(groesse), 0) FROM dateien WHERE status = 'kopiert'"
+        ).fetchone()[0])
+        verschoben_bytes = int(v.execute(
+            "SELECT COALESCE(SUM(groesse), 0) FROM dateien WHERE status = 'verschoben'"
         ).fetchone()[0])
         je_quelle: dict[str, dict[str, int]] = {}
         for z in v.execute(
             "SELECT quellwurzel, status, COUNT(*) AS n FROM dateien GROUP BY quellwurzel, status"
         ):
             je_quelle.setdefault(z["quellwurzel"], {})[z["status"]] = int(z["n"])
-        return {"status": status, "kopiert_bytes": kopiert_bytes, "je_quelle": je_quelle}
+        return {"status": status, "kopiert_bytes": kopiert_bytes, "verschoben_bytes": verschoben_bytes,
+                "je_quelle": je_quelle}
 
     # -- Pruefen (SPEC Abschnitt 4 Phase 4) --------------------------------
 
@@ -1833,6 +1851,23 @@ class Datenbank:
         return z is not None
 
     # -- Bericht (SPEC Abschnitt 10) ----------------------------------------
+
+    def naechster_schritt(self) -> str:
+        """Der erste Schritt, der noch Arbeit hat - dieselbe Regel wie der
+        Knopf im Fenster (Ablauf._naechster_aus): "analyse", "kopieren",
+        "pruefen", "aufraeumen"; "fertig" wenn nichts offen ist, "scan" ohne
+        erfasste Dateien (seit v0.14, Befund F8)."""
+        if self.anzahl_zu_analysieren() > 0:
+            return "analyse"
+        if self.zu_kopieren_summe()[0] > 0:
+            return "kopieren"
+        if self.zu_pruefen_summe()[0] > 0:
+            return "pruefen"
+        if sum(n for n, _b in self.zu_loeschen_summe().values()) > 0:
+            return "aufraeumen"
+        if not sum(self.zaehler_je_status().values()):
+            return "scan"
+        return "fertig"
 
     def duplikate_gesamt(self) -> int:
         """Duplikate - auch die schon aus der Quelle entfernten (seit v0.14)."""

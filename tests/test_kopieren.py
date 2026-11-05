@@ -28,7 +28,17 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 def _cli(*args) -> int:
-    return cli.main([str(a) for a in args])
+    """Ein Befehl wie am Terminal. Verschieben verlangt seit v0.14 das Wort
+    "verschieben" (Befund F11) - der Helfer tippt es, wie der Nutzer es taete.
+    Dass ohne Wort nichts geschieht, pruefen eigene Tests mit cli.main."""
+    argumente = [str(a) for a in args]
+    if "--verschieben" in argumente and "--dry-run" not in argumente and cli.bestaetigung_vorgabe is None:
+        cli.bestaetigung_vorgabe = {"dateien": "verschieben"}
+        try:
+            return cli.main(argumente)
+        finally:
+            cli.bestaetigung_vorgabe = None
+    return cli.main(argumente)
 
 
 def _vorbereiten(ziel: Path, *quellen: Path) -> None:

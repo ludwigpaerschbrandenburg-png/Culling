@@ -105,6 +105,9 @@ def test_es_geht_nur_vorwaerts_zum_naechsten_schritt_mit_arbeit(zustand, verschi
             ergebnis = kette_naechster(fertig, zustand, "", _stand(*bits), verschieben)
             if fertig == "pruefen" and zustand == "fehler":
                 assert ergebnis == ("ende", "pruefen_befunde")
+            elif fertig == "aufraeumen" and zustand == "fehler":
+                # Verweigerte Loeschungen: nicht "Alles erledigt" (Befund F3, v0.14).
+                assert ergebnis == ("ende", "aufraeumen_befunde")
             elif spaeter and spaeter[0] == "kopieren" and verschieben:
                 assert ergebnis == ("ende", "verschieben")
             elif spaeter:

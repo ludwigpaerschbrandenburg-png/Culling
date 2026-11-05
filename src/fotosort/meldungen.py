@@ -609,40 +609,45 @@ def scan_alles_ausgeschlossen(muster: list) -> str:
 
 # --------------------------------------------------------------- Status ----
 
-# Reihenfolge der Stufen aus SPEC Abschnitt 8; die uebrigen Status sind
-# Abzweigungen und zaehlen fuer die Phase nicht mit.
-PHASE_JE_STATUS: dict[str, tuple[int, str]] = {
-    "gefunden": (2, "Analyse offen"),
-    "analysiert": (3, "Kopieren offen"),
-    "kopieren_laeuft": (3, "Kopieren offen (ein Lauf wurde abgebrochen)"),
-    "kopiert": (4, "Pruefen offen"),
-    "geprueft": (5, "Quelle aufraeumen offen"),
-    "quelle_geloescht": (6, "Leere Ordner entfernen offen"),
+#: Seit v0.14 (Befund F8): Die Phase folgt dem naechsten Schritt mit Arbeit.
+PHASE_JE_SCHRITT: dict[str, str] = {
+    "scan": "Aktuelle Phase: 1 - Scan offen (es sind noch keine Dateien erfasst)",
+    "analyse": "Aktuelle Phase: 2 - Analyse offen",
+    "kopieren": "Aktuelle Phase: 3 - Kopieren offen",
+    "pruefen": "Aktuelle Phase: 4 - Pruefen offen",
+    "aufraeumen": "Aktuelle Phase: 5 - Quelle aufraeumen offen",
+    "fertig": ("Alles erledigt - nichts mehr zu analysieren, kopieren, pruefen oder aufzuraeumen.\n"
+               "Hoechstens leere Ordner sind noch zu entfernen: fotosort aufraeumen --leere-ordner"),
 }
 
 
-def status_phase(niedrigster: str | None, dateien_erfasst: bool = False) -> str:
-    """Die aktuelle Phase (SPEC Abschnitt 8).
+def status_phase_schritt(schritt: str, abgebrochen: bool = False) -> str:
+    text = PHASE_JE_SCHRITT[schritt]
+    if schritt == "kopieren" and abgebrochen:
+        text += " (ein Lauf wurde abgebrochen)"
+    return text
 
-    Steht keine Datei in einer Stufe, haengt der Klammerzusatz davon ab, ob
-    ueberhaupt schon Dateien erfasst sind: Stehen alle Zeilen in einem
-    Abzweig-Status (uebersprungen, fehler ...), sind sie sehr wohl erfasst.
-    """
-    if niedrigster is None:
-        if dateien_erfasst:
-            return (
-                "Aktuelle Phase: 1 - Scan offen (erfasste Dateien stehen alle in\n"
-                "einem Status, der keine Stufe ist - etwa uebersprungen oder fehler)"
-            )
-        return "Aktuelle Phase: 1 - Scan offen (es sind noch keine Dateien erfasst)"
-    phase, text = PHASE_JE_STATUS[niedrigster]
-    return f"Aktuelle Phase: {phase} - {text}"
+
+#: Was die gespeicherten Statuswoerter bedeuten - fuer die Ausgabe (seit v0.14).
+STATUS_ERKLAERT = {
+    "gefunden": "erfasst, noch nicht analysiert",
+    "analysiert": "eingeplant, noch nicht kopiert",
+    "kopieren_laeuft": "Kopie wird gerade geschrieben (oder ein Lauf brach ab)",
+    "kopiert": "im Archiv, noch nicht geprueft",
+    "geprueft": "im Archiv geprueft, Original noch in der Quelle",
+    "verschoben": "ins Archiv verschoben",
+    "duplikat": "doppelt, liegt schon im Archiv (noch nicht geprueft)",
+    "duplikat_bestaetigt": "doppelt, Partner im Archiv geprueft",
+    "quelle_geloescht": "im Archiv, Original aus der Quelle entfernt",
+    "uebersprungen": "bleibt in der Quelle (kein Foto/Video)",
+    "fehler": "Fehler - siehe Bericht",
+}
 
 
 def status_zaehler(zaehler: dict[str, int]) -> str:
     zeilen = ["Dateien je Status"]
     for name, wert in zaehler.items():
-        zeilen.append(f"  {name:<20} {anzahl(wert):>12}")
+        zeilen.append(f"  {name:<20} {anzahl(wert):>12}   {STATUS_ERKLAERT.get(name, '')}".rstrip())
     return "\n".join(zeilen)
 
 
@@ -756,7 +761,7 @@ def config_kaputt(pfad, zeile, spalte, grund: str) -> str:
         "Abbruch: Die Konfigurationsdatei laesst sich nicht lesen.\n"
         f"  Datei:  {pfad}\n"
         f"{stelle}"
-        f"  Grund:  {grund}\n"
+        f"  Technische Angabe (englisch): {grund}\n"
         "Die Datei bleibt unveraendert stehen - es wird nichts ueberschrieben.\n"
         "Meist fehlt ein Anfuehrungszeichen, eine eckige Klammer oder ein\n"
         "Gleichheitszeichen. Nach dem Berichtigen laeuft der Befehl wieder."
@@ -975,8 +980,10 @@ def scan_nichts_zu_tun(abgelehnt: list, nicht_erreichbar: list) -> str:
     )
 
 
-def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict) -> str:
-    """Fuer 'fotosort status': eine Zeile je bekannter Quelle."""
+def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict, jetzt: dict | None = None) -> str:
+    """Fuer 'fotosort status': eine Zeile je bekannter Quelle. jetzt: je Quelle,
+    ob sie gerade erreichbar ist (seit v0.14 jetzt nachgesehen, nicht der
+    Vermerk vom letzten Scan)."""
     if not quellen:
         return "Quellen: noch keine bekannt."
     zeilen = ["Quellen"]
@@ -984,7 +991,8 @@ def status_je_quelle(quellen: list, je_quelle: dict, je_status: dict) -> str:
         wurzel = z["wurzel"]
         zaehler = je_quelle.get(wurzel, {})
         stati = je_status.get(wurzel, {})
-        stand = "erreichbar" if int(z["erreichbar"] or 0) else "NICHT ERREICHBAR beim letzten Scan"
+        da = jetzt.get(wurzel) if jetzt is not None else bool(int(z["erreichbar"] or 0))
+        stand = "erreichbar" if da else "gerade nicht erreichbar - Platte, Karte oder Netz pruefen"
         zeilen.append(f"  {wurzel}  ({stand})")
         zeilen.append(
             f"    {anzahl(zaehler.get('gesamt', 0))} Dateien, {groesse(zaehler.get('bytes', 0))}"
@@ -1366,6 +1374,11 @@ def kopieren_zusammenfassung(z: dict) -> str:
     zeilen = [
         "Stand des Archivs",
         f"  kopiert (Pruefen offen):     {anzahl(status.get('kopiert', 0))} Dateien, {groesse(z.get('kopiert_bytes', 0))}",
+    ]
+    if status.get("verschoben", 0):
+        zeilen.append(f"  verschoben (umbenannt):      {anzahl(status['verschoben'])} Dateien,"
+                      f" {groesse(z.get('verschoben_bytes', 0))}")
+    zeilen += [
         f"  Duplikate:                   {anzahl(status.get('duplikat', 0))}",
         f"  noch zu kopieren:            {anzahl(status.get('analysiert', 0))}",
         f"  Fehler:                      {anzahl(status.get('fehler', 0))}",
@@ -1740,7 +1753,8 @@ def aufraeumen_uebersprungen(wurzel) -> str:
 
 
 def aufraeumen_nichts_zu_tun() -> str:
-    return "Nichts aufzuraeumen: Es gibt keine Dateien mit Status geprueft oder duplikat_bestaetigt."
+    return ("Nichts aufzuraeumen: Keine Datei ist geprueft und darf aus der Quelle entfernt werden.\n"
+            "Bereits importierte Bilder (lagen schon vorher im Archiv) bleiben immer in der Quelle.")
 
 
 def aufraeumen_dry_run_liste(wurzel, pfade_liste: list, weitere: int) -> str:
@@ -2022,6 +2036,15 @@ def start_quelle_abgelehnt(pfad, grund: str) -> str:
     return f"Quellordner {pfad} nicht uebernommen: {grund}"
 
 
+KOPIEREN_VERSCHIEBEN_NICHT_BESTAETIGT = (
+    "Nichts verschoben: Das Wort 'verschieben' wurde nicht eingegeben. Die Originale bleiben, wo sie sind."
+)
+KOPIEREN_PROBELAUF_VERSCHIEBEN = (
+    "Mit --verschieben wuerden die Originale danach aus der Quelle entfernt (gleiches Laufwerk: umbenannt,"
+    " sonst nach Kopie und Frischlesung beider Seiten) - erst nach dem Wort 'verschieben'."
+)
+
+
 def start_verschieben_frage(n: int, bytes_: int) -> str:
     return (
         f"Verschieben: {anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv gebracht und danach\n"
@@ -2247,11 +2270,16 @@ def ob_anleitung_fehlt() -> str:
     return "Die Anleitung (LIESMICH.md) liegt nicht im Programmordner. Bitte das ZIP-Paket vollständig neu entpacken."
 
 
+OB_ANLEGEN_JA = "Anlegen"
+OB_ANLEGEN_NEIN = "Nicht anlegen"   # der Text unten nennt genau diesen Knopf (Befund F9, v0.14)
+
+
 def ob_frage_ziel_anlegen(ziel) -> str:
     return (
         f"Den Ordner {ziel} gibt es noch nicht. Soll er angelegt werden? Lag hier schon ein Archiv – etwa auf "
-        "einer externen Platte oder einem Netzlaufwerk –, dann bitte erst die Platte angeschlossen oder das "
-        "Laufwerk verbunden und „Nicht anlegen“ wählen; sonst entsteht ein zweites, leeres Archiv."
+        "einer externen Platte oder einem Netzlaufwerk, das gerade nicht angeschlossen ist –, dann bitte „"
+        + OB_ANLEGEN_NEIN + "“ wählen, die Platte anschließen oder das Laufwerk verbinden und noch einmal "
+        "starten; sonst entsteht ein zweites, leeres Archiv."
     )
 
 

@@ -1071,7 +1071,11 @@ def test_startseite_sagt_nicht_alles_erledigt_wenn_noch_zu_pruefen_ist(tmp_path,
     from fotosort import cli
     assert cli.main(["scan", "--ziel", str(ziel), "--quelle", str(quelle)]) == cli.OK
     assert cli.main(["analyse", "--ziel", str(ziel)]) == cli.OK
-    assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.OK
+    cli.bestaetigung_vorgabe = {"dateien": "verschieben"}     # das Wort, wie am Terminal (seit v0.14)
+    try:
+        assert cli.main(["kopieren", "--ziel", str(ziel), "--verschieben"]) == cli.OK
+    finally:
+        cli.bestaetigung_vorgabe = None
     info = ablauf_modul.Ablauf(ziel=str(ziel), ordner=tmp_path / "ob").archiv_info()
     assert info["naechster"] == "pruefen", info
     assert "Prüfung steht noch aus" in info["phase"], info["phase"]

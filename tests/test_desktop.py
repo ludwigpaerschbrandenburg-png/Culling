@@ -209,12 +209,15 @@ def test_fenster_zu_neu_auf_und_absturz_im_fenster(app, tmp_path, grosse_quelle,
 def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys, monkeypatch):
     """Mit relativen Pfaden: Der Arbeitsprozess laeuft in einem anderen Ordner
     als das Fenster - frueher fand er dann seine Statusdatei nicht und der
-    erste Schritt galt als abgestuerzt."""
+    erste Schritt galt als abgestuerzt. Das Ziel gibt es noch nicht: Frueher
+    wartete der Durchlauf dann ewig auf die Frage "Ordner anlegen?" (Befund
+    F14, v0.14) - jetzt legt er es an."""
     from PySide6.QtGui import QImage
 
     monkeypatch.chdir(tmp_path)
     fotos = tmp_path / "fotos"
-    rc = cli.main(["fenster", "--durchlauf", os.path.relpath(ziel), os.path.relpath(quelle), "--fotos", "fotos"])
+    neu = ziel / "Neues Archiv"
+    rc = cli.main(["fenster", "--durchlauf", os.path.relpath(neu), os.path.relpath(quelle), "--fotos", "fotos"])
     aus = capsys.readouterr().out
     assert rc == cli.OK, aus
     assert "Durchlauf bestanden" in aus
@@ -891,4 +894,19 @@ def test_fenster_zu_im_ablauf_verlangt_das_wort_neu(app, tmp_path, quelle, ziel,
     assert titel[-1] == meldungen.OB_KETTE_TITEL and titel.count(meldungen.OB_KETTE_TITEL) == 2
     _bis_im_fenster(app, lambda: f.in_ruhe() and not f.ab.lauf_lebt(), 300)
     assert f.ab.naechster()["schritt"] == "fertig" and "erledigt" in f.meldung_label.text()
+    f.close()
+
+
+def test_f9_frage_ordner_anlegen_nennt_den_knopf_den_es_gibt(app, tmp_path, quelle, monkeypatch):
+    """Befund F9 (v0.14): Der Text sagte „Nicht anlegen“ wählen - die Knoepfe
+    hiessen aber „Abbrechen“ und „Anlegen“."""
+    gefragt: list = []
+    monkeypatch.setattr(desktop, "frage", lambda eltern, titel, text, **k: gefragt.append((titel, text, k)) or (False, ""))
+    ab = ablauf_modul.Ablauf(ordner=tmp_path / "ob")
+    f = desktop.Hauptfenster(ab)
+    f.start.ziel_setzen(str(tmp_path / "Neues Archiv"))
+    ab.quelle_hinzufuegen(str(quelle))
+    f.los(False, False)
+    (titel, text, knoepfe), = [g for g in gefragt if g[0] == "Ordner anlegen?"]
+    assert f"„{knoepfe['nein']}“" in text and knoepfe["ja"] == "Anlegen"
     f.close()
