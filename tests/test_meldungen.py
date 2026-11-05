@@ -245,6 +245,9 @@ def test_eine_datei_heisst_datei():
     text = Path(meldungen.__file__).read_text(encoding="utf-8")
     roh = re.findall(r"(?<!von )(?<!/)\{anzahl\([^)]*\)\} (?:Dateien|Quellen)\b", text)
     assert roh == []
+    # „von“ nur als „x von y Dateien“, nicht „die Pfade von 1 Dateien“.
+    von = re.findall(r"(\S+) von \{anzahl\([^)]*\)\} (?:Dateien|Quellen)\b", text)
+    assert all(v.endswith(")}") for v in von), von
     assert meldungen.n_dateien(1) == "1 Datei" and meldungen.n_dateien(1234) == "1.234 Dateien"
     assert meldungen.n_quellen(1) == "1 Quelle" and meldungen.n_quellen(2) == "2 Quellen"
     assert meldungen.ob_analyse_text(1) == "1 Datei wartet auf die Analyse."

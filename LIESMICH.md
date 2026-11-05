@@ -94,6 +94,24 @@ Virenscanner anschlägt.
 Ob alles zusammenpasst, zeigt `fotosort.bat --version` im schwarzen Fenster: Es nennt die
 Programmversion und das mitgelieferte ExifTool („gestartet ueber perl.exe").
 
+### Neue Version einspielen
+
+1. Das fotosort-Fenster schließen. Läuft gerade ein Schritt, fragt es nach; „Beenden" hält ihn
+   sauber an, die neue Version macht dort weiter.
+2. Die neue `fotosort-windows.zip` freigeben (wie oben in Schritt 2) und **in einen neuen
+   Ordner** entpacken, zum Beispiel `C:\fotosort-0.14` – nicht über den alten Ordner. Sonst
+   mischen sich alte und neue Programmdateien (seit Version 0.14 steckt ein neueres Python im
+   Paket).
+3. Im neuen Ordner `start.bat` doppelklicken. Archive, Einstellungen und das Gedächtnis des
+   Programms liegen nicht im Programmordner (Abschnitt 7): Die neue Version findet alles wieder.
+4. Hatten Sie für den alten Ordner eine Ausnahme im Virenscanner eingerichtet, braucht der neue
+   Ordner dieselbe.
+5. Läuft alles, können Sie den alten Programmordner löschen – Fotos liegen dort nie.
+
+**Nicht zurück zur alten Version:** Beim ersten Öffnen bringt eine neue Version die Datenbank
+auf ihren Stand; eine Kopie des alten Stands bleibt daneben liegen (Abschnitt 7). Eine ältere
+Version kann die Datenbank danach nicht mehr öffnen – sie sagt das und rührt nichts an.
+
 Wer das Programm aus dem Quellcode einrichten will, findet den Weg mit Python und
 ExifTool im Anhang am Ende dieser Anleitung.
 
@@ -173,15 +191,16 @@ oder Sidecar-Datei liegt. Es geht auch dann, wenn die Datenbank kaputt ist – d
 brauchen, oder wenn ein Archiv neu begonnen werden soll.
 
 Danach zeigt das Fenster die **Übersicht**: oben die Pfade (Quellen → Ziel) und die
-Phasenleiste **Scan · Analyse · Kopieren · Prüfen · Aufräumen** (die violette Linie zeigt, wie
-weit es ist), links der Balken mit erledigten Dateien, Datenmenge, MB/s und Restzeit, darunter
-die Zähler des letzten Schritts, rechts die Karten **Aufräumen**, **Leere Ordner** und **Letzter
-Bericht**. Unten stehen die Knöpfe. Bei **„Alles automatisch“** geht es nach jedem Schritt von
+Phasenleiste **Scan · Analyse · Kopieren · Prüfen · Aufräumen** (erledigte Schritte mit
+Haken ✓, der aktuelle mit Punkt ●), links der Fortschrittsbalken mit erledigten Dateien und
+Datenmenge – während eines Schritts auch Tempo (MB/s) und Restzeit –, darunter die Zähler des
+letzten Schritts und der schmale Balken **„Wohin kam was"** (mehr dazu im Reiter „Wohin?",
+unten), rechts die Karten **Aufräumen**, **Leere Ordner** und **Letzter Bericht**. Unten stehen die Knöpfe. Bei **„Alles automatisch“** geht es nach jedem Schritt von
 selbst weiter, bis am Ende **„Alles erledigt“** dasteht; hält der Ablauf vorher an (etwa nach
 „Abbrechen“ oder weil „Prüfen“ etwas gefunden hat), sagt eine Meldung, warum, und der Hauptknopf
 heißt **„Automatisch weiter ab …“** (er fragt noch einmal nach dem Wort). Bei **„Schritt für
 Schritt“** ist der umrandete Hauptknopf immer der nächste sinnvolle Schritt („Analyse starten",
-„Kopieren starten · 3.912 Dateien", „Prüfen starten"). Solange ein Schritt läuft, ist er
+„Kopieren starten (3.912 Dateien)", „Prüfen starten"). Solange ein Schritt läuft, ist er
 gesperrt, und daneben stehen **Pause** und **Abbrechen** – „Abbrechen“ hält auch den
 automatischen Ablauf an. Nichts beginnt ohne Ihren Klick auf „Los geht's“. Alles Bisherige
 bleibt gespeichert. **Fenster zu heißt Programm aus:** Läuft
@@ -230,7 +249,9 @@ das Programm berechnet für jede Datei den Zielordner. Ausgabe:
   Dateinamen abweicht. Das Programm sortiert trotzdem nach dem Aufnahmedatum; die Liste im
   Bericht hilft beim Nachsehen.
 - **Nur Hersteller, kein Modell** – manche Geräte schreiben nur ihren Hersteller in die Datei.
-  Solche Dateien landen im Ordner des Herstellers.
+  Solche Dateien landen im Ordner `Unbekannte_Kamera` (ein Ordner „Canon" wäre irreführend – es
+  könnten viele Canon-Kameras sein). Die Zusammenfassung der Analyse und der Bericht zählen sie
+  je Hersteller.
 
 Außer aus der Kamera-Angabe kommt das Datum auch aus Lightroom-Angaben (XMP), aus PNG-Dateien
 und aus einer `.xmp`-Datei neben dem Bild, wenn die Datei selbst keins hat.
@@ -263,7 +284,7 @@ Liegt im Zielordner schon ein Archiv, das Sie selbst angelegt haben, erkennt das
 
 ### Schritt 3: Kopieren
 
-Der Hauptknopf sagt, wie viele Dateien anstehen („Kopieren starten · 3.912 Dateien"); im
+Der Hauptknopf sagt, wie viele Dateien anstehen („Kopieren starten (3.912 Dateien)"); im
 schwarzen Fenster ist das der **Probelauf**. Nach dem Klick wird kopiert. Jede Datei wird zuerst unter einem Zwischennamen
 (`.part`) geschrieben, dabei wird eine Prüfsumme berechnet (ein Fingerabdruck des
 Inhalts), und erst am Ende bekommt sie ihren richtigen Namen. Ausgabe:
@@ -330,7 +351,8 @@ bleibt die Datei stehen und wird gemeldet.
 
 Zum Bestätigen tippen Sie das angezeigte Wort in das Feld der Karte (`verschieben` für den
 Ordner `_geloescht_`, `loeschen` für endgültiges Löschen). Der Knopf darunter wird erst
-anklickbar, wenn das Wort genau stimmt. Die Karte **„Leere Ordner"** arbeitet genauso mit dem
+anklickbar, wenn das Wort stimmt (Groß- und Kleinschreibung und Leerzeichen davor oder danach
+sind egal). Die Karte **„Leere Ordner"** arbeitet genauso mit dem
 Wort `entfernen`. Haben Sie auf
 der Startseite **Verschieben** gewählt, verlangt das Fenster schon vor Schritt 3 das Wort
 `verschieben`, weil dort die Quelle geleert wird. Im schwarzen Fenster gelten dieselben
@@ -347,6 +369,14 @@ Liegt am alten Platz inzwischen eine andere Datei, bleibt die Datei im Ordner `_
 wird genannt. Dateien, die Sie selbst in den Ordner gelegt haben, bleiben, wo sie sind. Beim
 nächsten Durchgang erkennt das Programm die zurückgelegten Dateien wieder – ihre Kopie liegt ja
 schon im Archiv. Endgültig gelöschte Dateien kann es nicht zurückholen.
+
+**Zurücklegen oder von Hand zurückschieben – ein Unterschied:** Mit „Zurücklegen…" bleiben die
+Dateien Duplikate ihrer eigenen Archivkopie; ein späteres Aufräumen darf sie wieder in den Ordner
+`_geloescht_` legen. Schieben Sie eine Datei dagegen **von Hand** aus dem Ordner `_geloescht_`
+zurück, kann das Programm nicht wissen, ob es dieselbe Datei ist. Es behandelt sie dann wie ein
+Bild, das schon vorher im Archiv lag: Sie bleibt für immer in der Quelle (im Reiter „Wohin?"
+grünblau, „War schon im Archiv"). Beides ist sicher – nur aufgeräumt wird die von Hand
+zurückgeschobene Datei nie mehr.
 
 ### Bilder sichten (Reiter „Sichten")
 
@@ -388,6 +418,45 @@ kleinen Datei auf dem Rechner (Abschnitt 7), nicht in den Bildern. Einzige Ausna
 neuen XMP-Dateien, und die nur, wenn Sie „XMP-Dateien anlegen…" drücken und bestätigen. Die
 kleinen Vorschaubilder hebt das Programm auf dem Rechner auf (nicht im Archiv), damit ein
 Ordner beim nächsten Mal sofort da ist.
+
+### Wohin kommt was? (Reiter „Wohin?")
+
+Oben im Fenster steht zwischen „Archiv" und „Sichten" der Reiter **„Wohin?"**. Er zeigt als
+Bild, wohin Ihre Dateien kommen – nach der Analyse als Plan, nach dem Kopieren als Ergebnis.
+Darüber stehen ein paar große Zahlen: Dateien gesamt, im Archiv, doppelt, schon vorher im
+Archiv, Fehler.
+
+- **Links** stehen die Quellordner, **rechts** die Ordner im Archiv (zuerst die Jahre).
+  Dazwischen laufen Bänder; je dicker ein Band, desto mehr Dateien.
+- **Die Farbe sagt, was mit den Dateien passiert** (die Legende steht über der Grafik):
+
+  | Farbe | Bedeutung |
+  |---|---|
+  | Blau | liegt im Archiv |
+  | Hellblau mit Rand | geplant, noch nicht kopiert |
+  | Orange | doppelt – derselbe Inhalt liegt schon im Archiv, er wird nicht zweimal abgelegt |
+  | Grünblau | lag schon vorher im Archiv – wird nie angefasst |
+  | Grau | bleibt in der Quelle (keine Fotos oder Videos, etwa Textdateien) oder ist noch nicht analysiert |
+  | Rot mit ⚠ | Fehler – der Grund steht in der Dateiliste und im Bericht |
+  | Gelb mit ⚠ | soll in einen anderen Zielordner als das gewählte Archiv |
+
+- **Mit der Maus auf ein Band zeigen:** Daneben erscheint, wie viele Dateien es sind, wie groß,
+  woher und wohin.
+- **Auf einen Ordner klicken** (mit „›" hinter der Zahl): eine Ebene tiefer – links in die
+  Unterordner der Quelle, rechts vom Jahr zum Monat, zum Tag und zur Kamera. Die Zeile über der
+  Grafik führt zurück („Alle Quellen", „Ganzes Archiv").
+- **Auf ein Band klicken:** Darunter erscheinen seine Dateien (höchstens 500) mit den Knöpfen
+  **„Archivordner öffnen"**, **„Quellordner öffnen"** und **„In Sichten zeigen"**. Die anderen
+  Bänder treten dabei zurück; „Auswahl aufheben" zeigt wieder alle.
+- Darunter stehen dieselben Ströme als **Tabelle** mit genauen Zahlen (ein Klick auf eine
+  Spaltenüberschrift sortiert) und das Feld **„Datei suchen"**: einen Namen oder einen Teil des
+  Pfads eintippen, Enter – für jede passende Datei steht da, woher sie kommt, wohin sie kommt
+  und was passiert ist. Bei einer doppelten Datei steht dort die Datei im Archiv, die schon
+  denselben Inhalt hat.
+
+Der Reiter liest nur, er ändert nichts. Während ein Schritt läuft, zeigt er den Stand davor und
+sagt das; nach dem Schritt ist er von selbst aktuell. In der Übersicht (Reiter „Archiv") zeigt
+der schmale Balken **„Wohin kam was"** dasselbe in Kurzform; der Knopf daneben führt hierher.
 
 ### Der große Lauf mit allen Fotos
 
@@ -443,10 +512,13 @@ auf (Eingabeaufforderung öffnen: in der Adresszeile des Explorers `cmd` eintipp
 | Quellordner mit den unsortierten Bildern | `D:\Probe\Quelle` |
 | Weiterer Quellordner (leer = keiner mehr) | nur Enter |
 | Kopieren oder Verschieben? (k/v) | Enter (= kopieren; die Quelle bleibt unverändert) |
-| Wo liegt das Ziel? hdd / ssd / netzwerk | `hdd` für eine Festplatte, `ssd` für eine SSD, `netzwerk` für ein Netzlaufwerk |
+| Worauf liegen Quelle und Ziel? (hdd / ssd / netzwerk / auto) | Enter nimmt den Vorschlag in Klammern; sonst `hdd`, wenn Quelle oder Ziel auf einer Festplatte liegt, `ssd`, wenn beide auf SSDs liegen, `netzwerk` für ein Netzlaufwerk, `auto` lässt das Programm nachsehen |
 | Stimmt das so? | Enter |
 
-Vor jedem Schritt fragt das Programm; Enter heißt „ja", `n` heißt „hier aufhören".
+Vor jedem Schritt fragt das Programm; Enter heißt „weiter", `n` heißt „hier aufhören". **Beim
+Aufräumen ist es umgekehrt:** Dort heißt Enter „nein". Die Quelle wird nur nach `ja` und dem
+Wort `verschieben` aufgeräumt, leere Ordner werden nur nach `ja` und dem Wort `entfernen`
+entfernt.
 
 ---
 
@@ -591,8 +663,8 @@ und daraus die **aktuelle Phase**; der Bericht nennt den Status je Datei.
 | `duplikat_bestaetigt` | die Archivdatei, auf die das Duplikat zeigt, wurde geprüft |
 | `verschoben` | auf demselben Laufwerk umbenannt statt kopiert |
 | `quelle_geloescht` | Original entfernt (endgültig oder in `_geloescht_<Datum>`) |
-| `uebersprungen` | nicht bearbeitet, z. B. Sidecar ohne Hauptdatei oder Datei zeigt ins Ziel |
-| `fehler` | etwas ging schief; der Grund steht im Bericht. Nichts wurde gelöscht. |
+| `uebersprungen` | nicht bearbeitet, bleibt in der Quelle: keine Foto- oder Videodatei (etwa eine Textdatei), eine Begleitdatei ohne ihr Bild (sie wird zugeordnet, sobald das Bild auftaucht) oder eine Datei, die ins Ziel zeigt |
+| `fehler` | etwas ging schief; der Grund steht im Bericht und im Reiter „Wohin?" (rot mit ⚠). Nichts wurde gelöscht. |
 
 Gelöscht werden darf **ausschließlich** aus `geprueft` und `duplikat_bestaetigt`, und
 auch dann erst nach erneutem vollständigem Lesen von Original und Archivkopie.
@@ -688,7 +760,11 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   als `fotosort.db.vor_schema_<Nummer>` liegen – ebenfalls nur zur Sicherheit.
 - **Archiv-Kennung**: `<Ziel>\.fotosortierer\archiv-id.txt`. Darüber findet das Programm
   die richtige Datenbank, auch wenn das Ziel unter einem anderen Laufwerksbuchstaben
-  eingebunden ist.
+  eingebunden ist (bei USB-Platten unter Windows häufig). **Seit Version 0.14** stellt es die
+  gespeicherten Pfade dann auf den neuen Ort um und sagt das; vorher legt es eine Kopie der
+  Datenbank als `fotosort.db.vor_umzug_<Zeit>` daneben. Im Archiv selbst ändert sich dabei
+  nichts. Gibt es den alten Ort noch mit derselben Kennung (eine Kopie des Archivs), hört es
+  auf und fragt, mit welchem Ordner es weitergehen soll.
 - **Bewertungen** aus dem Reiter „Sichten": `bewertungen.db` im selben Ordner wie die
   Datenbank, dazu der Ordner `vorschau` mit den aufgehobenen Vorschaubildern. „Archiv
   verwerfen" entfernt beides mit.
@@ -842,7 +918,8 @@ Nur nötig, wenn Sie nicht das fertige Paket, sondern den Quellcode benutzen wol
 
 1. **Quellcode holen:** Auf der Seite des Projekts auf GitHub auf **Code** und
    **Download ZIP** klicken, die ZIP-Datei entpacken, zum Beispiel nach `C:\fotosort-quellcode`.
-2. **Python 3.12 oder neuer** von https://www.python.org/downloads/windows/ als
+2. **Python 3.12 oder neuer** (am besten 3.15 – dieselbe Version wie im fertigen Paket) von
+   https://www.python.org/downloads/windows/ als
    „Windows installer (64-bit)" installieren, dabei **das Häkchen „Add python.exe to PATH"
    setzen**.
 3. **ExifTool** von https://exiftool.org als „Windows Executable" (ZIP) laden, entpacken,
@@ -853,8 +930,9 @@ Nur nötig, wenn Sie nicht das fertige Paket, sondern den Quellcode benutzen wol
    (braucht Internet) und meldet FERTIG. Es kann beliebig oft laufen.
 5. Danach funktionieren `start.bat` und `fotosort.bat` genauso wie im fertigen Paket.
 
-**Das Paket selbst bauen** (wie es die GitHub-Actions tun; geht mit Python 3.12 auf jedem
-System, auch Linux, braucht Internet): `python paket/exiftool_holen.py build/exiftool`, dann
+**Das Paket selbst bauen** (wie es die GitHub-Actions tun; geht mit Python 3.12 oder neuer auf
+jedem System, auch Linux, braucht Internet; nur mit Python 3.15 – derselben Version wie im
+Paket – wird zusätzlich vorkompiliert, dann ist der erste Start schneller): `python paket/exiftool_holen.py build/exiftool`, dann
 `python paket/bauen.py --exiftool build/exiftool`, dann
 `python paket/pruefen.py build/paket/fotosort build/pruefung`. Das Ergebnis liegt unter
 `build/paket/fotosort`. Der Bau holt das eingebettete Python von python.org und die

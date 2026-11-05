@@ -7,6 +7,61 @@ Neueste Einträge nach oben.
 
 ---
 
+## 2026-11-05 — „Wohin kommt was?“ als Reiter im Programmfenster
+
+**Entscheidung (des Nutzers):** Die Grafik, die zeigt, was wohin sortiert wird, kommt **ins
+Programmfenster** – als eigener Reiter „Wohin?“ zwischen „Archiv“ und „Sichten“ und als schmaler
+Balken „Wohin kam was“ in der Übersicht (SPEC §8). Gezeichnet als Fluss-Grafik: links die
+Quellordner, rechts die Ordner im Archiv, Bänder so dick wie die Zahl der Dateien, die Farbe nach
+dem Schicksal. Dazu dieselben Zahlen als Tabelle und eine Suche nach einzelnen Dateien.
+
+**Begründung:** Der Nutzer will sehen, wie sortiert wird – ohne Bericht zu lesen. Eine
+Fluss-Grafik zeigt Herkunft und Ziel zugleich; Hineinklicken hält sie auch bei vielen Ordnern
+lesbar (höchstens zehn Knoten je Seite). Die Tabelle daneben macht die genauen Zahlen ohne Farben
+lesbar. Gezeichnet mit QPainter, weil das Windows-Paket nur QtCore, QtGui und QtWidgets mitbringt.
+Die Farben sind mit dem Prüfskript für Farbsehschwächen geprüft, für hell und dunkel getrennt;
+„geplant“ ist derselbe Blauton als Schleier, weil hellere Blautöne die Prüfung nicht bestanden.
+
+**Alternativen:** Fenster und zusätzlich die Browser-Fassung (zur Wahl gestellt; der Nutzer wählte
+nur das Fenster – die Browser-Fassung bleibt für später, `docs/todo.md`); Kreis- oder
+Balkendiagramme je Quelle (zeigen kein Wohin).
+
+---
+
+## 2026-11-05 — Bausteine erneuert: Python 3.15.2, Qt 6.12.0, ExifTool 13.60
+
+**Entscheidung (des Nutzers):** „Updaten“ heißt auch: die Bausteine im Windows-Paket erneuern.
+Seit v0.14: Python 3.15.2 (vorher 3.12.10), PySide6/shiboken6 6.12.0 (6.11.2 läuft nicht unter
+Python 3.15), blake3 1.0.11, tzdata 2026.6, ExifTool 13.60 (geladen von SourceForge; exiftool.org
+liefert die ZIP-Datei nicht mehr). Die Python-Version steht an **einer** Stelle
+(`paket/paketinhalt.py`, `PYTHON_VERSION`). `requires-python` bleibt `>=3.12`.
+
+**Begründung:** Sicherheits- und Fehlerbehebungen der Bausteine; Qt 6.12 braucht die Windows-Datei
+`mscms.dll` (in der Liste der Systemdateien). Weil Python ab 3.13 manche Windows-Pfade anders
+schreibt, prüft die CI zusätzlich den Wechsel: Archiv mit 3.12 angelegt, mit 3.15 weitergeführt.
+Die CI testet Linux und Windows je mit 3.12 und 3.15.
+
+**Alternativen:** Bei Python 3.12 bleiben (läuft bis 2028, bekommt aber nur noch
+Sicherheitskorrekturen ohne Windows-Installer).
+
+---
+
+## 2026-11-05 — Bei gleichem Inhalt kommt die datierte Datei ins Archiv
+
+**Entscheidung:** Von inhaltsgleichen Dateien kommt zuerst eine mit sicherem Datum ins Archiv,
+erst danach eine ohne (Rang +3, SPEC §4 Phase 3). Bisher galt nur „zuerst eingereicht“ und der
+Kopie-Name.
+
+**Begründung:** Beobachtung der Prüfung v0.14: Im Testbaum haben `2026-01-01 Urlaub.jpg` (Datum aus
+dem Namen) und `.versteckt/versteckt.jpg` (ohne Datum) denselben Inhalt. Kam zufällig die
+undatierte zuerst, lag das Bild nur unter `_Ohne_Datum`, und das Datum aus dem Namen war
+verloren. Es geht kein Bild verloren – nur die Einordnung wird besser; die andere Datei wird wie
+bisher ihr Duplikat.
+
+**Alternativen:** Beide ablegen (widerspricht „nur eine Kopie je Inhalt“, SPEC §5).
+
+---
+
 ## 2026-10-28 — Alles automatisch: ein Wort beim Start, dann bis zum Aufräumen
 
 **Entscheidung (des Nutzers):** Im Fenster laufen Scan, Analyse, Kopieren, Prüfen und Aufräumen

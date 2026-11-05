@@ -20,6 +20,8 @@ Die Dauerregeln für die Arbeit am Projekt stehen in [`../CLAUDE.md`](../CLAUDE.
 | Datei | Wofür |
 |---|---|
 | [`entscheidungen.md`](entscheidungen.md) | Was wurde entschieden und warum |
+| [`pruefung_v0.14.md`](pruefung_v0.14.md) | Prüfung aller Funktionen für Version 0.14: wie geprüft, Ergebnis, was behoben |
+| [`oberflaeche/`](oberflaeche/) | Bildschirmfotos jeder Ansicht des Programmfensters (am Testbaum) |
 | [`notizen.md`](notizen.md) | Freitext für alles, was noch keinen Platz hat |
 | [`assets/`](assets/) | Bilder, PDFs, Screenshots, Skizzen |
 

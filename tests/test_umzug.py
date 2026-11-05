@@ -93,6 +93,18 @@ def test_neuer_laufwerksbuchstabe_pfade_werden_umgeschrieben(quelle, tmp_path, n
     assert "Das Archiv lag bisher unter" not in capsys.readouterr().out
     assert len(sorted(_archiv_ordner(nachschauen, neu).glob(umzug.SICHERUNG_MUSTER))) == 1
 
+    # Befund F1: Auch „Archiv nachpruefen“ findet am neuen Ort jede Datei, und
+    # die Pruefsummen-Liste nennt dieselben Dateien wie vor dem Wechsel.
+    liste = neu / ".fotosortierer" / "pruefsummen.b3"
+    eintraege = liste.read_text(encoding="utf-8").splitlines()
+    assert len(eintraege) >= len(geprueft)
+    assert _cli("pruefen", "--ziel", neu, "--alles") == cli.OK
+    aus = capsys.readouterr().out
+    assert "Ergebnis:          alle unveraendert" in aus and "FEHLT" not in aus, aus
+    assert sorted(liste.read_text(encoding="utf-8").splitlines()) == sorted(eintraege)
+    for p in geprueft:
+        assert _zeilen(nachschauen, neu)[p]["status"] == "geprueft", p
+
     # Ein neuer Durchgang haelt die eigenen Kopien nicht fuer "schon im Archiv",
     # und das Aufraeumen findet die Kopien am neuen Ort.
     _vorbereiten(neu, quelle)

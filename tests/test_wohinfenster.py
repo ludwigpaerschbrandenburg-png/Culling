@@ -72,6 +72,18 @@ def _knoten_punkt(g: wohinfenster.FlussGrafik, seite: str, i: int) -> QPoint:
     return QPoint(round(k.x + k.b / 2), round(g.RAND + k.mitte))
 
 
+def _zeiger(g: wohinfenster.FlussGrafik, punkt: QPoint) -> None:
+    """Den Zeiger ueber die Grafik bewegen - als Ereignis direkt an das Widget.
+    (QTest.mouseMove liefert nichts, wenn der Zeiger aus einem frueheren Test
+    schon genau dort steht.)"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    ort = QPointF(punkt)
+    ereignis = QMouseEvent(QEvent.Type.MouseMove, ort, QPointF(g.mapToGlobal(punkt)), Qt.MouseButton.NoButton,
+                           Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(g, ereignis)
+
+
 def _band_punkt(g: wohinfenster.FlussGrafik, i: int) -> QPoint:
     b = g.lage_holen().baender[i]
     x = (b.x0 + b.x1) / 2
@@ -233,8 +245,7 @@ def test_hinweis_unter_dem_zeiger(app, tmp_path, quelle, ziel):
     g = f.wohin.grafik
     a = f.wohin.ansicht
     i = next(j for j, b in enumerate(a.baender) if b.schicksal == wohin.KOPIERT)
-    QTest.mouseMove(g, _band_punkt(g, i))
-    _ereignisse(app, 0.1)
+    _zeiger(g, _band_punkt(g, i))
     assert g.ueber == ("band", i)
     b = a.baender[i]
     text = g.tipp_text(("band", i))
@@ -242,8 +253,7 @@ def test_hinweis_unter_dem_zeiger(app, tmp_path, quelle, ziel):
     assert a.links[b.links].name in text and a.rechts[b.rechts].name in text
     assert meldungen.WOHIN_SCHICKSAL[wohin.KOPIERT] in text
     # Ein ganzer Knoten hebt seine Baender hervor.
-    QTest.mouseMove(g, _knoten_punkt(g, "links", 0))
-    _ereignisse(app, 0.1)
+    _zeiger(g, _knoten_punkt(g, "links", 0))
     assert g.ueber == ("links", 0) and g._hervorgehoben() == {j for j, b in enumerate(a.baender) if b.links == 0}
     f.close()
 

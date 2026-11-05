@@ -968,6 +968,34 @@ an; auch das Aufräumen automatisch, nur in den Ordner `_geloescht_` (SPEC §8,
   und das Wort, dann alle fünf Schritte von selbst; „Ergebnis prüfen“: 5.321 von 5.321 richtig, kein
   Bild verloren. CI grün (Linux, Windows 1104 grün, Paket), Release v0.13.0 mit `fotosort-windows.zip`.
 
+## Phase 15 — Wohin kommt was? Alles geprüft, Bausteine erneuert (Version 0.14)
+
+**Wunsch des Nutzers vom 05.11.2026:** „Baue eine schlaue und gute Visualisierung, wie sortiert
+wird – visuell darstellen, was wohin geht. Bitte außerdem alle Features nach Richtigkeit testen
+und updaten.“ Entscheidungen: Grafik im Programmfenster; „updaten“ heißt auch, die Bausteine im
+Windows-Paket zu erneuern (`docs/entscheidungen.md`).
+
+- [x] Bausteine: Python 3.15.2, PySide6 6.12.0, blake3 1.0.11, tzdata 2026.6, ExifTool 13.60;
+  Python-Version an einer Stelle; `mscms.dll` für Qt 6.12; CI mit vier Kombinationen (Linux und
+  Windows je 3.12 und 3.15) und Wechseltest 3.12 → 3.15 (`tests/test_wechsel.py`).
+- [x] Fehler 1–9 der Prüfung (je Test zuerst): neuer Laufwerksbuchstabe fürs Archiv
+  (`umzug.py`), neue Endungen wirken auf erfasste Dateien, Nachzügler-XMP eines schon
+  importierten Bildes, Sidecar ohne Hauptdatei wird erneut zugeordnet, „Verschieben“ mit falscher
+  Größe wird geprüft, Zahlen nach dem Aufräumen über denselben Zeitraum, Browser-Fassung nimmt
+  keine fremden Anfragen an, Schreibschutz nur an der Verknüpfung, Text „Alles automatisch“.
+- [x] Unabhängiger Tester (eigene Arbeitskopie, nur Testbaum und Testbilder): alle Befehle, das
+  Fenster, Unterbrechungen. Befunde F1–F16 behoben (`docs/pruefung_v0.14.md`), darunter: Kopie
+  mit Datum vor Kopie ohne, „Aufräumen“ bei verschwundenem Archiv hört auf, „kopieren
+  --verschieben“ verlangt das Wort, Tippfehler-Hinweis auf Deutsch, „1 Datei“ statt „1 Dateien“.
+- [x] Reiter „Wohin?“: Kern `wohin.py` (Test zuerst, 1 Million Zeilen in wenigen Sekunden),
+  Fenster `oberflaeche/wohinfenster.py` (Grafik, Hinweise, Hineinklicken, Band mit Dateien,
+  Tabelle, Suche), Balken „Wohin kam was“ in der Übersicht, Bild „15-wohin“ im Durchlauf.
+- [x] Doku: SPEC (§2, §3, §4, §6, §8, §9, §12), `docs/entscheidungen.md`, LIESMICH (neuer Abschnitt
+  zum Reiter, „Neue Version einspielen“, veraltete Stellen), Prüfprotokoll.
+- [ ] Volle Tests mit Python 3.12 und 3.15, Rundgang mit 5000 Testbildern im Fenster, CI grün,
+  Release v0.14.0.
+
 ## Ohne feste Phase
 
-- [ ] Nichts offen.
+- [ ] Reiter „Wohin?“ auch in der Browser-Fassung (für TrueNAS; Wunsch vom 05.11.2026 war nur das
+  Fenster).

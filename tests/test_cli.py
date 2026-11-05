@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import testbaum
-from fotosort import cli, config, db
+from fotosort import cli, config, db, meldungen
 
 
 def _laufen(capsys, *argumente) -> tuple[int, str]:
@@ -150,8 +150,9 @@ def test_scan_zeigt_anzahl_groesse_typen_und_durchsatz(capsys, quelle, ziel):
     _, ausgabe = _laufen(capsys, "scan", "--quelle", str(quelle), "--ziel", str(ziel))
     assert "Dateien gesamt" in ausgabe
     assert "Gesamtgroesse" in ausgabe
-    for typ in ("foto", "raw", "video", "sidecar", "sonstiges"):
-        assert typ in ausgabe
+    # Seit v0.14 mit deutschen Namen statt der Kennungen (foto, raw, sidecar ...).
+    for _typ, name in meldungen.TYPEN_MEHRZAHL:
+        assert name in ausgabe
     assert "Durchsatz" in ausgabe
 
 

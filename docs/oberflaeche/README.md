@@ -11,7 +11,7 @@ QT_QPA_PLATFORM=offscreen fotosort fenster --durchlauf <Ziel> <Quelle> --fotos d
 ```
 
 Der Durchlauf bedient das Fenster selbst – „Schritt für Schritt“, damit jede Ansicht ein Bild bekommt: Startseite → Scan → Analyse → Kopieren (danach ein
-Blick in den Reiter „Sichten“) → Prüfen → Aufräumen. Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
+Blick in den Reiter „Sichten“) → Prüfen → Aufräumen → Reiter „Wohin?“ (seit v0.14). Der „laufende Schritt" (Bilder 05 und 06) ist ein eingespielter Beispielstand, weil
 der Testbaum zu klein ist, um ihn mitten im Kopieren zu erwischen. Dieselbe Prüfung läuft in
 der CI gegen das Windows-Paket.
 
@@ -27,9 +27,10 @@ der CI gegen das Windows-Paket.
 | [08](08-uebersicht-nach-pruefen-aufraeumen-karte.png) | Übersicht nach dem Prüfen, Aufräumen-Karte aktiv |
 | [09](09-aufraeumen-bestaetigt.png) | Aufräumen: Bestätigungswort getippt, Knopf aktiv |
 | [10](10-liste-duplikate.png) | Liste (Duplikate), seitenweise |
-| [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
+| [11](11-uebersicht-nach-aufraeumen-fertig.png) | Übersicht nach dem Aufräumen, alle Phasen erledigt; darunter der Balken „Wohin kam was“ (seit v0.14); unten „Archiv nachprüfen…“, oben rechts „Hilfe“ (F1) |
 | [12](12-dialog-ordner-anlegen.png) | Dialog „Ordner anlegen?" |
 | [13](13-sichten.png) | Reiter „Sichten“ (seit v0.8, ausgebaut in v0.11): Ordner des Archivs, Vorschaubilder, Knopfleiste für Sterne, Markierung und Farbe, Vergleichen (die Testbilder sind nur 1 × 1 Pixel groß) |
 | [14](14-frage-alles-automatisch.png) | Die eine Frage von „Alles automatisch“ (seit v0.13): einmal das Wort `verschieben`, dann läuft alles bis zum Aufräumen allein |
+| [15](15-wohin.png) | Reiter „Wohin?“ (seit v0.14): oben die Kennzahlen und die Legende, darunter die Fluss-Grafik – hier in „2026“ hineingeklickt, das dickste Band gewählt; darunter seine Dateien |
 
 Design-Übergabe: [`../design/DESIGN.md`](../design/DESIGN.md).

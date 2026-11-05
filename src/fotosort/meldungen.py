@@ -879,7 +879,7 @@ def archiv_umzug(umzuege, sicherung, neu_geplant: int) -> list[str]:
         texte.append(
             f"Das Archiv lag bisher unter {alt}, jetzt unter {neu}\n"
             "(anderer Laufwerksbuchstabe oder verschobener Ordner - erkannt an der Archiv-Kennung).\n"
-            f"Die gespeicherten Pfade von {anzahl(dateien)} Dateien zeigen jetzt auf den neuen Ort.\n"
+            f"Die gespeicherten Pfade von {n_dateien(dateien)} zeigen jetzt auf den neuen Ort.\n"
             "Im Archiv selbst wurde nichts veraendert."
         )
     if neu_geplant:
