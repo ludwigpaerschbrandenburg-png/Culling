@@ -992,8 +992,10 @@ Windows-Paket zu erneuern (`docs/entscheidungen.md`).
   Tabelle, Suche), Balken „Wohin kam was“ in der Übersicht, Bild „15-wohin“ im Durchlauf.
 - [x] Doku: SPEC (§2, §3, §4, §6, §8, §9, §12), `docs/entscheidungen.md`, LIESMICH (neuer Abschnitt
   zum Reiter, „Neue Version einspielen“, veraltete Stellen), Prüfprotokoll.
-- [ ] Volle Tests mit Python 3.12 und 3.15, Rundgang mit 5000 Testbildern im Fenster, CI grün,
-  Release v0.14.0.
+- [x] Volle Tests mit Python 3.12 und 3.15 (je 1.208 bestanden), Rundgang mit 5000 Testbildern im
+  Fenster („Ergebnis prüfen“: 5.321 von 5.321 richtig, kein Bild verloren; „Wohin?“ zählt alle
+  5.248 Dateien genau einmal), CI grün (vier Kombinationen, Wechseltest, Paket), Release v0.14.0
+  mit `fotosort-windows.zip`.
 
 ## Ohne feste Phase
 

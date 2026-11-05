@@ -136,4 +136,30 @@ Nicht geprüft: echte Netzlaufwerke, exFAT-Karten, echter Stromausfall.
 
 ## Ergebnis der Abschlusstests
 
-(wird nach den Abschlusstests eingetragen)
+- **Rundgang mit 5000 Testbildern im Fenster** („Testbilder anlegen“, „Los geht's“, einmal das Wort
+  `verschieben`, dann alles automatisch): nach 42 Sekunden „Alles erledigt“. Der Reiter „Wohin?“
+  zeigt alle 5.248 erfassten Dateien genau einmal: 5.147 im Archiv, 27 doppelt, 64 schon vorher im
+  Archiv, 10 bleiben in der Quelle (keine Fotos oder Videos). „Ergebnis prüfen“: **„Alles richtig:
+  Jede Datei liegt dort, wo es auf ihr steht. 5.321 von 5.321 Erwartungen erfüllt. Kein Bild ist
+  verloren gegangen.“**
+- **Die Tests auf GitHub fanden noch einen Fehler zu F12** (Ausgabe in ein anderes Programm
+  umgeleitet, das plötzlich weg ist): Lag beim Beenden noch Ausgabe im Zwischenspeicher, endete das
+  Programm mit einem Fehlercode statt mit „OK“ – unter Linux und Windows. Hier im Container fiel das
+  nicht auf, weil dort die Ausgabe ungepuffert eingestellt ist. Außerdem beendete die Bibliothek
+  für die Bildschirmausgabe (rich) bei laufender Fortschrittsanzeige das Programm selbst, mitten im
+  Lauf. **Jetzt:** Eine abgerissene Ausgabe geht still ins Leere, der Lauf endet sauber. Der Test
+  läuft jetzt wie bei Nutzern (gepuffert) und zusätzlich mit Fortschrittsanzeige.
+- **Ein zweiter Fehler, ebenfalls zuerst auf GitHub gesehen** (danach auch hier mit Python 3.15):
+  Fielen zwei Berichte in dieselbe Sekunde – der Bericht eines Laufs und gleich danach „Neu
+  schreiben“ –, hielt das Programm den älteren für den neuesten und packte die Tabelle des
+  wirklich neuesten. Kein Bild betroffen, nur die Ordnung der Berichte. **Jetzt:** In derselben
+  Sekunde zählt der zuletzt geschriebene. Ein Test zeigt den Fall.
+- **Alle automatischen Tests** (nach diesen Behebungen, ausgeführt wie bei Nutzern, also
+  gepuffert): mit Python 3.12 **1.208 bestanden**, mit Python 3.15 ebenso **1.208 bestanden**,
+  keiner fehlgeschlagen. Je 8 übersprungen: Prüfungen, die nur unter Windows gehen oder hier im
+  Container nicht möglich sind.
+- **Automatische Tests auf GitHub:** Linux und Windows, jeweils mit Python 3.12 und 3.15 – alle
+  vier grün (unter Windows mit 3.15: 1.190 bestanden, 26 übersprungen; dort entfallen vor allem
+  Prüfungen, die es nur unter Linux gibt). Ebenfalls grün: der Wechseltest (Archiv mit Python 3.12
+  angelegt, mit 3.15 weitergeführt) und die Prüfung des Windows-Pakets, die Fenster,
+  Arbeitsprozess und Testbilder mit dem neuen Python startet.
