@@ -66,6 +66,11 @@ ARGPARSE: dict[str, str] = {
     "%(prog)s: error: %(message)s\n": "%(prog)s: Fehler: %(message)s\n",
     "argument %(argument_name)s: %(message)s": "Angabe %(argument_name)s: %(message)s",
     "invalid choice: %(value)r (choose from %(choices)s)": "unbekannt: %(value)r (moeglich: %(choices)s)",
+    # Seit Python 3.14 (das Windows-Paket hat 3.15): Vorschlag bei Tippfehlern.
+    "invalid choice: %(value)r, maybe you meant %(closest)r? (choose from %(choices)s)":
+        "unbekannt: %(value)r, meinten Sie %(closest)r? (moeglich: %(choices)s)",
+    "%(prog)s: warning: %(message)s\n": "%(prog)s: Warnung: %(message)s\n",
+    "subcommands": "Befehle",
     "the following arguments are required: %s": "es fehlt: %s",
     "unrecognized arguments: %s": "unbekannte Angaben: %s",
     "expected one argument": "hier fehlt ein Wert",

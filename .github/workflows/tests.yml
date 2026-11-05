@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   tests:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     # Unter Windows dauern die Tests seit v0.12 (Testbilder) 20-26 Minuten, auf
     # einer langsamen Maschine knapp 40 - mit 40 wurde ein Lauf kurz vor dem
@@ -21,13 +21,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Seit v0.14: das Python des Windows-Pakets (3.15) und die kleinste
+        # erlaubte Version (requires-python, 3.12), je unter Linux und Windows.
+        include:
+          - {os: ubuntu-latest, python: "3.12"}
+          - {os: windows-latest, python: "3.15"}
+          - {os: ubuntu-latest, python: "3.15"}
+          - {os: windows-latest, python: "3.12"}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - name: ExifTool und Qt-Grundlagen installieren (Linux)
         if: runner.os == 'Linux'
@@ -56,3 +62,47 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q -p no:cacheprovider --timeout=300 -o faulthandler_timeout=290
+
+  wechsel:
+    # Ein Archiv mit Python 3.12 anlegen (Paket bis v0.13) und mit 3.15
+    # weiterfuehren (Paket ab v0.14): dieselben Pfade, nichts doppelt, die
+    # eigenen Kopien kein "schon im Archiv", Aufraeumen wie gewohnt.
+    name: Wechsel Python 3.12 -> 3.15 (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        id: alt
+        with:
+          python-version: "3.12"
+
+      - name: fotosort fuer das alte Python (3.12)
+        shell: pwsh
+        run: |
+          & "${{ steps.alt.outputs.python-path }}" -m pip install --upgrade pip
+          & "${{ steps.alt.outputs.python-path }}" -m pip install -e .
+
+      - uses: actions/setup-python@v5
+        id: neu
+        with:
+          python-version: "3.15"
+
+      - name: ExifTool holen (wie im Paket)
+        shell: pwsh
+        run: |
+          python paket/exiftool_holen.py build/exiftool
+          "$((Resolve-Path build/exiftool).Path)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: fotosort und Tests fuer das neue Python (3.15)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]" pytest-timeout
+
+      - name: Wechseltest
+        env:
+          QT_QPA_PLATFORM: offscreen
+          FOTOSORT_PYTHON_ALT: ${{ steps.alt.outputs.python-path }}
+          FOTOSORT_PYTHON_NEU: ${{ steps.neu.outputs.python-path }}
+        run: python -m pytest -q -s -p no:cacheprovider --timeout=600 tests/test_wechsel.py

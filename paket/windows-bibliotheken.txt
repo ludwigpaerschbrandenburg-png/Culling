@@ -1,6 +1,8 @@
 # Bibliotheken des Windows-Pakets (paket/bauen.py), fest mit Version und
 # Pruefsumme: Jeder Bau nimmt genau diese Dateien von PyPI, fuer Windows 64 Bit
-# und Python 3.12 (installiert ohne weitere Abhaengigkeiten, --no-deps).
+# und Python 3.15 (paketinhalt.PYTHON_VERSION; installiert ohne weitere
+# Abhaengigkeiten, --no-deps). blake3 hat je Python-Version eine eigene Datei:
+# die Pruefsumme muss die der cp315-Datei sein.
 #
 # Nicht dabei, mit Absicht:
 # - fastapi, uvicorn: die Browser-Fassung; unter Windows gibt es das Fenster.
@@ -8,12 +10,12 @@
 #   Hervorhebung, Markdown und bunte Fehlerberichte - fotosort nutzt davon
 #   nichts (nur Console, Progress, Table). tests/test_paket.py prueft das.
 #
-# Neue Versionen: pip download --platform win_amd64 --python-version 3.12 \
+# Neue Versionen: pip download --platform win_amd64 --python-version 3.15 \
 #   --implementation cp --only-binary=:all: <paket>==<version>, dann die
 #   SHA-256 der .whl-Datei hier eintragen.
-blake3==1.0.9 --hash=sha256:15566065ff90ab3da46ec0be1417406f00507af902b6fb0fbc6563e77f02fc42
+blake3==1.0.11 --hash=sha256:2b25a0bffc822160a474912a0428d2e5a62b864de126703993f501dd6cb3e744
 rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
 tomli-w==1.2.0 --hash=sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90
-tzdata==2026.4 --hash=sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81
-PySide6-Essentials==6.11.2 --hash=sha256:c8a29def77032773a30879f7f24415b5395ad08592d147c170824ef4c735dfc1
-shiboken6==6.11.2 --hash=sha256:6ab0eba1c904455df621f9a6df3ca2bb896bab8670572d2bc4e37804ae91f19a
+tzdata==2026.6 --hash=sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec
+PySide6-Essentials==6.12.0 --hash=sha256:c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42
+shiboken6==6.12.0 --hash=sha256:a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e

@@ -32,9 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Dieselbe Version wie python\ im Paket (paket/paketinhalt.py,
+      # PYTHON_VERSION) - sonst wird nicht vorkompiliert.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.15"
 
       # fotosort selbst nur fuer die Pruefung (Testbaum-Erzeuger); das Paket
       # bekommt seine Bibliotheken fest aus paket/windows-bibliotheken.txt.

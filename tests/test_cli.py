@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-
+import sys
 from pathlib import Path
 
 import pytest
@@ -831,3 +831,16 @@ def test_hilfe_und_eingabefehler_auf_deutsch(capsys):
         cli.main(["gibtsnicht"])
     fehler = capsys.readouterr().err
     assert "Fehler:" in fehler and "unbekannt: 'gibtsnicht'" in fehler and "invalid choice" not in fehler
+
+
+def test_tippfehler_im_befehl_vorschlag_auf_deutsch(capsys):
+    """Seit Python 3.14 schlaegt argparse bei einem Tippfehler den naechsten
+    Befehl vor ("maybe you meant") - mit einem neuen, englischen Text. Das
+    Windows-Paket hat seit v0.14 Python 3.15."""
+    with pytest.raises(SystemExit):
+        cli.main(["statsu"])
+    fehler = capsys.readouterr().err
+    assert "Fehler:" in fehler and "unbekannt: 'statsu'" in fehler
+    assert "invalid choice" not in fehler and "maybe you meant" not in fehler
+    if sys.version_info >= (3, 14):
+        assert "meinten Sie 'status'?" in fehler

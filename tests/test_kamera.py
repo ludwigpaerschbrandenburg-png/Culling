@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import warnings
 from pathlib import PureWindowsPath
 
@@ -69,8 +70,12 @@ def test_windows_geraetenamen_werden_nie_ordnernamen(modell, ordner):
     konf = config.Konfiguration()
     ergebnis = kamera.ordnername({"Model": modell}, konf)[0]
     assert ergebnis == ordner
-    reserviert = getattr(PureWindowsPath, "is_reserved", None)
-    if reserviert is not None:
+    # Gegenprobe mit Pythons eigener Liste: ab 3.13 ntpath.isreserved (auf jedem
+    # System importierbar), davor PureWindowsPath.is_reserved - das gibt es seit
+    # 3.15 nicht mehr, die Pruefung fiele dort sonst stumm weg.
+    if hasattr(ntpath, "isreserved"):
+        assert not ntpath.isreserved(ergebnis)
+    else:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             assert not PureWindowsPath(ergebnis).is_reserved()

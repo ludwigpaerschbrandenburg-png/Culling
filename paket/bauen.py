@@ -10,14 +10,15 @@ Programm, mit dem ein Python-Skript sonst auch laeuft:
     fotosort.bat     Befehle mit Ausgabe: python\\python.exe
     LIESMICH.md, VERSION.txt
     python\\          "Windows embeddable package" (64 Bit) von python.org,
-                     unveraendert bis auf python312._pth (Suchpfad ..\\lib)
+                     unveraendert bis auf python3xx._pth (Suchpfad ..\\lib)
     lib\\             fotosort, fotosort_start.py und die Bibliotheken; Qt nur mit
                      QtCore, QtGui, QtWidgets; alles vorkompiliert
     exiftool\\        ExifTool von exiftool.org: exiftool_files mit perl.exe und
                      exiftool.pl - ohne den Starter exiftool.exe, perl.exe wird
                      direkt gestartet (metadaten.exiftool_befehl)
 
-Aufruf (auf jedem System, auch unter Linux; braucht Internet und Python 3.12):
+Aufruf (auf jedem System, auch unter Linux; braucht Internet und das Python
+der Paketversion, paketinhalt.PYTHON_VERSION - sonst wird nicht vorkompiliert):
     python paket/bauen.py --exiftool build/exiftool [--ausgabe build/paket]
 
 Ergebnis: <ausgabe>/fotosort/. Der Bau bricht ab, wenn eine Pruefsumme nicht
@@ -43,14 +44,14 @@ import paketinhalt
 
 WURZEL = Path(__file__).resolve().parent.parent
 
-PYTHON_VERSION = "3.12.10"      # die letzte 3.12 mit fertigen Windows-Dateien, wie in den Tests
+PYTHON_VERSION = paketinhalt.PYTHON_VERSION    # seit v0.14: 3.15.2 (vorher 3.12.10)
 PYTHON_ZIP = f"python-{PYTHON_VERSION}-embed-amd64.zip"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/{PYTHON_ZIP}"
-# Pruefsumme der Datei von python.org. Die Seite der Version nennt MD5
-# fe8ef205f2e9c3ba44d0cf9954e1abd3; die Datei wurde damit geprueft und ihre
-# SHA-256 hier festgehalten.
-PYTHON_SHA256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
-PTH = "python312._pth"
+# Pruefsumme der Datei von python.org - dieselbe SHA-256 nennt die Seite der
+# Version (python.org/downloads/release/python-3152/, 05.11.2026 verglichen).
+PYTHON_SHA256 = "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62"
+PTH = f"python{paketinhalt.PYTHON_KURZ}._pth"
+PYTHON_STDLIB = f"python{paketinhalt.PYTHON_KURZ}.zip"
 BIBLIOTHEKEN = WURZEL / "paket" / "windows-bibliotheken.txt"
 
 # Was von PySide6 bleibt: nur die drei Qt-Module, die das Fenster braucht.
@@ -115,21 +116,21 @@ def python_einrichten(python: Path, zwischenablage: Path) -> None:
         zf.extractall(python)
     pth = python / PTH
     zeilen = pth.read_text(encoding="utf-8").splitlines()
-    if "python312.zip" not in zeilen or "." not in zeilen:
+    if PYTHON_STDLIB not in zeilen or "." not in zeilen:
         raise SystemExit(f"{PTH} sieht anders aus als erwartet: {zeilen}")
     # Kein "import site": Es gelten genau diese Pfade, nichts aus dem System
     # des Nutzers (kein PYTHONPATH, keine Benutzer-Pakete) - das eingebettete
     # Python laeuft dadurch abgeschottet.
-    pth.write_text("python312.zip\r\n.\r\n..\\lib\r\n", encoding="ascii")
+    pth.write_text(f"{PYTHON_STDLIB}\r\n.\r\n..\\lib\r\n", encoding="ascii")
     print(f"Python {PYTHON_VERSION} (eingebettet, Pruefsumme stimmt) unter {python}")
 
 
 def bibliotheken_installieren(lib: Path) -> None:
-    """Die Bibliotheken fuer Windows 64 Bit / Python 3.12 nach lib\\ - genau die
+    """Die Bibliotheken fuer Windows 64 Bit und das Python des Pakets nach lib\\ - genau die
     Versionen und Dateien aus windows-bibliotheken.txt (Pruefsummen)."""
     befehl = [
         sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location",
-        "--target", str(lib), "--platform", "win_amd64", "--python-version", "3.12", "--implementation", "cp",
+        "--target", str(lib), "--platform", "win_amd64", "--python-version", paketinhalt.PYTHON_ZWEI, "--implementation", "cp",
         "--only-binary=:all:", "--no-compile", "--no-deps", "--require-hashes", "-r", str(BIBLIOTHEKEN),
     ]
     print(" ".join(befehl), flush=True)
@@ -193,9 +194,9 @@ def vorkompilieren(lib: Path) -> None:
     vom Datum der Dateien (ZIP-Entpacken aendert es). Die Dateinamen im
     Bytecode sind relativ zu lib\\ - Fehlermeldungen finden ihre Zeilen ueber
     den Suchpfad trotzdem."""
-    if sys.version_info[:2] != (3, 12):
+    if f"{sys.version_info[0]}.{sys.version_info[1]}" != paketinhalt.PYTHON_ZWEI:
         print(f"Hinweis: nicht vorkompiliert (baue mit Python {sys.version.split()[0]}, "
-              "das Paket enthaelt 3.12). Python kompiliert dann beim ersten Start.")
+              f"das Paket enthaelt {paketinhalt.PYTHON_ZWEI}). Python kompiliert dann beim ersten Start.")
         return
     ok = compileall.compile_dir(
         str(lib), quiet=1, workers=0, stripdir=str(lib),

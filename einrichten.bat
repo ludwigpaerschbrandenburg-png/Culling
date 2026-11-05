@@ -13,6 +13,8 @@ rem Keine Klammerbloecke mit Variablen: Ein Pfad mit ")" wuerde sie sprengen.
 
 rem ---------------------------------------------------------- Python ----
 set "PY="
+py -3.15 -c "import sys" >nul 2>&1 && set "PY=py -3.15"
+if defined PY goto :python_da
 py -3.14 -c "import sys" >nul 2>&1 && set "PY=py -3.14"
 if defined PY goto :python_da
 py -3.13 -c "import sys" >nul 2>&1 && set "PY=py -3.13"

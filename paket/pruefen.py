@@ -10,7 +10,7 @@ Auf jedem System (auch Linux) wird der Inhalt geprueft:
     gehoert zu Windows selbst (paketinhalt.py).
 
 Nur unter Windows (GitHub Actions) laeuft das Paket wirklich:
-  1. Signaturen: python.exe, pythonw.exe und python312.dll gueltig signiert
+  1. Signaturen: python.exe, pythonw.exe und die python-DLL (z. B. python315.dll) gueltig signiert
      von der Python Software Foundation.
   2. Frischer PC: Kopie nach "...\\fotosort-windows (1)\\fotosort", leerer
      Nutzerdatenordner, Suchpfad ohne Python, Perl und ExifTool des Rechners.
@@ -56,7 +56,8 @@ WINDOWS = sys.platform.startswith("win")
 FENSTER_SEKUNDEN = 20
 PFLICHT = [
     "start.bat", "fotosort.bat", "LIESMICH.md", "VERSION.txt",
-    "python/python.exe", "python/pythonw.exe", "python/python312.dll", "python/python312.zip", "python/python312._pth",
+    "python/python.exe", "python/pythonw.exe", f"python/python{paketinhalt.PYTHON_KURZ}.dll",
+    f"python/python{paketinhalt.PYTHON_KURZ}.zip", f"python/python{paketinhalt.PYTHON_KURZ}._pth",
     "lib/fotosort_start.py", "lib/fotosort/__init__.py", "lib/fotosort/__main__.py", "lib/fotosort/restzeit.py",
     "lib/PySide6/QtWidgets.pyd", "lib/PySide6/Qt6Widgets.dll", "lib/PySide6/plugins/platforms/qwindows.dll",
     "lib/PySide6/plugins/imageformats/qjpeg.dll", "lib/PySide6/plugins/imageformats/qtiff.dll",
@@ -295,11 +296,12 @@ def inhalt_pruefen(paket: Path) -> list[str]:
         except OSError:
             pass
     try:
-        pth = [z.strip() for z in (paket / "python" / "python312._pth").read_text(encoding="utf-8").splitlines()]
-        if "..\\lib" not in pth or "python312.zip" not in pth:
-            fehler.append(f"python312._pth nennt den Suchpfad ..\\lib nicht: {pth}")
+        kurz = paketinhalt.PYTHON_KURZ
+        pth = [z.strip() for z in (paket / "python" / f"python{kurz}._pth").read_text(encoding="utf-8").splitlines()]
+        if "..\\lib" not in pth or f"python{kurz}.zip" not in pth:
+            fehler.append(f"python{kurz}._pth nennt den Suchpfad ..\\lib nicht: {pth}")
         if any(z.startswith("import") for z in pth):
-            fehler.append(f"python312._pth darf nichts importieren (kein 'import site'): {pth}")
+            fehler.append(f"python{kurz}._pth darf nichts importieren (kein 'import site'): {pth}")
     except OSError:
         pass
     programme = paketinhalt.programme(paket)
@@ -348,7 +350,7 @@ def main() -> int:
         return _ende(fehler, nur_inhalt=True)
 
     # -- 1. Signaturen ----------------------------------------------------------------
-    for name in ("python/python.exe", "python/pythonw.exe", "python/python312.dll"):
+    for name in ("python/python.exe", "python/pythonw.exe", f"python/python{paketinhalt.PYTHON_KURZ}.dll"):
         status, wer = _signatur(paket / name)
         print(f"Signatur {name}: {status} - {wer}", flush=True)
         if status != "Valid" or PSF not in wer:

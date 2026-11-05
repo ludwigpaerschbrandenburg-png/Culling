@@ -6,7 +6,7 @@ das Paket aber nicht mitnimmt - es startet perl.exe mit exiftool.pl direkt
 diesen Ordner ebenfalls (.github/workflows/tests.yml).
 
 Aufruf:
-    python paket/exiftool_holen.py <zielordner> [--version 13.59 | --version neueste]
+    python paket/exiftool_holen.py <zielordner> [--version 13.60 | --version neueste]
 
 Ohne --version wird die festgenagelte Version FESTE_VERSION genommen und die
 geladene ZIP-Datei gegen FESTE_SHA256 geprueft - so nimmt jeder Bau
@@ -36,8 +36,9 @@ from pathlib import Path
 KOPF = {"User-Agent": "fotosort-paketbau (https://github.com/ludwigpaerschbrandenburg-png/Culling)"}
 # Die festgenagelte Fassung: Version und SHA-256 der ZIP-Datei
 # exiftool-<Version>_64.zip (Windows, 64 Bit, mit exiftool_files).
-FESTE_VERSION = "13.59"
-FESTE_SHA256 = "44b512b25af500724ba579d0a53c8fc5851628b692dd5e5d94ae4a15c2cba9ec"
+# 13.60 seit v0.14; dieselbe SHA-256 nennt https://exiftool.org/checksums-13.60.txt.
+FESTE_VERSION = "13.60"
+FESTE_SHA256 = "548b1f4e0b713cd2a26824b34080c35db4e2d2edd166468eb38b1d55ada90c2e"
 NEUESTE = "neueste"
 VERSUCHE = 3
 
@@ -87,13 +88,19 @@ def version_waehlen(gewuenscht: str | None) -> tuple[str, str | None]:
     return gewuenscht, None
 
 
-def holen(ziel: Path, version: str | None) -> str:
-    version, erwartet = version_waehlen(version)
-    kandidaten = [
+def adressen(version: str) -> list[str]:
+    """Woher die ZIP-Datei kommt. Seit November 2026 liefert exiftool.org sie
+    nicht mehr aus (404) und verweist auf SourceForge - das deshalb zuerst."""
+    return [
+        f"https://sourceforge.net/projects/exiftool/files/exiftool-{version}_64.zip/download",
         f"https://exiftool.org/exiftool-{version}_64.zip",
         f"https://exiftool.org/exiftool-{version}.zip",
-        f"https://sourceforge.net/projects/exiftool/files/exiftool-{version}_64.zip/download",
     ]
+
+
+def holen(ziel: Path, version: str | None) -> str:
+    version, erwartet = version_waehlen(version)
+    kandidaten = adressen(version)
     daten = None
     quelle = ""
     for url in kandidaten:

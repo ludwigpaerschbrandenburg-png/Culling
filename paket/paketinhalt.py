@@ -13,6 +13,13 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
+# Das eingebettete Python von python.org im Windows-Paket (seit v0.14: 3.15).
+# Nur hier eintragen - Bau (bauen.py), Pruefung (pruefen.py), die Tests und die
+# CI richten sich danach (tests/test_paket.py prueft das).
+PYTHON_VERSION = "3.15.2"
+PYTHON_ZWEI = ".".join(PYTHON_VERSION.split(".")[:2])     # "3.15" - fuer pip und die CI
+PYTHON_KURZ = PYTHON_ZWEI.replace(".", "")                # "315" - python315.dll, python315._pth
+
 ERLAUBTE_PROGRAMME = {
     "python/python.exe",
     "python/pythonw.exe",
@@ -41,6 +48,8 @@ SYSTEM = {
     "icuuc.dll", "icuin.dll", "icu.dll",
     # Zufallszahlen fuer Rust-Programme (blake3), seit Windows 8 in System32.
     "bcryptprimitives.dll",
+    # Farbverwaltung von Windows (System32); qwindows.dll aus Qt 6.12 laedt sie.
+    "mscms.dll",
 }
 
 

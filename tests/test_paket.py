@@ -157,6 +157,18 @@ def test_paketpruefung_zeichnet_testbilder_im_hintergrund():
     assert pruefen.HINTERGRUND_GUT in aus.stdout, aus.stdout + aus.stderr
 
 
+def test_bat_dateien_im_projekt_mit_crlf():
+    """Auch die .bat-Dateien im Projektordner (einrichten.bat, start.bat,
+    fotosort.bat) brauchen CRLF: Mit reinen LF-Zeilenenden springt cmd.exe
+    bei "goto" an falsche Stellen. Beim Erneuern auf Python 3.15 war
+    einrichten.bat versehentlich auf LF umgestellt worden."""
+    dateien = sorted(WURZEL.glob("*.bat"))
+    assert {d.name for d in dateien} >= {"einrichten.bat", "start.bat", "fotosort.bat"}
+    for datei in dateien:
+        roh = datei.read_bytes()
+        assert b"\r\n" in roh and b"\n" not in roh.replace(b"\r\n", b""), datei.name
+
+
 def test_startdateien_mit_crlf_und_ohne_klammerbloecke(tmp_path):
     """cmd.exe braucht CRLF fuer Sprungmarken; Klammerbloecke wuerden an einem
     Pfad wie "...\\fotosort-windows (1)\\..." zerbrechen."""
@@ -333,3 +345,49 @@ def test_pruefung_leert_nur_eigene_arbeitsordner(tmp_path):
     (eigen / "rest.txt").write_text("x", encoding="utf-8")
     pruefung._arbeitsordner_leeren(eigen)                       # eigener Ordner: geleert
     assert not (eigen / "rest.txt").exists() and (eigen / pruefung.PRUEFUNGS_MARKE).is_file()
+
+
+# ------------------------------------- Python-Version des Pakets (v0.14) ----
+
+
+def test_python_version_steht_an_einer_stelle():
+    """Seit v0.14 (Python 3.15): Die Version des eingebetteten Python steht nur
+    in paketinhalt.PYTHON_VERSION. Bau, Pruefung, Bibliotheksliste, CI und
+    einrichten.bat richten sich danach - sonst passen Suchpfad-Datei, DLL-Namen
+    oder der vorkompilierte Code nicht zusammen."""
+    inhalt = _modul("paketinhalt")
+    bauen = _modul("bauen")
+    pruefen = _modul("pruefen")
+    haupt, neben = inhalt.PYTHON_VERSION.split(".")[:2]
+    kurz = haupt + neben
+    assert inhalt.PYTHON_KURZ == kurz and inhalt.PYTHON_ZWEI == f"{haupt}.{neben}"
+    assert bauen.PYTHON_VERSION == inhalt.PYTHON_VERSION
+    assert bauen.PYTHON_ZIP == f"python-{inhalt.PYTHON_VERSION}-embed-amd64.zip"
+    assert bauen.PTH == f"python{kurz}._pth"
+    for name in (f"python/python{kurz}.dll", f"python/python{kurz}.zip", f"python/python{kurz}._pth"):
+        assert name in pruefen.PFLICHT
+    for datei in ("bauen.py", "pruefen.py"):
+        text = (PAKET / datei).read_text(encoding="utf-8")
+        assert "python312" not in text and '"3.12"' not in text, datei
+    # Das Paket wird mit genau dieser Version gebaut (sonst fehlt der vorkompilierte
+    # Code), und die Tests laufen auch mit ihr.
+    workflows = WURZEL / ".github" / "workflows"
+    assert f'python-version: "{haupt}.{neben}"' in (workflows / "paket.yml").read_text(encoding="utf-8")
+    assert f'"{haupt}.{neben}"' in (workflows / "tests.yml").read_text(encoding="utf-8")
+    assert f"py -{haupt}.{neben} " in (WURZEL / "einrichten.bat").read_text(encoding="utf-8")
+    assert f"Python {haupt}.{neben}" in (PAKET / "windows-bibliotheken.txt").read_text(encoding="utf-8")
+
+
+def test_farbverwaltung_von_windows_ist_eine_systemdatei():
+    """Qt 6.12 (qwindows.dll) laedt mscms.dll, die Farbverwaltung von Windows
+    aus System32. Ohne Eintrag brach der Bau mit "Fehlende Bibliotheken" ab."""
+    inhalt = _modul("paketinhalt")
+    assert inhalt.ist_system("mscms.dll") and inhalt.ist_system("MSCMS.DLL")
+    assert not inhalt.ist_system("msvcp140.dll")          # die C++-Laufzeit gehoert weiter ins Paket
+
+
+def test_exiftool_zuerst_von_sourceforge():
+    """exiftool.org liefert die ZIP-Dateien nicht mehr aus (404) und verweist auf
+    SourceForge - diese Adresse kommt deshalb zuerst."""
+    holen = _modul("exiftool_holen")
+    assert holen.adressen("13.60")[0] == "https://sourceforge.net/projects/exiftool/files/exiftool-13.60_64.zip/download"
