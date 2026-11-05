@@ -1745,6 +1745,40 @@ def parser_bauen() -> argparse.ArgumentParser:
     return eltern
 
 
+def _ins_leere(strom) -> None:
+    """Den Ausgabekanal hinter strom auf das Nichts (os.devnull) umlenken.
+    Fuer eine abgerissene Leitung: Python leert seine Puffer beim Beenden noch
+    einmal - ginge das in die tote Leitung, endete das Programm mit Fehler 120
+    (Befund F12, v0.14; Rezept aus der Python-Dokumentation zu SIGPIPE)."""
+    try:
+        kanal = strom.fileno()
+    except (AttributeError, OSError, ValueError):
+        return
+    try:
+        leer = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(leer, kanal)
+    except OSError:
+        pass
+    finally:
+        os.close(leer)
+
+
+def _ausgabe_abschliessen() -> None:
+    """Am Ende jedes Befehls die Ausgabe leeren. Ist die Leitung abgerissen,
+    geht der Rest ins Leere statt in einen Fehler beim Beenden."""
+    for strom in (sys.stdout, sys.stderr):
+        if strom is None:
+            continue
+        strom = getattr(strom, "rich_proxied_file", strom)
+        try:
+            strom.flush()
+        except (OSError, ValueError):
+            _ins_leere(strom)
+
+
 class _RobusteAusgabe:
     """Wie sys.stdout (oder sys.stderr) - nur dass eine abgerissene Leitung den
     Lauf nicht mehr aus dem Tritt bringt: Laeuft die Ausgabe in ein anderes
@@ -1759,7 +1793,10 @@ class _RobusteAusgabe:
         self._weg = False
 
     def _ziel(self):
-        return sys.stderr if self._fehlerausgabe else sys.stdout
+        strom = sys.stderr if self._fehlerausgabe else sys.stdout
+        # Waehrend einer laufenden Anzeige von rich steht dort ein Stellvertreter,
+        # der zurueck in die Konsole schreibt - geschrieben wird in den echten Strom.
+        return getattr(strom, "rich_proxied_file", strom)
 
     @staticmethod
     def _abgerissen(fehler: OSError) -> bool:
@@ -1774,7 +1811,7 @@ class _RobusteAusgabe:
         except OSError as fehler:
             if not self._abgerissen(fehler):
                 raise
-            self._weg = True
+            self._abreissen()
             return len(text)
 
     def flush(self) -> None:
@@ -1785,9 +1822,18 @@ class _RobusteAusgabe:
         except OSError as fehler:
             if not self._abgerissen(fehler):
                 raise
-            self._weg = True
+            self._abreissen()
+
+    def _abreissen(self) -> None:
+        """Leitung weg: ab jetzt still verwerfen, den Kanal ins Leere lenken."""
+        self._weg = True
+        _ins_leere(self._ziel())
 
     def __getattr__(self, name):
+        if name == "rich_proxied_file":
+            # rich soll ueber diese Huelle schreiben, nicht an ihr vorbei in den
+            # echten Strom (sonst beendet rich bei abgerissener Leitung das Programm).
+            raise AttributeError(name)
         return getattr(self._ziel(), name)
 
 
@@ -1802,7 +1848,14 @@ def _konsole(fehlerausgabe: bool = False):
     """
     from rich.console import Console
 
-    return Console(
+    class _Konsole(Console):
+        def on_broken_pipe(self) -> None:
+            # rich beendet hier das Programm (SystemExit) - mitten in einem Lauf
+            # waere das kein sauberes Ende (Befund F12). Still weiterarbeiten.
+            self.quiet = True
+            _ins_leere(self.file)
+
+    return _Konsole(
         soft_wrap=True, highlight=False, markup=False, file=_RobusteAusgabe(fehlerausgabe)
     )
 
@@ -1833,6 +1886,15 @@ def _ohne_konsole_umleiten() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Einstieg aller Befehle. Am Ende wird die Ausgabe geleert - auch wenn
+    die Leitung dorthin abgerissen ist (Befund F12)."""
+    try:
+        return _main(argv)
+    finally:
+        _ausgabe_abschliessen()
+
+
+def _main(argv: list[str] | None = None) -> int:
     global _argumente
     _ohne_konsole_umleiten()
     argumente = list(sys.argv[1:] if argv is None else argv)

@@ -651,15 +651,32 @@ def test_f13_stand_des_archivs_zahl_und_groesse_passen_zusammen(baum, quelle, zi
 # ------------------------ F12: abgerissene Ausgabe (Pipe zu) ----
 
 
-def test_f12_abgerissene_ausgabe_bricht_den_lauf_nicht_ab(quelle, ziel, nachschauen):
+@pytest.mark.parametrize("farbe", [
+    "",
+    pytest.param("1", marks=pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="Unter Windows zeichnet rich bei FORCE_COLOR ueber die Konsolen-Schnittstelle von Windows, "
+               "die es an einer Leitung nicht gibt - kein Weg, den ein Nutzer geht")),
+], ids=["leitung", "wie-konsole"])
+def test_f12_abgerissene_ausgabe_bricht_den_lauf_nicht_ab(quelle, ziel, nachschauen, farbe):
     """F12: Lief die Ausgabe in ein anderes Programm ("| tee") und war dieses
     weg (Strg+C trifft beide), scheiterte schon die naechste Ausgabezeile -
     der Lauf endete nicht sauber, .part-Dateien blieben liegen. Jetzt geht
-    eine abgerissene Ausgabe still verloren, die Arbeit wird ordentlich beendet."""
+    eine abgerissene Ausgabe still verloren, die Arbeit wird ordentlich beendet.
+
+    Wie bei einem normalen Nutzer gepuffert (ohne PYTHONUNBUFFERED): Sonst
+    lag beim Beenden noch Ausgabe im Puffer, und Python endete mit Fehler 120
+    (in der CI gesehen). Mit FORCE_COLOR haelt rich die Leitung fuer eine
+    Konsole und zeigt eine laufende Anzeige - dann beendete rich selbst das
+    Programm mitten im Lauf (SystemExit(1))."""
     import os
     import subprocess
     import sys
     umgebung = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
+    for name in ("PYTHONUNBUFFERED", "FORCE_COLOR", "TTY_COMPATIBLE", "NO_COLOR"):
+        umgebung.pop(name, None)
+    if farbe:
+        umgebung["FORCE_COLOR"] = farbe
     prozess = subprocess.Popen([sys.executable, "-m", "fotosort", "scan", "--quelle", str(quelle), "--ziel", str(ziel)],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=umgebung)
     prozess.stdout.close()                    # der Leser ist weg
