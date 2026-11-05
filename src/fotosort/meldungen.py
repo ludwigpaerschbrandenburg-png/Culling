@@ -830,6 +830,51 @@ def datenbank_angehoben(pfad, von: int, bis: int, kopie) -> str:
     )
 
 
+def archiv_umzug(umzuege, sicherung, neu_geplant: int) -> list[str]:
+    """Meldungen, wenn das Archiv an einem neuen Ort liegt (umzug.nachziehen):
+    umzuege ist eine Liste (alter Ort, neuer Ort, Zahl der Dateien)."""
+    texte = []
+    for alt, neu, dateien in umzuege:
+        texte.append(
+            f"Das Archiv lag bisher unter {alt}, jetzt unter {neu}\n"
+            "(anderer Laufwerksbuchstabe oder verschobener Ordner - erkannt an der Archiv-Kennung).\n"
+            f"Die gespeicherten Pfade von {anzahl(dateien)} Dateien zeigen jetzt auf den neuen Ort.\n"
+            "Im Archiv selbst wurde nichts veraendert."
+        )
+    if neu_geplant:
+        texte.append(
+            f"{anzahl(neu_geplant)} Dateien waren schon eingeplant, ihr Zielname lag aber noch am alten Ort.\n"
+            "Sie werden in der naechsten Analyse neu eingeplant - kopiert wird nur ins gewaehlte Archiv."
+        )
+    if texte and sicherung is not None:
+        texte.append(f"Die Datenbank von vorher ist aufgehoben: {sicherung}")
+    return texte
+
+
+def kopieren_ziel_ausserhalb(zielpfad, ziel) -> str:
+    return (
+        "Abgebrochen: Ein geplanter Zielname liegt ausserhalb des Archivs:\n"
+        f"  {zielpfad}\n"
+        f"Gewaehltes Archiv: {ziel}\n"
+        "Dort wird nichts angelegt. Bitte die Analyse noch einmal starten; sie plant die\n"
+        "Zielnamen im gewaehlten Archiv neu."
+    )
+
+
+def archiv_zweimal(alt, neu) -> str:
+    return (
+        "Abgebrochen, nichts geaendert: Dieses Archiv gibt es zweimal, unter\n"
+        f"  {alt}\n"
+        "und unter\n"
+        f"  {neu}\n"
+        "Beide Ordner tragen dieselbe Archiv-Kennung - einer ist wohl eine Kopie des anderen.\n"
+        "Das Programm weiss nicht, mit welchem es weiterarbeiten soll. So geht es weiter:\n"
+        f"  - Mit dem bisherigen Ordner weiterarbeiten: {alt} als Ziel waehlen.\n"
+        f"  - Mit {neu} weiterarbeiten: die alte Platte abziehen oder den alten\n"
+        "    Ordner umbenennen, dann noch einmal starten."
+    )
+
+
 def datenbank_schema_veraltet(pfad, gefunden: int, erwartet: int) -> str:
     return (
         f"Die Datenbank {pfad} stammt aus einem frueheren Stand des Programms\n"

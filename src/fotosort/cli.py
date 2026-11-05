@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import analyse, aufraeumen, bericht, bestand, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, zielindex, zuruecklegen, FotosortFehler, config, db, meldungen, pfade, scan
+from . import analyse, aufraeumen, bericht, bestand, kopieren, loeschen, messen, metadaten, nachpruefen, pruefen, prozesse, steuerung, umzug, zielindex, zuruecklegen, FotosortFehler, config, db, meldungen, pfade, scan
 
 # Rueckgabewerte
 OK = 0
@@ -219,6 +219,16 @@ def archiv_oeffnen(args, konsole, anlegen: bool, sperren: bool = False, datenban
 
     datenbank = db.Datenbank.oeffnen(ort.ordner, sperren=sperren)
     _anhebung_melden(datenbank, konsole)
+    if sperren:
+        # Neuer Laufwerksbuchstabe oder verschobener Ordner (v0.14): Nur
+        # veraendernde Befehle stellen die gespeicherten Pfade um.
+        try:
+            umgezogen = umzug.nachziehen(datenbank, ort.ziel, ort.archiv_id)
+        except BaseException:
+            datenbank.schliessen()
+            raise
+        for text in meldungen.archiv_umzug(umgezogen.umzuege, umgezogen.sicherung, umgezogen.neu_geplant):
+            konsole.print(text)
     if not ort.id_war_da:
         try:
             datei = db.archiv_id_schreiben(ort.ziel, ort.archiv_id)

@@ -521,6 +521,7 @@ class _Lauf:
     def __init__(self, ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole,
                  kopier_worker: int, hash_worker: int, direkt: bool, verschieben: bool = False) -> None:
         self.ziel = ziel
+        self.ziel_basis = str(ziel) if str(ziel).endswith(os.sep) else str(ziel) + os.sep
         self.konf = konf
         self.dbank = dbank
         self.lauf = lauf
@@ -664,6 +665,11 @@ class _Lauf:
         auftraege: list[_Auftrag] = []
         for z in zeilen:
             ziel = Path(db.text_pfad(z["zielpfad"]))
+            if not str(ziel).startswith(self.ziel_basis):
+                # Letzte Absicherung (v0.14): Nach einem Umzug des Archivs zieht
+                # umzug.nachziehen alle Pfade nach. Liegt trotzdem ein geplanter
+                # Name ausserhalb, wird dort nichts angelegt.
+                raise FotosortFehler(meldungen.kopieren_ziel_ausserhalb(ziel, self.ziel))
             if ziel in self.in_arbeit or part_pfad(ziel) in self.in_arbeit:
                 return False
             auftraege.append(_Auftrag(z, Path(db.text_pfad(z["quellpfad"])), ziel, part_pfad(ziel), _stamm(z)))

@@ -199,6 +199,15 @@ CREATE TABLE IF NOT EXISTS lauf_ereignisse (
 
 CREATE INDEX IF NOT EXISTS ereignisse_lauf ON lauf_ereignisse (lauf_nummer, art);
 CREATE INDEX IF NOT EXISTS ereignisse_art ON lauf_ereignisse (art, lauf_nummer);
+
+-- Seit v0.14: Angaben zum Archiv selbst, etwa wo es zuletzt lag (ziel_wurzel;
+-- umzug.py zieht damit die Pfade nach einem neuen Laufwerksbuchstaben nach).
+-- Eine neue Tabelle aendert nichts an den uebrigen Daten; auch ein aelterer
+-- Programmstand kann die Datei weiter oeffnen.
+CREATE TABLE IF NOT EXISTS archiv_angaben (
+    name TEXT PRIMARY KEY,
+    wert TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Sammelschreiben: alle 500 Dateien oder 2 Sekunden (SPEC Abschnitt 6).
@@ -762,6 +771,19 @@ class Datenbank:
         if self.sperre is not None:
             self.sperre.freigeben()
             self.sperre = None
+
+    # -- Angaben zum Archiv (seit v0.14) ---------------------------------
+
+    def angabe_lesen(self, name: str) -> str | None:
+        zeile = self.verbindung.execute("SELECT wert FROM archiv_angaben WHERE name = ?", (name,)).fetchone()
+        return None if zeile is None else str(zeile[0])
+
+    def angabe_schreiben(self, name: str, wert: str) -> None:
+        self._beginnen()
+        self.verbindung.execute(
+            "INSERT INTO archiv_angaben (name, wert) VALUES (?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET wert = excluded.wert", (name, wert))
+        self.stapel_schreiben()
 
     # -- Sammelschreiben --------------------------------------------------
 
