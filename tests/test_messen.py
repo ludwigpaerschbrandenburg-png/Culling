@@ -81,6 +81,24 @@ def test_empfehlung_kleinste_zahl_nahe_am_besten_wert(tmp_path, monkeypatch):
     assert e.profil == "netzwerk" and "Netzlaufwerk" in e.hinweis
 
 
+def test_ohne_lesemessung_folgen_die_pruef_worker_dem_profil(tmp_path, monkeypatch):
+    """Befund F16 (v0.14): Ohne Lesemessung (Quelle zu klein) schlug messen
+    bisher alle Kerne zum Pruefen vor - zusammen mit dem Profil „hdd“. Auf einer
+    Festplatte bremst das; jetzt gilt der Wert des vorgeschlagenen Profils."""
+    from fotosort import kopieren
+    monkeypatch.setattr(messen.os, "cpu_count", lambda: 16)
+    e = messen.Ergebnis(stufen=[messen.Stufe(1, schreiben_mb_s=100), messen.Stufe(2, schreiben_mb_s=190),
+                                messen.Stufe(4, schreiben_mb_s=195)])
+    messen.empfehlung(e, tmp_path, tmp_path)
+    assert e.profil == "hdd" and e.hash_worker == kopieren.HASH_JE_PROFIL["hdd"] == 2
+    e.stufen[1].schreiben_mb_s = 100                      # 4 Worker schreiben am schnellsten: SSD
+    messen.empfehlung(e, tmp_path, tmp_path)
+    assert e.profil == "ssd" and e.hash_worker == 8        # alle Kerne, hoechstens 8
+    monkeypatch.setattr(messen.pfade, "ist_netzpfad", lambda p: True)
+    messen.empfehlung(e, tmp_path, tmp_path)
+    assert e.profil == "netzwerk" and e.hash_worker == kopieren.HASH_JE_PROFIL["netzwerk"] == 4
+
+
 def test_platzpruefung_deckt_die_kleinste_schreibmenge(baum, quelle, ziel, monkeypatch, capsys):
     """Fund 10: geschrieben werden mindestens 8 Bloecke, auch bei --mb 1."""
     monkeypatch.setattr(messen.pfade, "freier_platz", lambda p: 10 * 1024 * 1024)

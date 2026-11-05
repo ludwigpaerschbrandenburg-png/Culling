@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import testbaum
-from fotosort import FotosortFehler, cli, db, pfade, scan
+from fotosort import FotosortFehler, cli, db, meldungen, pfade, scan
 
 
 def _laufen(capsys, *args):
@@ -54,6 +54,9 @@ def test_zwei_quellen_werden_beide_erfasst(capsys, zwei_quellen, ziel, nachschau
         assert d.zaehler_je_status()["gefunden"] == 2 * (testbaum.ERWARTET_GESAMT - testbaum.ERWARTET_JE_TYP["sonstiges"])
     assert "Je Quelle" in ausgabe
     assert "2 Quellen" in ausgabe
+    # SPEC §4 Phase 1: Aufteilung nach Typ je Quelle und gesamt (Befund F16, v0.14).
+    je_typ = meldungen.scan_typen(testbaum.ERWARTET_JE_TYP)
+    assert ausgabe.count(je_typ) == 2, ausgabe
 
 
 def test_jede_datei_merkt_sich_ihre_quelle(capsys, zwei_quellen, ziel, nachschauen):

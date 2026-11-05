@@ -186,14 +186,12 @@ def reste(ziel: Path) -> list[Path]:
 
 
 def empfehlung(e: Ergebnis, quelle: Path, ziel: Path) -> None:
-    """Kleinste Worker-Zahl, die nahe am besten Wert liegt; Profil danach."""
+    """Kleinste Worker-Zahl, die nahe am besten Wert liegt; Profil danach.
+    Ohne Lesemessung folgen die Pruef-Worker dem Profil (Befund F16, v0.14):
+    frueher waren es dann alle Kerne - auch bei „hdd“, wo das bremst."""
+    from .kopieren import HASH_JE_PROFIL
     mit_lesen = [s for s in e.stufen if s.lesen_mb_s]
     mit_schreiben = [s for s in e.stufen if s.schreiben_mb_s]
-    if mit_lesen:
-        best = max(s.lesen_mb_s for s in mit_lesen)
-        e.hash_worker = min(s.worker for s in mit_lesen if s.lesen_mb_s >= TOLERANZ * best)
-    else:
-        e.hash_worker = max(1, min(8, os.cpu_count() or 1))
     if mit_schreiben:
         best = max(s.schreiben_mb_s for s in mit_schreiben)
         e.kopier_worker = min(s.worker for s in mit_schreiben if s.schreiben_mb_s >= TOLERANZ * best)
@@ -207,9 +205,15 @@ def empfehlung(e: Ergebnis, quelle: Path, ziel: Path) -> None:
     if netz:
         e.profil = "netzwerk"
         e.hinweis = meldungen.messen_netz_hinweis(netz)
-        return
-    # "netzwerk" nur bei erkanntem Netzpfad; lokal entscheidet die Worker-Zahl.
-    e.profil = "hdd" if e.kopier_worker <= 2 else "ssd"
+    else:
+        # "netzwerk" nur bei erkanntem Netzpfad; lokal entscheidet die Worker-Zahl.
+        e.profil = "hdd" if e.kopier_worker <= 2 else "ssd"
+    if mit_lesen:
+        best = max(s.lesen_mb_s for s in mit_lesen)
+        e.hash_worker = min(s.worker for s in mit_lesen if s.lesen_mb_s >= TOLERANZ * best)
+    else:
+        # 0 heisst "alle Kerne" (SSD), hoechstens 8 wie bei der Messung.
+        e.hash_worker = HASH_JE_PROFIL.get(e.profil) or max(1, min(8, os.cpu_count() or 1))
 
 
 def ausfuehren(quelle: Path, ziel: Path, konsole=None, *, mb: int = 256,

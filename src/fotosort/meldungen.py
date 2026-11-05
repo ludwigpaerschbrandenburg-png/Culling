@@ -17,6 +17,16 @@ def anzahl(n: int) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
+def n_dateien(n: int) -> str:
+    """1 -> "1 Datei", 1234 -> "1.234 Dateien"."""
+    return f"{anzahl(n)} {'Datei' if int(n) == 1 else 'Dateien'}"
+
+
+def n_quellen(n: int) -> str:
+    """1 -> "1 Quelle", 2 -> "2 Quellen"."""
+    return f"{anzahl(n)} {'Quelle' if int(n) == 1 else 'Quellen'}"
+
+
 def dezimal(wert: float, stellen: int = 1) -> str:
     """1234.5 -> "1.234,5" (Punkt als Tausender-, Komma als Dezimaltrenner)."""
     return f"{float(wert):,.{stellen}f}".replace(",", " ").replace(".", ",").replace(" ", ".")
@@ -347,7 +357,7 @@ def ziel_index_stand(stand: dict, ziel) -> str:
 
 def ziel_index_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str, fortgesetzt_von) -> str:
     text = (
-        f"Ziel-Index wird neu aufgebaut: {anzahl(dateien)} Dateien, {groesse(bytes_)} im Ziel werden"
+        f"Ziel-Index wird neu aufgebaut: {n_dateien(dateien)}, {groesse(bytes_)} im Ziel werden"
         f" vollstaendig gelesen, {anzahl(hash_worker)} gleichzeitig (Hash-Worker)."
     )
     if fortgesetzt_von:
@@ -470,7 +480,8 @@ def wiederherstellen_fertig(stand, lokal, beiseite) -> str:
         "Datenbank aus der Sicherungskopie zurueckgeholt.",
         f"  aus:       {stand.pfad} (Stand vom {stand.geaendert.replace('T', ' ')})",
         f"  nach:      {lokal}",
-        f"  Inhalt:    {anzahl(stand.dateien)} Dateien, {anzahl(stand.quellen)} Quellen, {anzahl(stand.laeufe)} Laeufe",
+        f"  Inhalt:    {n_dateien(stand.dateien)}, {n_quellen(stand.quellen)},"
+        f" {anzahl(stand.laeufe)} {'Lauf' if stand.laeufe == 1 else 'Laeufe'}",
     ]
     if stand.letzter_lauf:
         zeilen.append(f"  Letzter Lauf in der Sicherung: {stand.letzter_lauf}")
@@ -492,7 +503,7 @@ def scan_beginnt(quelle, ziel) -> str:
 
 
 def scan_laeuft(gefunden: int) -> str:
-    return f"{anzahl(gefunden)} Dateien gefunden"
+    return f"{n_dateien(gefunden)} gefunden"
 
 
 def scan_abgebrochen() -> str:
@@ -500,6 +511,17 @@ def scan_abgebrochen() -> str:
         "Abgebrochen. Das Bisherige ist gespeichert; ein neuer Scan derselben\n"
         "Quelle macht genau dort weiter."
     )
+
+
+TYPEN_MEHRZAHL = (("foto", "Fotos"), ("raw", "RAW"), ("video", "Videos"), ("sidecar", "Begleitdateien"),
+                  ("sonstiges", "Sonstiges"))
+
+
+def scan_typen(je_typ: dict[str, int]) -> str:
+    """Aufteilung nach Typ in einer Zeile: "Fotos 13, RAW 1, Videos 4, ..." -
+    nur Typen, die vorkommen."""
+    teile = [f"{name} {anzahl(je_typ.get(typ, 0))}" for typ, name in TYPEN_MEHRZAHL if je_typ.get(typ, 0)]
+    return ", ".join(teile) if teile else "keine Dateien"
 
 
 def scan_ergebnis(
@@ -515,8 +537,8 @@ def scan_ergebnis(
         f"  Gesamtgroesse:   {groesse(bytes_)}",
         "  Aufteilung nach Typ:",
     ]
-    for typ in ("foto", "raw", "video", "sidecar", "sonstiges"):
-        zeilen.append(f"    {typ:<10} {anzahl(je_typ.get(typ, 0)):>12}")
+    for typ, name in TYPEN_MEHRZAHL:
+        zeilen.append(f"    {name:<15} {anzahl(je_typ.get(typ, 0)):>7}")
     zeilen.append(f"  Dauer:           {dauer(sekunden)}")
     zeilen.append(f"  Durchsatz:       {durchsatz(dateien, bytes_, sekunden)}")
     return "\n".join(zeilen)
@@ -670,7 +692,7 @@ def status_sicherung_und_index(sicherung_zeit: str, index: dict) -> str:
         zeilen.append(f"  Sicherungskopie im Ziel:  {sicherung_zeit}")
     else:
         zeilen.append("  Sicherungskopie im Ziel:  noch keine (entsteht nach dem ersten abgeschlossenen Schritt)")
-    zeilen.append(f"  Ziel-Index:               {anzahl(index['zeilen'])} Dateien im Ziel bekannt, {groesse(index['bytes'])}")
+    zeilen.append(f"  Ziel-Index:               {n_dateien(index['zeilen'])} im Ziel bekannt, {groesse(index['bytes'])}")
     return "\n".join(zeilen)
 
 
@@ -862,8 +884,8 @@ def archiv_umzug(umzuege, sicherung, neu_geplant: int) -> list[str]:
         )
     if neu_geplant:
         texte.append(
-            f"{anzahl(neu_geplant)} Dateien waren schon eingeplant, ihr Zielname lag aber noch am alten Ort.\n"
-            "Sie werden in der naechsten Analyse neu eingeplant - kopiert wird nur ins gewaehlte Archiv."
+            f"Schon eingeplant, der Zielname lag aber noch am alten Ort: {n_dateien(neu_geplant)}.\n"
+            "Die naechste Analyse plant sie neu ein - kopiert wird nur ins gewaehlte Archiv."
         )
     if texte and sicherung is not None:
         texte.append(f"Die Datenbank von vorher ist aufgehoben: {sicherung}")
@@ -949,22 +971,24 @@ def scan_laufwerke(anzahl_laufwerke: int, anzahl_quellen: int) -> str:
     if anzahl_quellen <= 1:
         return ""
     if anzahl_laufwerke == 1:
-        return f"{anzahl(anzahl_quellen)} Quellen auf einem Laufwerk, nacheinander gelesen."
+        return f"{n_quellen(anzahl_quellen)} auf einem Laufwerk, nacheinander gelesen."
     return (
-        f"{anzahl(anzahl_quellen)} Quellen auf {anzahl(anzahl_laufwerke)} Laufwerken,"
+        f"{n_quellen(anzahl_quellen)} auf {anzahl(anzahl_laufwerke)} Laufwerken,"
         " je Laufwerk parallel gelesen."
     )
 
 
 def scan_je_quelle(je_quelle: dict) -> str:
-    """Eine Zeile je Quelle: Dateien, Groesse, neu/unveraendert/veraendert."""
+    """Je Quelle: Dateien, Groesse, neu/unveraendert/veraendert und die
+    Aufteilung nach Typ (SPEC §4 Phase 1, seit v0.14)."""
     if len(je_quelle) <= 1:
         return ""
     zeilen = ["Je Quelle"]
     for wurzel, e in je_quelle.items():
         zeilen.append(f"  {wurzel}")
+        zeilen.append(f"    {scan_typen(e.je_typ)}")
         zeilen.append(
-            f"    {anzahl(e.dateien)} Dateien, {groesse(e.bytes_gesamt)}"
+            f"    {n_dateien(e.dateien)}, {groesse(e.bytes_gesamt)}"
             f" — neu {anzahl(e.neu)}, unveraendert {anzahl(e.unveraendert)},"
             f" veraendert {anzahl(e.veraendert)}"
             + (f", nicht mehr vorhanden {anzahl(e.verschwunden)}" if e.verschwunden_ausgewertet else "")
@@ -1028,14 +1052,15 @@ def analyse_verwaiste_zugeordnet(n: int) -> str:
 
 def analyse_erneut_versucht(n: int) -> str:
     return (
-        f"{anzahl(n)} Dateien, deren Metadaten beim letzten Mal nicht gelesen werden konnten"
-        " (Datei nicht erreichbar, ExifTool abgestuerzt oder haengengeblieben), werden erneut versucht."
+        f"{n_dateien(n)}, deren Metadaten beim letzten Mal nicht gelesen werden konnten"
+        f" (Datei nicht erreichbar, ExifTool abgestuerzt oder haengengeblieben), {'wird' if n == 1 else 'werden'}"
+        " erneut versucht."
     )
 
 
 def analyse_beginnt(prozesse: int, offen: int) -> str:
     return (
-        f"Analyse laeuft: {anzahl(offen)} Dateien zu bearbeiten,"
+        f"Analyse laeuft: {n_dateien(offen)} zu bearbeiten,"
         f" {anzahl(prozesse)} ExifTool-Prozess{'e' if prozesse != 1 else ''}."
     )
 
@@ -1247,7 +1272,7 @@ def zu_wenig_platz(ziel, benoetigt: int, frei: int) -> str:
 def kopieren_beginnt(dateien: int, bytes_: int, kopier_worker: int, hash_worker: int,
                      profil: str, direkt: bool) -> str:
     zeilen = [
-        f"Kopieren laeuft: {anzahl(dateien)} Dateien, {groesse(bytes_)}."
+        f"Kopieren laeuft: {n_dateien(dateien)}, {groesse(bytes_)}."
         f" Profil {profil}: {anzahl(kopier_worker)} Kopier-Worker; dazu {anzahl(hash_worker)} Hash-Worker."
     ]
     if direkt:
@@ -1315,11 +1340,11 @@ def kopieren_plan(plan) -> str:
     """--dry-run: was passieren wuerde."""
     zeilen = [
         "Probelauf (--dry-run): Es wird nichts kopiert und kein Lauf angelegt.",
-        f"  zu kopieren:                         {anzahl(plan.dateien)} Dateien, {groesse(plan.bytes)}",
+        f"  zu kopieren:                         {n_dateien(plan.dateien)}, {groesse(plan.bytes)}",
     ]
     if len(plan.je_quelle) > 1:
         for wurzel, (n, b) in sorted(plan.je_quelle.items()):
-            zeilen.append(f"    {wurzel}: {anzahl(n)} Dateien, {groesse(b)}")
+            zeilen.append(f"    {wurzel}: {n_dateien(n)}, {groesse(b)}")
     zeilen.append(
         f"  Zielname schon belegt (wird Duplikat oder bekommt _1): {anzahl(plan.zielname_belegt)}"
     )
@@ -1337,8 +1362,8 @@ def kopieren_ergebnis(e) -> str:
     """Zaehler dieses Laufs (ein kopieren.Ergebnis)."""
     zeilen = [
         "Ergebnis des Kopierens (dieser Lauf)",
-        f"  angestanden:                 {anzahl(e.geplant)} Dateien, {groesse(e.geplant_bytes)}",
-        f"  kopiert:                     {anzahl(e.kopiert)} Dateien, {groesse(e.bytes_kopiert)}",
+        f"  angestanden:                 {n_dateien(e.geplant)}, {groesse(e.geplant_bytes)}",
+        f"  kopiert:                     {n_dateien(e.kopiert)}, {groesse(e.bytes_kopiert)}",
         f"  Duplikate (Inhalt war schon im Ziel, nicht kopiert): {anzahl(e.duplikate)}",
         f"  Namenskonflikte (mit Anhang _1, _2 ... abgelegt):    {anzahl(e.namenskonflikte)}",
         f"  Quelle seit der Analyse veraendert (neu einordnen):  {anzahl(e.quelle_veraendert)}",
@@ -1376,7 +1401,7 @@ def kopieren_zusammenfassung(z: dict) -> str:
         f"  kopiert (Pruefen offen):     {anzahl(status.get('kopiert', 0))} Dateien, {groesse(z.get('kopiert_bytes', 0))}",
     ]
     if status.get("verschoben", 0):
-        zeilen.append(f"  verschoben (umbenannt):      {anzahl(status['verschoben'])} Dateien,"
+        zeilen.append(f"  verschoben (umbenannt):      {n_dateien(status['verschoben'])},"
                       f" {groesse(z.get('verschoben_bytes', 0))}")
     zeilen += [
         f"  Duplikate:                   {anzahl(status.get('duplikat', 0))}",
@@ -1435,8 +1460,8 @@ def ereignis_nachgeprueft(e) -> str:
 
 def ob_frage_zuruecklegen(n: int) -> str:
     return (
-        f"{anzahl(n)} Dateien, die beim Aufräumen in einen Ordner _geloescht_ gelegt wurden, kommen an ihren "
-        "alten Ort in der Quelle zurück. Nichts wird überschrieben: Ist ein alter Name inzwischen belegt, bleibt "
+        f"{n_dateien(n)}, die beim Aufräumen in einen Ordner _geloescht_ gelegt "
+        f"{'wurde, kommt' if n == 1 else 'wurden, kommen'} an ihren alten Ort in der Quelle zurück. Nichts wird überschrieben: Ist ein alter Name inzwischen belegt, bleibt "
         "die Datei im Ordner _geloescht_. Im Archiv ändert sich nichts. Beim nächsten Durchgang werden die "
         "Dateien wieder erkannt – ihr Inhalt liegt ja schon im Archiv."
     )
@@ -1530,7 +1555,7 @@ def pruefsummen_fehler(fehler: OSError) -> str:
 
 
 def pruefsummen_geschrieben(pfad, n: int) -> str:
-    return f"Pruefsummen-Liste geschrieben ({anzahl(n)} Dateien, Format von b3sum): {pfad}"
+    return f"Pruefsummen-Liste geschrieben ({n_dateien(n)}, Format von b3sum): {pfad}"
 EREIGNIS_NEU_NACH_PRUEFUNG = "nach fehlgeschlagener Pruefung neu zu kopieren"
 
 
@@ -1541,7 +1566,7 @@ def grund_pruefung_groesse(erwartet: int, gefunden: int) -> str:
 
 def pruefen_beginnt(dateien: int, bytes_: int, hash_worker: int, profil: str) -> str:
     return (
-        f"Pruefen laeuft: {anzahl(dateien)} Dateien, {groesse(bytes_)} werden vollstaendig neu gelesen."
+        f"Pruefen laeuft: {n_dateien(dateien)}, {groesse(bytes_)} werden vollstaendig neu gelesen."
         f" {anzahl(hash_worker)} gleichzeitig (Hash-Worker)."
     )
 
@@ -1566,7 +1591,7 @@ def pruefen_ergebnis(e) -> str:
     """Zaehler dieses Laufs (ein pruefen.Ergebnis)."""
     zeilen = [
         "Ergebnis des Pruefens (dieser Lauf)",
-        f"  angestanden:                 {anzahl(e.geplant)} Dateien, {groesse(e.geplant_bytes)}",
+        f"  angestanden:                 {n_dateien(e.geplant)}, {groesse(e.geplant_bytes)}",
         f"  geprueft (Zieldatei stimmt): {anzahl(e.geprueft)}",
         f"  Duplikate bestaetigt (Partnerdatei stimmt): {anzahl(e.duplikate_bestaetigt)}",
         f"  verschobene Dateien gehasht: {anzahl(e.verschoben_gehasht)}",
@@ -1724,8 +1749,8 @@ def aufraeumen_plan(je_quelle: dict, weise: str, nicht_erreichbar: list) -> str:
         n, b = je_quelle[wurzel]
         gesamt_n += n
         gesamt_b += b
-        zeilen.append(f"  {wurzel}: {anzahl(n)} Dateien, {groesse(b)}")
-    zeilen.append(f"  gesamt: {anzahl(gesamt_n)} Dateien, {groesse(gesamt_b)}")
+        zeilen.append(f"  {wurzel}: {n_dateien(n)}, {groesse(b)}")
+    zeilen.append(f"  gesamt: {n_dateien(gesamt_n)}, {groesse(gesamt_b)}")
     if nicht_erreichbar:
         zeilen.append("Nicht erreichbare Quellen (dort passiert nichts):")
         zeilen.extend(f"  {q}" for q in nicht_erreichbar)
@@ -1735,7 +1760,7 @@ def aufraeumen_plan(je_quelle: dict, weise: str, nicht_erreichbar: list) -> str:
 def aufraeumen_frage(wurzel, n: int, bytes_: int, weise: str) -> str:
     wort = BESTAETIGUNGSWORT[weise]
     return (
-        f"Quelle {wurzel}: {anzahl(n)} Dateien ({groesse(bytes_)}) {weise_text(weise)}.\n"
+        f"Quelle {wurzel}: {n_dateien(n)} ({groesse(bytes_)}) {weise_text(weise)}.\n"
         f"Vor jeder Loeschung werden Quelle und Ziel vollstaendig neu gelesen und verglichen.\n"
         f"Zum Bestaetigen das Wort '{wort}' eingeben, alles andere ueberspringt diese Quelle: "
     )
@@ -1750,6 +1775,10 @@ def aufraeumen_ordner_frage(wurzel, n: int) -> str:
 
 def aufraeumen_uebersprungen(wurzel) -> str:
     return f"Quelle {wurzel}: uebersprungen (nicht bestaetigt)."
+
+
+AUFRAEUMEN_NUR_ORDNER = ("Keine Datei mehr aus den Quellen zu entfernen - jetzt geht es nur um leere Ordner "
+                         "(Reste wie Thumbs.db zaehlen als leer; der Quellordner selbst bleibt).")
 
 
 def aufraeumen_nichts_zu_tun() -> str:
@@ -1855,7 +1884,8 @@ def zuruecklegen_nichts_zu_tun() -> str:
 
 
 def zuruecklegen_probelauf(e) -> str:
-    zeilen = [f"Probelauf (--dry-run): {anzahl(e.zurueckgelegt)} Dateien wuerden an ihren alten Ort zurueckgelegt."]
+    zeilen = [f"Probelauf (--dry-run): {n_dateien(e.zurueckgelegt)}"
+              f" {'wuerde' if e.zurueckgelegt == 1 else 'wuerden'} an ihren alten Ort zurueckgelegt."]
     if e.belegt:
         zeilen.append(f"  alter Ort belegt, bleiben im Ordner _geloescht_: {anzahl(len(e.belegt))}")
         zeilen.extend(f"    {p}" for p in e.belegt[:20])
@@ -1868,7 +1898,7 @@ def zuruecklegen_probelauf(e) -> str:
 def zuruecklegen_ergebnis(e) -> str:
     zeilen = [
         "Ordner _geloescht_ zurueckgelegt (dieser Lauf)",
-        f"  zurueckgelegt:     {anzahl(e.zurueckgelegt)} Dateien an ihren alten Ort",
+        f"  zurueckgelegt:     {n_dateien(e.zurueckgelegt)} an ihren alten Ort",
     ]
     if e.kopiert:
         zeilen.append(f"    davon kopiert:   {anzahl(e.kopiert)} (das Dateisystem kann nicht umbenennen, ohne zu"
@@ -2047,7 +2077,7 @@ KOPIEREN_PROBELAUF_VERSCHIEBEN = (
 
 def start_verschieben_frage(n: int, bytes_: int) -> str:
     return (
-        f"Verschieben: {anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv gebracht und danach\n"
+        f"Verschieben: {n_dateien(n)} ({groesse(bytes_)}) {'wird' if n == 1 else 'werden'} ins Archiv gebracht und danach\n"
         "in der Quelle geloescht (auf demselben Laufwerk durch Umbenennen, sonst nach Kopie\n"
         "und Frischlesung beider Seiten). Zum Bestaetigen das Wort 'verschieben' eingeben,\n"
         "alles andere hoert hier auf: "
@@ -2072,7 +2102,7 @@ def start_alias_unbekannt(modell: str) -> str:
 def start_aliase_geschrieben(pfad, n: int, zurueck: int) -> str:
     return (
         f"{anzahl(n)} Alias{'e' if n != 1 else ''} in {pfad} eingetragen;"
-        f" {anzahl(zurueck)} Dateien werden neu analysiert."
+        f" {n_dateien(zurueck)} {'wird' if zurueck == 1 else 'werden'} neu analysiert."
     )
 
 
@@ -2451,7 +2481,7 @@ def ob_frage_wiederherstellen(zeit: str, lokal, ersetzen: bool = False) -> str:
 
 
 def ob_wiederhergestellt(dateien: int, zeit: str) -> str:
-    return f"Datenbank zurückgeholt: {anzahl(dateien)} Dateien erfasst, Stand vom {zeit or 'unbekannten Zeitpunkt'}."
+    return f"Datenbank zurückgeholt: {n_dateien(dateien)} erfasst, Stand vom {zeit or 'unbekannten Zeitpunkt'}."
 
 
 def ob_datenbank_schon_da() -> str:
@@ -2483,8 +2513,9 @@ def ob_einstellungen(pfad, geoeffnet: bool) -> str:
 
 def ob_aliase_geschrieben(n: int, zurueck: int) -> str:
     return (
-        f"{anzahl(n)} Ordnernamen gespeichert. {anzahl(zurueck)} Dateien werden jetzt noch einmal analysiert,"
-        " damit sie den neuen Ordnernamen bekommen."
+        f"{anzahl(n)} Ordnernamen gespeichert. {n_dateien(zurueck)}"
+        f" {'wird' if zurueck == 1 else 'werden'} jetzt noch einmal analysiert,"
+        f" damit sie den neuen Ordnernamen {'bekommt' if zurueck == 1 else 'bekommen'}."
     )
 
 
@@ -2495,19 +2526,22 @@ def ob_keine_aliase() -> str:
 def ob_kopieren_text(n: int, bytes_: int, verschieben: bool) -> str:
     if verschieben:
         return (
-            f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv verschoben. Jede Datei wird erst in der"
+            f"{n_dateien(n)} ({groesse(bytes_)}) {'wird' if n == 1 else 'werden'} ins Archiv verschoben."
+            " Jede Datei wird erst in der"
             " Quelle gelöscht, wenn ihre Kopie im Archiv geprüft ist. Zur Bestätigung bitte das Wort"
             " „verschieben“ eintippen."
         )
-    return f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden ins Archiv kopiert. Die Quelle bleibt unverändert."
+    return (f"{n_dateien(n)} ({groesse(bytes_)}) {'wird' if n == 1 else 'werden'} ins Archiv kopiert."
+            " Die Quelle bleibt unverändert.")
 
 
 def ob_pruefen_text(n: int, bytes_: int) -> str:
-    return f"{anzahl(n)} Dateien ({groesse(bytes_)}) werden im Archiv vollständig neu gelesen und verglichen."
+    return (f"{n_dateien(n)} ({groesse(bytes_)}) {'wird' if n == 1 else 'werden'} im Archiv vollständig"
+            " neu gelesen und verglichen.")
 
 
 def ob_analyse_text(n: int) -> str:
-    return f"{anzahl(n)} Dateien warten auf die Analyse."
+    return f"{n_dateien(n)} {'wartet' if n == 1 else 'warten'} auf die Analyse."
 
 
 def ob_fertig_text() -> str:
@@ -2822,8 +2856,9 @@ def ob_frage_automatisch(quellen: list[str], aufraeumbar: int, verschieben: bool
         if len(quellen) > 6:
             zeilen.append(f"  und {anzahl(len(quellen) - 6)} weitere")
     if aufraeumbar:
-        zeilen += ["", f"Aus früheren Läufen sind schon {anzahl(aufraeumbar)} Dateien geprüft; "
-                       "auch sie kommen in den Ordner „_geloescht_“."]
+        zeilen += ["", f"Aus früheren Läufen {'ist' if aufraeumbar == 1 else 'sind'} schon"
+                       f" {n_dateien(aufraeumbar)} geprüft; auch {'sie kommt' if aufraeumbar == 1 else 'sie kommen'}"
+                       " in den Ordner „_geloescht_“."]
     if verschieben:
         zeilen += ["", OB_KETTE_VERSCHIEBEN_HINWEIS]
     zeilen += [
@@ -2875,7 +2910,7 @@ def bestand_erfasst(dateien: int, neu: int) -> str:
     if not dateien:
         return "Bestand des Archivs: noch leer."
     zusatz = f", davon {anzahl(neu)} neu erfasst" if neu else ""
-    return (f"Bestand des Archivs: {anzahl(dateien)} Dateien bekannt{zusatz} "
+    return (f"Bestand des Archivs: {n_dateien(dateien)} bekannt{zusatz} "
             "(nur Namen und Größen, gelesen wird erst beim Kopieren, wo nötig).")
 
 
@@ -2883,7 +2918,7 @@ def vermutlich_importiert(je_quelle: dict) -> str:
     zeilen = ["Schon im Archiv? Diese Dateien sind vermutlich bereits importiert (genau so groß wie eine"
               " Datei im Archiv; sicher weiß es das Programm nach dem Kopieren):"]
     for quelle, n in sorted(je_quelle.items(), key=lambda x: str(x[0])):
-        zeilen.append(f"  {quelle}: {anzahl(n)} Dateien")
+        zeilen.append(f"  {quelle}: {n_dateien(n)}")
     return "\n".join(zeilen)
 
 
@@ -3177,7 +3212,7 @@ TB_ABGEBROCHEN = "Abgebrochen. Der angefangene Testordner bleibt liegen; er kann
 
 
 def tb_fertig(ordner, bilder: int, dateien: int, groesse_bytes: int, sekunden: float) -> str:
-    return (f"Fertig: {anzahl(bilder)} Testbilder ({anzahl(dateien)} Dateien, {groesse(groesse_bytes)}) in "
+    return (f"Fertig: {anzahl(bilder)} Testbilder ({n_dateien(dateien)}, {groesse(groesse_bytes)}) in "
             f"{dauer(sekunden)}.\n"
             f"  Quelle:    {Path(ordner) / 'Quelle'}\n"
             f"  Ziel:      {Path(ordner) / 'Ziel'} (vorbelegtes Archiv)\n"
@@ -3328,3 +3363,61 @@ def wohin_direkt(ordner: str) -> str:
 
 def wohin_weitere(n: int) -> str:
     return f"weitere {anzahl(n)} Ordner"
+
+WOHIN_REITER = "Wohin?"
+WOHIN_TITEL = "Wohin kommt was?"
+WOHIN_STAND = {
+    "leer": "Noch nichts eingeplant – erst Scan und Analyse, dann zeigt die Grafik den Plan.",
+    "plan": "Plan – noch nichts kopiert. So wird sortiert, sobald das Kopieren läuft.",
+    "sortiert": "So wurde sortiert.",
+}
+WOHIN_KEIN_ARCHIV = "Noch kein Archiv gewählt – auf der Startseite einen Zielordner angeben."
+WOHIN_LAEUFT = "Ein Schritt läuft – die Grafik zeigt den Stand davor und wird nach dem Schritt aktualisiert."
+WOHIN_KENNZAHLEN = (("gesamt", "Dateien gesamt"), ("kopiert", "Im Archiv"), ("geplant", "Geplant"),
+                    ("doppelt", "Doppelt"), ("schon_da", "War schon im Archiv"), ("fehler", "Fehler"))
+WOHIN_QUELLEN = "Alle Quellen"
+WOHIN_ARCHIV = "Ganzes Archiv"
+WOHIN_HILFE = ("Links die Quellordner, rechts die Ordner im Archiv. Je dicker ein Band, desto mehr Dateien. "
+               "Auf einen Ordner klicken: eine Ebene tiefer. Auf ein Band klicken: seine Dateien.")
+WOHIN_SPALTEN = ("Von", "Nach", "Was passiert", "Dateien", "Größe")
+WOHIN_DATEI_SPALTEN = ("Datei", "Liegt in (Quelle)", "Kommt nach (im Archiv)", "Was passiert")
+WOHIN_SUCHEN = "Datei suchen"
+WOHIN_SUCHEN_HINWEIS = "Namen oder Teil des Pfads eintippen …"
+WOHIN_ORDNER_OEFFNEN = "Archivordner öffnen"
+WOHIN_QUELLE_OEFFNEN = "Quellordner öffnen"
+WOHIN_IN_SICHTEN = "In Sichten zeigen"
+WOHIN_AUSWAHL_WEG = "Auswahl aufheben"
+WOHIN_BALKEN_TITEL = "Wohin kam was"
+WOHIN_GENAUER = "Genauer: Reiter „Wohin?“"
+WOHIN_ZEICHEN_FEHLER = "⚠"
+
+
+def wohin_lesefehler(fehler) -> str:
+    return (f"Das Archiv ließ sich gerade nicht lesen ({fehler}). Bitte später noch einmal "
+            "den Reiter öffnen – an den Dateien ändert das nichts.")
+
+
+def wohin_band_text(n: int, bytes_: int, von: str, nach: str, schicksal: str) -> str:
+    """Hinweis zu einem Band: der Wert zuerst, dann woher und wohin."""
+    return f"{n_dateien(n)} · {groesse(bytes_)}\n{von} → {nach}\n{WOHIN_SCHICKSAL.get(schicksal, schicksal)}"
+
+
+def wohin_knoten_text(name: str, n: int, bytes_: int, tiefer: bool) -> str:
+    text = f"{n_dateien(n)} · {groesse(bytes_)}\n{name}"
+    return text + ("\nKlicken: eine Ebene tiefer" if tiefer else "")
+
+
+def wohin_band_titel(von: str, nach: str, schicksal: str, n: int) -> str:
+    return f"{von} → {nach} · {WOHIN_SCHICKSAL.get(schicksal, schicksal)} · {n_dateien(n)}"
+
+
+def wohin_liste_gekuerzt(gezeigt: int, gesamt: int) -> str:
+    return f"Die ersten {anzahl(gezeigt)} von {anzahl(gesamt)} Dateien."
+
+
+def wohin_treffer(gezeigt: int, gesamt: int) -> str:
+    if gesamt == 0:
+        return "Keine Datei gefunden."
+    if gezeigt < gesamt:
+        return f"{n_dateien(gesamt)} gefunden, die ersten {anzahl(gezeigt)} stehen hier."
+    return f"{n_dateien(gesamt)} gefunden."

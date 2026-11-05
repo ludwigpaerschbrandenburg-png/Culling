@@ -68,6 +68,7 @@ QLabel[klasse="titel"], QLabel[klasse="kicker"], QLabel[klasse="kicker-gedaempft
 QLabel[klasse="feldname"] {{ font-weight: 600; }}
 QLabel[klasse="dialog-titel"] {{ font-size: 13pt; font-weight: 600; }}
 QLabel[klasse="seitentitel"] {{ font-size: 15pt; font-weight: 600; }}
+QLabel[klasse="kennzahl-gross"] {{ font-size: 18pt; font-weight: 600; }}
 QLabel[klasse="phase-aktiv"] {{ font-weight: 600; }}
 QFrame[klasse="card"], QFrame[klasse="card-inaktiv"] {{
     background: palette(base); border: 1px solid palette(midlight); border-radius: 6px;

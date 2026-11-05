@@ -35,9 +35,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import FotosortFehler, __version__, cli, config, meldungen, prozesse, testbilder
+from .. import FotosortFehler, __version__, cli, config, meldungen, prozesse, testbilder, wohin
 from . import ablauf as ablauf_modul
-from . import meldungsfenster, sichtfenster, stil
+from . import meldungsfenster, sichtfenster, stil, wohinfenster
 
 SCHRITTE = ["scan", "analyse", "kopieren", "pruefen", "aufraeumen"]
 #: Marke des kuenstlichen Testbaums (tests/testbaum.py legt sie neben "Quelle" ab):
@@ -537,6 +537,10 @@ class HauptSeite(QWidget):
         self.kameras.setMaximumWidth(640)
         self.kameras.hide()
         links.addWidget(self.kameras)
+        # Seit v0.14: Wohin kam was - schmaler Balken, Legende, Weg zum Reiter „Wohin?“
+        self.wohin = wohinfenster.WohinBalken()
+        self.wohin.genauer.connect(lambda: self.f.reiter_wechseln("wohin"))
+        links.addWidget(self.wohin)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumHeight(180)
@@ -639,7 +643,9 @@ class HauptSeite(QWidget):
         self.kennzahlen.addWidget(paar(t.get("dateien") or "0", "Dateien"))
         if l.get("bytes") or l.get("gesamt_bytes"):
             self.kennzahlen.addWidget(paar(t.get("bytes") or "", ""))
-        if t.get("rate"):
+        if t.get("rate") and l.get("zustand") not in ENDE:
+            # Nach dem Ende nennt die Zusammenfassung das Tempo des ganzen
+            # Schritts - nicht zwei verschiedene Zahlen nebeneinander.
             w = label("", "kennzahl")
             w.setTextFormat(Qt.TextFormat.RichText)
             w.setText(f'<b>{t["rate"].replace(" MB/s", "")}</b> MB/s')
@@ -804,9 +810,10 @@ class Hauptfenster(QMainWindow):
         tl = QHBoxLayout(self.titel)
         tl.setContentsMargins(32, 10, 24, 0)
         tl.setSpacing(12)
-        # Zwei Reiter (SPEC §8 seit v0.8): „Archiv“ ist der bisherige Ablauf,
-        # „Sichten“ zeigt und bewertet die Bilder im Archiv - er ersetzt nichts.
-        self.reiter = Seg([("archiv", "Archiv"), ("sichten", "Sichten")], reiter=True)
+        # Reiter (SPEC §8): „Archiv“ ist der Ablauf, „Wohin?“ zeigt als Grafik,
+        # was wohin kommt (seit v0.14), „Sichten“ zeigt und bewertet die Bilder
+        # im Archiv (seit v0.8). Die beiden ersetzen nichts.
+        self.reiter = Seg([("archiv", "Archiv"), ("wohin", meldungen.WOHIN_REITER), ("sichten", "Sichten")], reiter=True)
         self.reiter.setzen("archiv")
         self.reiter.geaendert.connect(self.reiter_wechseln)
         tl.addWidget(self.reiter)
@@ -852,7 +859,9 @@ class Hauptfenster(QMainWindow):
         self.reiter_stapel = QStackedWidget()
         self.archiv_reiter = archiv_w
         self.sichten = sichtfenster.SichtenSeite(self)
+        self.wohin = wohinfenster.WohinSeite(self)
         self.reiter_stapel.addWidget(archiv_w)
+        self.reiter_stapel.addWidget(self.wohin)
         self.reiter_stapel.addWidget(self.sichten)
         aussen.addWidget(self.reiter_stapel, 1)
 
@@ -924,15 +933,40 @@ class Hauptfenster(QMainWindow):
         super().closeEvent(ev)
 
     def reiter_wechseln(self, name: str) -> None:
-        """„Archiv“ oder „Sichten“. Der Ablauf im Reiter „Archiv“ laeuft dabei weiter."""
+        """„Archiv“, „Wohin?“ oder „Sichten“. Der Ablauf im Reiter „Archiv“
+        laeuft dabei weiter."""
         self.reiter.setzen(name)
         if name == "sichten":
             self.sichten.oeffnen(self.ab.sichten_info())
             self.reiter_stapel.setCurrentWidget(self.sichten)
             self.sichten.raster.setFocus()
+            return
+        self.sichten.pausieren()
+        if name == "wohin":
+            with self.beschaeftigt():
+                self.wohin.aktualisieren()
+            self.reiter_stapel.setCurrentWidget(self.wohin)
         else:
-            self.sichten.pausieren()
             self.reiter_stapel.setCurrentWidget(self.archiv_reiter)
+
+    def reiter_jetzt(self) -> str:
+        return self.reiter.wert() or "archiv"
+
+    def sichten_ordner_zeigen(self, pfad: Path) -> None:
+        """Vom Reiter „Wohin?“: einen Ordner des Archivs im Reiter „Sichten“ zeigen."""
+        self.reiter_wechseln("sichten")
+        self.sichten.ordner_zeigen(Path(pfad))
+
+    def wohin_auffrischen(self) -> None:
+        """Nach einem Schritt: Balken in der Uebersicht und - falls offen - der
+        Reiter „Wohin?“ zeigen den neuen Stand. Kein Archiv, kein Balken."""
+        try:
+            daten = self.ab.wohin_lesen()
+        except FotosortFehler:
+            daten = None
+        self.haupt.wohin.setzen(daten)
+        if self.reiter_jetzt() == "wohin":
+            self.wohin.aktualisieren()
 
     def _marker_schreiben(self, sichtbar: bool) -> None:
         try:
@@ -1405,6 +1439,8 @@ class Hauptfenster(QMainWindow):
         self.letzter_schritt = schritt or self.letzter_schritt
         self.abbruch_zeit = 0.0
         self.haupt.kameras.hide()
+        self.haupt.wohin.setzen(None)
+        self.wohin.schritt_laeuft()
         self.haupt.log.hide()
         self.haupt.zaehler.setzen([])
         self.haupt.aktuell.setText("Wird gestartet …")
@@ -1588,6 +1624,7 @@ class Hauptfenster(QMainWindow):
             h.phasen.setzen(n["schritt"], 0)
         self.karten_fuellen(n, z)
         self.ruhe_aktionen(n, zf)
+        self.wohin_auffrischen()
 
     @staticmethod
     def _vorheriger(naechster: str, zaehler: dict) -> str:
@@ -1838,6 +1875,32 @@ class Durchlauf(QObject):
         self._foto("13-sichten")
         f.reiter.knoepfe["archiv"].click()
 
+    def _wohin_zeigen(self) -> None:
+        """Reiter „Wohin?“ (v0.14): oeffnen, ins Jahr mit den meisten Dateien
+        hineinklicken, das dickste Band waehlen, fotografieren, zurueck. Die
+        Grafik muss jede Datei der Datenbank genau einmal zeigen."""
+        f = self.f
+        f.reiter.knoepfe["wohin"].click()
+        QApplication.processEvents()
+        w = f.wohin
+        a = w.ansicht
+        if a is None or not a.baender:
+            self._abbruch(f"Reiter „Wohin?“ zeigt nichts: {w.stand.text()}")
+            return
+        gesamt = sum((f.ab.archiv_lesen().get("zaehler") or {}).values())
+        if sum(b.n for b in a.baender) != gesamt:
+            self._abbruch(f"Reiter „Wohin?“ zählt {sum(b.n for b in a.baender)} Dateien, die Datenbank {gesamt}")
+            return
+        ordner = [i for i, k in enumerate(a.rechts) if k.art == wohin.ORDNER and k.tiefer]
+        if ordner:
+            w.knoten_klick("rechts", max(ordner, key=lambda i: a.rechts[i].n))
+            a = w.ansicht
+        w.band_waehlen(max(range(len(a.baender)), key=lambda i: a.baender[i].n))
+        QApplication.processEvents()
+        self._sagen(f"Wohin: {meldungen.n_dateien(gesamt)} in {len(a.baender)} Bändern")
+        self._foto("15-wohin")
+        f.reiter.knoepfe["archiv"].click()
+
     def _abbruch(self, text: str) -> None:
         self.timer.stop()
         self.fehler = text
@@ -1941,7 +2004,9 @@ class Durchlauf(QObject):
                         d.grab().save(str(self.fotos / "14-frage-alles-automatisch.png"))
                         self._sagen("Foto 14-frage-alles-automatisch")
                     d.reject()
-                    self._pruefen()
+                    self._wohin_zeigen()
+                    if not self.fehler:
+                        self._pruefen()
         except Exception as fehler:  # noqa: BLE001 - der Durchlauf meldet, statt abzustuerzen
             self._abbruch(f"{type(fehler).__name__}: {fehler}")
 

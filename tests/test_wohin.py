@@ -125,7 +125,9 @@ def test_stand_plan_und_leer(tmp_path):
 def test_oberste_ebene_quellen_links_jahre_und_kaesten_rechts(beispiel):
     d, ziel, karte, alt = beispiel
     a = wohin.ansicht(wohin.lesen(d, ziel))
-    assert [k.name for k in a.links] == [db.pfad_text(alt), db.pfad_text(karte)]
+    # Quellen heissen nach ihrem Ordner (der ganze Pfad steht im Hinweis).
+    assert [k.name for k in a.links] == ["Alt", "Karte"]
+    assert [k.schluessel for k in a.links] == [(db.pfad_text(alt),), (db.pfad_text(karte),)]
     assert [k.n for k in a.links] == [7, 7]
     namen = [k.name for k in a.rechts]
     # Echte Ordnernamen in fester Reihenfolge, "_" am Ende; danach die Kaesten.
@@ -133,6 +135,24 @@ def test_oberste_ebene_quellen_links_jahre_und_kaesten_rechts(beispiel):
     assert [k.art for k in a.rechts[4:]] == [wohin.BLEIBT, wohin.OFFEN, wohin.FEHLER, wohin.ANDERSWO]
     assert sum(k.n for k in a.links) == sum(k.n for k in a.rechts) == sum(b.n for b in a.baender) == 14
     assert a.rechts[0].tiefer and not a.rechts[1].tiefer and not a.rechts[4].tiefer
+
+
+def test_gleichnamige_quellen_mit_ganzem_pfad(tmp_path):
+    """Zwei Karten mit DCIM: dann steht der ganze Pfad da, sonst der Ordnername.
+    Sortiert wird nach dem, was dasteht."""
+    ziel = tmp_path / "Archiv"
+    d = _datenbank(tmp_path)
+    try:
+        quellen = (tmp_path / "Karte B" / "DCIM", tmp_path / "Karte A" / "DCIM", tmp_path / "urlaub 2019",
+                   tmp_path / "Urlaub 2018")
+        for q in quellen:
+            _zeile(d, q / "x.jpg", q, "kopiert", ziel / "2019" / f"{q.parent.name}_{q.name}.jpg")
+        d.verbindung.commit()
+        a = wohin.ansicht(wohin.lesen(d, ziel))
+        assert [k.name for k in a.links] == [str(tmp_path / "Karte A" / "DCIM"), str(tmp_path / "Karte B" / "DCIM"),
+                                             "Urlaub 2018", "urlaub 2019"]
+    finally:
+        d.schliessen()
 
 
 def test_hineinklicken_links_und_rechts(beispiel):
@@ -305,3 +325,50 @@ def test_entferntes_duplikat_bleibt_doppelt(tmp_path):
         assert daten.je_schicksal == {wohin.KOPIERT: 1, wohin.DOPPELT: 1}
     finally:
         d.schliessen()
+
+
+# ------------------------------------------------ Dateien eines Bandes ----
+
+
+def test_dateien_eines_bandes_passen_genau_zum_band(beispiel):
+    """Klick auf ein Band listet seine Dateien: genau so viele, wie das Band
+    zaehlt, jede mit seinem Schicksal - oben, links hineingeklickt und rechts."""
+    d, ziel, karte, _alt = beispiel
+    daten = wohin.lesen(d, ziel)
+    for a in (wohin.ansicht(daten), wohin.ansicht(daten, links=(db.pfad_text(karte),)),
+              wohin.ansicht(daten, rechts=("2019",)), wohin.ansicht(daten, links=(db.pfad_text(karte), "DCIM"))):
+        for i, b in enumerate(a.baender):
+            dateien, gesamt = wohin.band_dateien(d, ziel, a, i)
+            assert gesamt == b.n == len(dateien), (a.pfad_links, a.pfad_rechts, b)
+            assert {x.schicksal for x in dateien} == {b.schicksal}
+            assert sum(x.groesse for x in dateien) == b.bytes
+
+
+def test_dateien_eines_bandes_mit_weitere_und_grenze(tmp_path):
+    ziel = tmp_path / "Archiv"
+    q = tmp_path / "Q"
+    d = _datenbank(tmp_path)
+    try:
+        for i in range(15):
+            for j in range(i + 1):
+                _zeile(d, q / f"Ordner {i:02d}" / f"{j}.jpg", q, "kopiert", ziel / "2019" / f"{i}_{j}.jpg")
+        d.verbindung.commit()
+        a = wohin.ansicht(wohin.lesen(d, ziel), links=(db.pfad_text(q),))
+        weitere = next(i for i, b in enumerate(a.baender) if a.links[b.links].art == wohin.WEITERE)
+        dateien, gesamt = wohin.band_dateien(d, ziel, a, weitere, grenze=5)
+        assert gesamt == 21 and len(dateien) == 5
+    finally:
+        d.schliessen()
+
+
+def test_datei_suchen(beispiel):
+    d, ziel, karte, _alt = beispiel
+    treffer, gesamt = wohin.suchen(d, ziel, "a.jpg")
+    assert gesamt == len(treffer) == 1
+    (t,) = treffer
+    assert Path(t.quelle) == karte / "DCIM" / "a.jpg" and t.schicksal == wohin.KOPIERT
+    assert Path(t.ziel).parts[-5:] == ("2019", "2019-03 März", "2019-03-04", "A7C", "a.jpg")
+    treffer, gesamt = wohin.suchen(d, ziel, "K.JPG")               # Gross/Klein egal
+    assert gesamt == 1 and treffer[0].schicksal == wohin.FEHLER and treffer[0].grund == "Metadaten nicht lesbar"
+    assert wohin.suchen(d, ziel, "gibtsnicht") == ([], 0)
+    assert wohin.suchen(d, ziel, "%") == ([], 0)                    # Platzhalter gelten als Zeichen

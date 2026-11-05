@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from fotosort import meldungen
@@ -233,3 +235,20 @@ def test_exiftool_texte_nennen_die_gruppe_in_klammern():
     assert "[leistung]" in meldungen.exiftool_fehlt("/x")
     assert "[leistung]" in meldungen.exiftool_hinweis("/x")
     assert "[datenbank]" in meldungen.datenbank_auf_netzlaufwerk("/n", "cifs")
+
+
+def test_eine_datei_heisst_datei():
+    """Befund F16 (v0.14): "1 Dateien", "1 Quellen". Eine Zahl vor „Dateien“
+    oder „Quellen“ laeuft ueber n_dateien/n_quellen - ausser nach „von“ oder
+    „/“ (1 von 3 Dateien). Das Verb richtet sich nach der Zahl."""
+    import re
+    text = Path(meldungen.__file__).read_text(encoding="utf-8")
+    roh = re.findall(r"(?<!von )(?<!/)\{anzahl\([^)]*\)\} (?:Dateien|Quellen)\b", text)
+    assert roh == []
+    assert meldungen.n_dateien(1) == "1 Datei" and meldungen.n_dateien(1234) == "1.234 Dateien"
+    assert meldungen.n_quellen(1) == "1 Quelle" and meldungen.n_quellen(2) == "2 Quellen"
+    assert meldungen.ob_analyse_text(1) == "1 Datei wartet auf die Analyse."
+    assert meldungen.ob_analyse_text(2) == "2 Dateien warten auf die Analyse."
+    assert meldungen.ob_kopieren_text(1, 10, False).startswith("1 Datei (10 B) wird ins Archiv kopiert.")
+    assert meldungen.ob_pruefen_text(3, 10).startswith("3 Dateien (10 B) werden")
+    assert "1 Datei, die beim Aufräumen" in meldungen.ob_frage_zuruecklegen(1) and "kommt an" in meldungen.ob_frage_zuruecklegen(1)

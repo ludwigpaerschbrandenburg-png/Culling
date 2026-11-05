@@ -222,7 +222,8 @@ def test_durchlauf_ueber_das_fenster(quelle, ziel, tmp_path, capsys, monkeypatch
     assert rc == cli.OK, aus
     assert "Durchlauf bestanden" in aus
     bilder = sorted(p.name for p in fotos.glob("*.png"))
-    assert len(bilder) == 14 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "14-frage-alles-automatisch.png"
+    assert len(bilder) == 15 and bilder[0] == "01-startseite-leer.png" and bilder[-1] == "15-wohin.png"
+    assert "Wohin" in aus and "15-wohin" in aus      # Reiter „Wohin?“ (v0.14) mit gewaehltem Band
     # Die Bildschirmfotos fuer die Anleitung zeigen das Fenster in voller Groesse.
     bild = QImage(str(fotos / "03-uebersicht-nach-scan.png"))
     assert (bild.width(), bild.height()) == (1180, 800)

@@ -15,6 +15,7 @@ Kein HTML hier, keine Texte: die stehen in meldungen.py und in static/.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -25,7 +26,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, nachpruefen, pfade, prozesse, steuerung, zuruecklegen
+from .. import FotosortFehler, __version__, bericht, cli, config, dateitypen, db, kopieren, loeschen, meldungen, nachpruefen, pfade, prozesse, steuerung, wohin, zuruecklegen
 from datetime import datetime
 
 SCHRITTE = ("scan", "analyse", "kopieren", "pruefen", "aufraeumen")
@@ -621,6 +622,49 @@ class Ablauf:
             # Das Oeffnen selbst kann schreiben (Anhebung, Index): danach neu messen.
             self._stand_gemerkt = (self._stand_kennung(), stand)
             return dict(stand)
+
+    # -- Reiter „Wohin?" (v0.14) ------------------------------------------------
+
+    def wohin_lesen(self) -> "wohin.Daten":
+        """Die Stroeme fuer den Reiter „Wohin?" - eine Abfrage, zwischengespeichert
+        wie archiv_lesen: Solange sich an Datenbank und Einstellungen nichts
+        geaendert hat, wird nicht neu gerechnet. Waehrend ein Schritt laeuft,
+        wird die Datenbank nicht gelesen (FotosortFehler ob_datenbank_belegt);
+        das Fenster zeigt dann den letzten Stand."""
+        with self.sperre:
+            self._datenbank_frei()
+            if not self._archiv_da():
+                raise FotosortFehler(meldungen.ob_kein_archiv(self.ziel or "(kein Ziel)"))
+            kennung = self._stand_kennung()
+            gemerkt = getattr(self, "_wohin_gemerkt", None)
+            if kennung and gemerkt is not None and gemerkt[0] == kennung:
+                return gemerkt[1]
+            with self._lesend() as (archiv, d):
+                daten = wohin.lesen(d, archiv.ziel)
+            self._wohin_gemerkt = (self._stand_kennung(), daten)
+            return daten
+
+    def wohin_band(self, ansicht: "wohin.Ansicht", band: int, grenze: int = 500) -> tuple[list, int]:
+        with self.sperre:
+            self._datenbank_frei()
+            with self._lesend() as (archiv, d):
+                return wohin.band_dateien(d, archiv.ziel, ansicht, band, grenze)
+
+    def wohin_suchen(self, text: str, grenze: int = 200) -> tuple[list, int]:
+        with self.sperre:
+            self._datenbank_frei()
+            with self._lesend() as (archiv, d):
+                return wohin.suchen(d, archiv.ziel, text, grenze)
+
+    @contextlib.contextmanager
+    def _lesend(self):
+        """Das Archiv nur lesend oeffnen (wie die Uebersicht), danach schliessen."""
+        stille = _StilleKonsole()
+        archiv = cli.archiv_oeffnen(self._namensraum(), stille, anlegen=False)
+        try:
+            yield archiv, archiv.datenbank
+        finally:
+            archiv.datenbank.schliessen()
 
     def _archiv_lesen_frisch(self) -> dict:
         with self.sperre:

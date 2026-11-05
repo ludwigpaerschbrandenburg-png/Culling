@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import testbaum
-from fotosort import cli, db, hashes, loeschen
+from fotosort import cli, db, hashes, loeschen, meldungen
 from test_kopieren import _cli, _ereignisse, _vorbereiten, _zeilen, _zieldateien
 
 
@@ -414,9 +414,16 @@ def test_leere_ordner_dry_run_und_papierkorb_bleibt(baum, quelle, ziel, nachscha
     aus = capsys.readouterr().out
     assert "diese leeren Ordner wuerden entfernt" in aus and str(quelle / "Videos") in aus
     assert korb.exists() and (quelle / "Videos").exists()
+    # Befund F16 (v0.14): Ist keine Datei mehr aufzuraeumen, passt die
+    # Ueberschrift ueber das Entfernen von Dateien nicht ("Loeschweise ...,
+    # gesamt: 0 Dateien") - es geht nur noch um leere Ordner.
+    assert "Loeschweise" not in aus and "gesamt: 0 Dateien" not in aus
+    assert meldungen.AUFRAEUMEN_NUR_ORDNER in aus
     antwort.append("entfernen")
     assert _cli("aufraeumen", "--ziel", ziel, "--leere-ordner") == cli.OK
     assert korb.exists() and not (quelle / "Videos").exists()
+    aus = capsys.readouterr().out
+    assert "Loeschweise" not in aus and meldungen.AUFRAEUMEN_NUR_ORDNER in aus
 
 
 # --------------------------------------------------------- Loeschstelle -----

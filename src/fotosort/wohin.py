@@ -125,6 +125,20 @@ class Ansicht:
     pfad_rechts: tuple[str, ...] = ()
     n: int = 0
     bytes: int = 0
+    # Interner Schluessel (Ordnername, "direkt", Kasten) -> Knoten; fuer band_dateien.
+    l_index: dict = field(default_factory=dict, repr=False, compare=False)
+    r_index: dict = field(default_factory=dict, repr=False, compare=False)
+
+
+@dataclass
+class Datei:
+    """Eine Datei in der Liste eines Bandes oder der Suche."""
+    quelle: str
+    ziel: str            # Pfad im Archiv ('' ohne)
+    schicksal: str
+    status: str
+    grund: str
+    groesse: int
 
 
 @dataclass
@@ -162,49 +176,75 @@ def schicksal_von(status: str, schon_im_archiv: int) -> str:
     return SCHON_DA if s == DOPPELT and schon_im_archiv else s
 
 
-def lesen(dbank: db.Datenbank, ziel: Path) -> Daten:
-    """Die ganze Tabelle einmal lesen und zu Stroemen zusammenzaehlen."""
-    sep = os.sep
-    windows = sep == "\\"
-    ziel_text = db.text_pfad(db.pfad_text(ziel))
-    zbasis = ziel_text if ziel_text.endswith(sep) else ziel_text + sep
-    zbasis_klein = zbasis.lower()
-    zlaenge = len(zbasis)
-    basen: dict[str, tuple[str, str, int]] = {}
-    sammel: dict[tuple, list[int]] = {}
-    roh = db._ROH_KENNZEICHEN
-    dbank.stapel_schreiben()
-    for wurzel, qp, zp, status, schon, groesse, war_duplikat in dbank.verbindung.execute(
-            "SELECT quellwurzel, quellpfad, zielpfad, status, schon_im_archiv, groesse, war_duplikat FROM dateien"):
+_SPALTEN = "quellwurzel, quellpfad, zielpfad, status, schon_im_archiv, groesse, war_duplikat"
+
+
+class _Einordner:
+    """Eine Zeile einordnen: (Quellwurzel, Quellordner, Schicksal, Archivordner).
+    Die Ordner als Text mit dem Trenner des Systems ("" = direkt in der Wurzel,
+    Archivordner None = Kasten). Dieselbe Rechnung fuer die ganze Tabelle
+    (lesen), fuer die Dateien eines Bandes und fuer die Suche."""
+
+    def __init__(self, ziel: Path) -> None:
+        self.sep = os.sep
+        self.windows = self.sep == "\\"
+        ziel_text = db.text_pfad(db.pfad_text(ziel))
+        self.zbasis = ziel_text if ziel_text.endswith(self.sep) else ziel_text + self.sep
+        self.zbasis_klein = self.zbasis.lower()
+        self.zlaenge = len(self.zbasis)
+        self.basen: dict[str, tuple[str, str, int]] = {}
+
+    def __call__(self, wurzel, qp, zp, status, schon, war_duplikat) -> tuple[str, str, str, str | None]:
+        sep = self.sep
         s = _VON_STATUS.get(status, OFFEN)
         if s == DOPPELT and schon:
             s = SCHON_DA
         elif war_duplikat and status == "quelle_geloescht":
             s = DOPPELT          # aufgeraeumtes Duplikat (seit v0.14)
-        b = basen.get(wurzel)
+        b = self.basen.get(wurzel)
         if b is None:
             w = db.text_pfad(wurzel)
             basis = w if w.endswith(sep) else w + sep
-            b = basen[wurzel] = (basis, basis.lower(), len(basis))
-        if qp.startswith(roh):
+            b = self.basen[wurzel] = (basis, basis.lower(), len(basis))
+        if qp.startswith(_ROH):
             qp = db.text_pfad(qp)
-        if qp.startswith(b[0]) or (windows and qp[:b[2]].lower() == b[1]):
+        if qp.startswith(b[0]) or (self.windows and qp[:b[2]].lower() == b[1]):
             rest = qp[b[2]:]
         else:
             rest = qp
         stelle = rest.rfind(sep)
         q_ordner = rest[:stelle] if stelle > 0 else ""
         z_ordner = None
-        if s in (KOPIERT, GEPLANT, DOPPELT, SCHON_DA):
-            if zp.startswith(roh):
+        if s in _MIT_ORDNER:
+            if zp.startswith(_ROH):
                 zp = db.text_pfad(zp)
-            if zp.startswith(zbasis) or (windows and zp[:zlaenge].lower() == zbasis_klein):
-                zrest = zp[zlaenge:]
+            if zp.startswith(self.zbasis) or (self.windows and zp[:self.zlaenge].lower() == self.zbasis_klein):
+                zrest = zp[self.zlaenge:]
                 stelle = zrest.rfind(sep)
                 z_ordner = zrest[:stelle] if stelle > 0 else ""
             else:
                 s = ANDERSWO
-        schluessel = (wurzel, q_ordner, s, z_ordner)
+        return wurzel, q_ordner, s, z_ordner
+
+    def ketten(self, q_ordner: str, z_ordner: str | None) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
+        quelle = tuple(q_ordner.split(self.sep)) if q_ordner else ()
+        if z_ordner is None:
+            return quelle, None
+        return quelle, (tuple(z_ordner.split(self.sep)) if z_ordner else ())
+
+
+_ROH = db._ROH_KENNZEICHEN
+_MIT_ORDNER = frozenset(INS_ARCHIV)
+
+
+def lesen(dbank: db.Datenbank, ziel: Path) -> Daten:
+    """Die ganze Tabelle einmal lesen und zu Stroemen zusammenzaehlen."""
+    einordnen = _Einordner(ziel)
+    sammel: dict[tuple, list[int]] = {}
+    dbank.stapel_schreiben()
+    for wurzel, qp, zp, status, schon, groesse, war_duplikat in dbank.verbindung.execute(
+            f"SELECT {_SPALTEN} FROM dateien"):
+        schluessel = einordnen(wurzel, qp, zp, status, schon, war_duplikat)
         wert = sammel.get(schluessel)
         if wert is None:
             sammel[schluessel] = [1, groesse or 0]
@@ -215,11 +255,7 @@ def lesen(dbank: db.Datenbank, ziel: Path) -> Daten:
     je: dict[str, int] = {}
     bytes_je: dict[str, int] = {}
     for (wurzel, q_ordner, s, z_ordner), (n, b) in sammel.items():
-        quelle = tuple(q_ordner.split(sep)) if q_ordner else ()
-        if z_ordner is None:
-            kette = None
-        else:
-            kette = tuple(z_ordner.split(sep)) if z_ordner else ()
+        quelle, kette = einordnen.ketten(q_ordner, z_ordner)
         eintraege.append(Eintrag(wurzel, quelle, s, kette, n, b))
         je[s] = je.get(s, 0) + n
         bytes_je[s] = bytes_je.get(s, 0) + b
@@ -252,6 +288,17 @@ def _anzeigename(wurzel: str) -> str:
     return db.text_pfad(wurzel)
 
 
+def _quellnamen(wurzeln) -> dict[str, str]:
+    """Quellen heissen nach ihrem Ordner ("Karte", "Urlaub 2019"). Heissen zwei
+    gleich (Gross-/Kleinschreibung egal) oder hat eine keinen eigenen Namen
+    (ein ganzes Laufwerk), steht der ganze Pfad da."""
+    kurz = {w: Path(_anzeigename(w)).name for w in wurzeln}
+    wie_oft: dict[str, int] = {}
+    for name in kurz.values():
+        wie_oft[name.casefold()] = wie_oft.get(name.casefold(), 0) + 1
+    return {w: name if name and wie_oft[name.casefold()] == 1 else _anzeigename(w) for w, name in kurz.items()}
+
+
 def _ordnername(teil: str) -> str:
     return Path(db.text_pfad(teil)).name or db.text_pfad(teil)
 
@@ -268,15 +315,10 @@ def ansicht(daten: Daten, links: tuple[str, ...] = (), rechts: tuple[str, ...] =
     stroeme: dict[tuple[str, str, str], list[int]] = {}
     for e in daten.eintraege:
         kette = (e.wurzel, *e.quelle)
-        if kette[:ll] != links:
+        schluessel = _schluessel(kette, e.ziel, e.schicksal, links, rechts)
+        if schluessel is None:
             continue
-        if rl and (e.ziel is None or e.ziel[:rl] != rechts):
-            continue
-        lk = kette[ll] if len(kette) > ll else _DIREKT
-        if e.ziel is None:
-            rk = "\x00" + e.schicksal
-        else:
-            rk = e.ziel[rl] if len(e.ziel) > rl else _DIREKT
+        lk, rk = schluessel
         for werte, k, tiefer in ((l_werte, lk, len(kette) > ll + 1),
                                  (r_werte, rk, e.ziel is not None and len(e.ziel) > rl + 1)):
             w = werte.get(k)
@@ -305,11 +347,11 @@ def ansicht(daten: Daten, links: tuple[str, ...] = (), rechts: tuple[str, ...] =
             rest = [k for k in kandidaten if k not in behalten]
         knoten: list[Knoten] = []
         index: dict[str, int] = {}
-        for k in sorted((k for k in ordner_k if k in behalten), key=_sortierung):
+        namen = _quellnamen(ordner_k) if ist_links and not weg else {k: _ordnername(k) for k in ordner_k}
+        for k in sorted((k for k in ordner_k if k in behalten), key=lambda k: (_sortierung(namen[k]), k)):
             n, b, tiefer = werte[k]
-            name = _anzeigename(k) if ist_links and not weg else _ordnername(k)
             index[k] = len(knoten)
-            knoten.append(Knoten((*weg, k), name, ORDNER, n, b, tiefer))
+            knoten.append(Knoten((*weg, k), namen[k], ORDNER, n, b, tiefer))
         if _DIREKT in behalten:
             if weg:
                 hier = _anzeigename(weg[0]) if ist_links and len(weg) == 1 else weg[-1]
@@ -343,7 +385,94 @@ def ansicht(daten: Daten, links: tuple[str, ...] = (), rechts: tuple[str, ...] =
     baender = [Band(li, ri, s, n, b) for (li, ri, s), (n, b) in
                sorted(zusammen.items(), key=lambda t: (t[0][0], t[0][1], _REIHE[t[0][2]]))]
     return Ansicht(l_knoten, r_knoten, baender, links, rechts,
-                   sum(k.n for k in l_knoten), sum(k.bytes for k in l_knoten))
+                   sum(k.n for k in l_knoten), sum(k.bytes for k in l_knoten), l_index, r_index)
+
+
+def _schluessel(kette: tuple, ziel: tuple | None, schicksal: str, links: tuple, rechts: tuple):
+    """(linker, rechter) Schluessel einer Zeile in dieser Ansicht - oder None,
+    wenn sie nicht hineingehoert."""
+    ll, rl = len(links), len(rechts)
+    if kette[:ll] != links:
+        return None
+    if rl and (ziel is None or ziel[:rl] != rechts):
+        return None
+    lk = kette[ll] if len(kette) > ll else _DIREKT
+    if ziel is None:
+        rk = "\x00" + schicksal
+    else:
+        rk = ziel[rl] if len(ziel) > rl else _DIREKT
+    return lk, rk
+
+
+def _like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def band_dateien(dbank: db.Datenbank, ziel: Path, a: Ansicht, band: int, grenze: int = 500) -> tuple[list[Datei], int]:
+    """Die Dateien eines Bandes: hoechstens grenze Stueck und die Gesamtzahl.
+    Gelesen wird nur der Teil der Tabelle unter dem linken Knoten (Index ueber
+    Quellwurzel und Quellpfad); eingeordnet wird jede Zeile wie in lesen()."""
+    b = a.baender[band]
+    knoten = a.links[b.links]
+    sep = os.sep
+    if knoten.art == WEITERE:
+        wege = list(knoten.mitglieder)
+    elif knoten.art == DIREKT:
+        wege = [a.pfad_links]
+    else:
+        wege = [knoten.schluessel]
+    einordnen = _Einordner(ziel)
+    gesehen: set[str] = set()
+    dateien: list[Datei] = []
+    gesamt = 0
+    dbank.stapel_schreiben()
+    for weg in wege:
+        wurzel = weg[0]
+        if len(weg) == 1:
+            sql, werte = f"SELECT {_SPALTEN}, fehlergrund FROM dateien WHERE quellwurzel = ?", [wurzel]
+        else:
+            anfang = db.text_pfad(wurzel).rstrip(sep) + sep + sep.join(weg[1:]) + sep
+            sql = (f"SELECT {_SPALTEN}, fehlergrund FROM dateien WHERE quellwurzel = ?"
+                   " AND quellpfad LIKE ? ESCAPE '\\'")
+            werte = [wurzel, _like(db.pfad_text(anfang)) + "%"]
+        for z in dbank.verbindung.execute(sql, werte):
+            if z[1] in gesehen:
+                continue
+            w, q_ordner, s, z_ordner = einordnen(*z[:5], z[6])
+            if s != b.schicksal:
+                continue
+            quelle, zkette = einordnen.ketten(q_ordner, z_ordner)
+            schluessel = _schluessel((w, *quelle), zkette, s, a.pfad_links, a.pfad_rechts)
+            if schluessel is None or a.l_index.get(schluessel[0]) != b.links or a.r_index.get(schluessel[1]) != b.rechts:
+                continue
+            gesehen.add(z[1])
+            gesamt += 1
+            if len(dateien) < grenze:
+                dateien.append(Datei(db.text_pfad(z[1]), db.text_pfad(z[2]) if z[2] else "", s, z[3], z[7] or "",
+                                     int(z[5] or 0)))
+    dateien.sort(key=lambda x: x.quelle)
+    return dateien, gesamt
+
+
+def suchen(dbank: db.Datenbank, ziel: Path, text: str, grenze: int = 200) -> tuple[list[Datei], int]:
+    """Dateien, deren Quellpfad den Text enthaelt (Gross-/Kleinschreibung egal):
+    woher, wohin, was passiert ist. Hoechstens grenze Stueck und die Gesamtzahl."""
+    text = text.strip()
+    if not text:
+        return [], 0
+    einordnen = _Einordner(ziel)
+    dbank.stapel_schreiben()
+    muster = "%" + _like(text) + "%"
+    gesamt = int(dbank.verbindung.execute(
+        "SELECT COUNT(*) FROM dateien WHERE quellpfad LIKE ? ESCAPE '\\'", (muster,)).fetchone()[0])
+    dateien = []
+    for z in dbank.verbindung.execute(
+            f"SELECT {_SPALTEN}, fehlergrund FROM dateien WHERE quellpfad LIKE ? ESCAPE '\\'"
+            " ORDER BY quellpfad LIMIT ?", (muster, int(grenze))):
+        _w, _q, s, _z = einordnen(*z[:5], z[6])
+        dateien.append(Datei(db.text_pfad(z[1]), db.text_pfad(z[2]) if z[2] else "", s, z[3], z[7] or "",
+                             int(z[5] or 0)))
+    return dateien, gesamt
 
 
 # --------------------------------------------------------------- Lage ----

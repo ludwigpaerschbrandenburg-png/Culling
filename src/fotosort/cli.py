@@ -828,7 +828,11 @@ def befehl_aufraeumen(args, konsole) -> int:
             return FEHLENDE_ANGABE
         for q in plan.nicht_erreichbar:
             konsole.print(meldungen.aufraeumen_quelle_nicht_erreichbar(q))
-        konsole.print(meldungen.aufraeumen_plan(plan.je_quelle, weise, plan.nicht_erreichbar))
+        if args.leere_ordner and not any(n for n, _ in plan.je_quelle.values()):
+            # Keine Datei mehr aufzuraeumen: es geht nur um leere Ordner (Befund F16).
+            konsole.print(meldungen.AUFRAEUMEN_NUR_ORDNER)
+        else:
+            konsole.print(meldungen.aufraeumen_plan(plan.je_quelle, weise, plan.nicht_erreichbar))
         schon = datenbank.bereits_importiert_je_quelle()
         if schon:
             konsole.print(meldungen.aufraeumen_bleiben({db.text_pfad(q): n for q, n in schon.items()}))

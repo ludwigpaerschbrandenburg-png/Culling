@@ -747,6 +747,23 @@ class SichtenSeite(QWidget):
                 return None
         return e
 
+    def ordner_zeigen(self, pfad: Path) -> bool:
+        """Einen Ordner des Archivs waehlen (vom Reiter „Wohin?“ aus). Gibt es
+        ihn im Archiv nicht (mehr), bleibt die Auswahl, wie sie ist."""
+        if self.ziel is None:
+            return False
+        e = self._finden(Path(pfad))
+        if e is None:
+            try:
+                e = self._finden(self.ziel / Path(pfad).resolve().relative_to(self.ziel.resolve()))
+            except (OSError, ValueError):
+                e = None
+        if e is None:
+            return False
+        self.baum.setCurrentItem(e)          # waehlt den Ordner (currentItemChanged)
+        self.baum.scrollToItem(e)
+        return True
+
     def _ordner_gewaehlt(self, e: QTreeWidgetItem | None, erzwingen: bool = False) -> None:
         if e is None or not e.data(0, ROLLE_PFAD) or self.ziel is None:
             return
