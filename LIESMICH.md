@@ -765,7 +765,7 @@ Befehl. Eine Zeile, die mit `#` beginnt, ist nur ein Kommentar.
   gespeicherten Pfade dann auf den neuen Ort um und sagt das; vorher legt es eine Kopie der
   Datenbank als `fotosort.db.vor_umzug_<Zeit>` daneben. Im Archiv selbst ändert sich dabei
   nichts. Gibt es den alten Ort noch mit derselben Kennung (eine Kopie des Archivs), hört es
-  auf und fragt, mit welchem Ordner es weitergehen soll.
+  auf, ändert nichts und erklärt, wie Sie den richtigen Ordner wählen.
 - **Bewertungen** aus dem Reiter „Sichten": `bewertungen.db` im selben Ordner wie die
   Datenbank, dazu der Ordner `vorschau` mit den aufgehobenen Vorschaubildern. „Archiv
   verwerfen" entfernt beides mit.
