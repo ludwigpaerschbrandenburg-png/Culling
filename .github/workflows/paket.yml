@@ -86,5 +86,7 @@ jobs:
             4. Zielordner waehlen, Quellordner hinzufuegen, "Los geht's" - bei "Alles automatisch" (Standard) einmal das Wort "verschieben" eintippen, dann laeuft alles von selbst bis zum Aufraeumen in den Ordner _geloescht_.
             5. Alles Weitere steht in der `LIESMICH.md` im selben Ordner.
 
+            Schon eine aeltere Version im Einsatz? Die neue in einen **neuen** Ordner entpacken, nicht ueber die alte (LIESMICH, Abschnitt "Neue Version einspielen"). Archive, Einstellungen und das Gedaechtnis des Programms bleiben erhalten.
+
             Gestartet wird nur das offizielle, signierte Python von python.org (Ordner `python`) und ExifTool (Ordner `exiftool`, Version siehe `exiftool\VERSION.txt`) - keine eigenen exe-Dateien. Meldet ein Virenscanner trotzdem etwas: LIESMICH, Abschnitt "Wenn der Virenscanner anschlaegt".
             Bitte zuerst mit Kopien einiger Fotos ausprobieren.

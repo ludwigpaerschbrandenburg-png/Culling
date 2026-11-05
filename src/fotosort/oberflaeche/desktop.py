@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -962,8 +963,8 @@ class Hauptfenster(QMainWindow):
         Reiter „Wohin?“ zeigen den neuen Stand. Kein Archiv, kein Balken."""
         try:
             daten = self.ab.wohin_lesen()
-        except FotosortFehler:
-            daten = None
+        except (FotosortFehler, OSError, sqlite3.Error):
+            daten = None                       # nur ein Bild - der Ablauf geht vor
         self.haupt.wohin.setzen(daten)
         if self.reiter_jetzt() == "wohin":
             self.wohin.aktualisieren()

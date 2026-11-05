@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import time
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -330,6 +331,13 @@ def test_eine_million_zeilen_in_wenigen_sekunden(tmp_path):
         beginn = time.monotonic()
         wohin.ansicht(daten, links=(q,), rechts=("2003",))
         assert time.monotonic() - beginn < 1.0
+        # Die Suche liest jede Zeile einmal (Schreibweise egal) - auch das in Sekunden.
+        beginn = time.monotonic()
+        treffer, n = wohin.suchen(d, ziel, "img_0123456")
+        dauer = time.monotonic() - beginn
+        print(f"Suche in 1 000 000 Zeilen: {dauer:.2f} s")
+        assert n == 1 and [Path(t.quelle).name for t in treffer] == ["IMG_0123456.JPG"]
+        assert dauer < 20, dauer
     finally:
         d.schliessen()
 
@@ -396,3 +404,26 @@ def test_datei_suchen(beispiel):
     assert gesamt == 1 and treffer[0].schicksal == wohin.FEHLER and treffer[0].grund == "Metadaten nicht lesbar"
     assert wohin.suchen(d, ziel, "gibtsnicht") == ([], 0)
     assert wohin.suchen(d, ziel, "%") == ([], 0)                    # Platzhalter gelten als Zeichen
+
+
+def test_suche_ohne_ruecksicht_auf_gross_klein_und_umlaut_schreibweise(tmp_path):
+    """„österreich“ findet „Urlaub Österreich“; ein auf dem Mac gespeicherter
+    Name (Umlaut in zwei Zeichen) wird mit dem getippten gefunden; Zeichen wie
+    % und _ gelten woertlich."""
+    ziel = tmp_path / "Archiv"
+    q = tmp_path / "Q"
+    d = _datenbank(tmp_path)
+    try:
+        _zeile(d, q / "Urlaub Österreich" / "a.jpg", q, "kopiert", ziel / "2019" / "a.jpg")
+        _zeile(d, q / unicodedata.normalize("NFD", "Ärger") / "b.jpg", q, "kopiert", ziel / "2019" / "b.jpg")
+        _zeile(d, q / "100% sicher" / "c_d.jpg", q, "kopiert", ziel / "2019" / "c_d.jpg")
+        d.verbindung.commit()
+        for text in ("österreich", "ÖSTERREICH", "Urlaub Österreich", unicodedata.normalize("NFD", "österreich")):
+            treffer, n = wohin.suchen(d, ziel, text)
+            assert n == 1 and [Path(t.quelle).name for t in treffer] == ["a.jpg"], text
+        treffer, n = wohin.suchen(d, ziel, "ärger")
+        assert n == 1 and Path(treffer[0].quelle).name == "b.jpg"
+        assert [Path(t.quelle).name for t in wohin.suchen(d, ziel, "100%")[0]] == ["c_d.jpg"]
+        assert wohin.suchen(d, ziel, "0%_")[1] == 0 and wohin.suchen(d, ziel, "c_d")[1] == 1
+    finally:
+        d.schliessen()

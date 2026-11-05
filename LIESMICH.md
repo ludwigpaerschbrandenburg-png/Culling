@@ -427,7 +427,8 @@ Darüber stehen ein paar große Zahlen: Dateien gesamt, im Archiv, doppelt, scho
 Archiv, Fehler.
 
 - **Links** stehen die Quellordner, **rechts** die Ordner im Archiv (zuerst die Jahre).
-  Dazwischen laufen Bänder; je dicker ein Band, desto mehr Dateien.
+  Dazwischen laufen Bänder; je dicker ein Band, desto mehr Dateien. Gibt es nur eine Quelle,
+  stehen links gleich ihre Unterordner (etwa „Handy“, „Kamera“, „Urlaub 2019“).
 - **Die Farbe sagt, was mit den Dateien passiert** (die Legende steht über der Grafik):
 
   | Farbe | Bedeutung |
@@ -450,7 +451,7 @@ Archiv, Fehler.
   Bänder treten dabei zurück; „Auswahl aufheben" zeigt wieder alle.
 - Darunter stehen dieselben Ströme als **Tabelle** mit genauen Zahlen (ein Klick auf eine
   Spaltenüberschrift sortiert) und das Feld **„Datei suchen"**: einen Namen oder einen Teil des
-  Pfads eintippen, Enter – für jede passende Datei steht da, woher sie kommt, wohin sie kommt
+  Pfads eintippen (Groß- und Kleinschreibung egal), Enter – für jede passende Datei steht da, woher sie kommt, wohin sie kommt
   und was passiert ist. Bei einer doppelten Datei steht dort die Datei im Archiv, die schon
   denselben Inhalt hat.
 

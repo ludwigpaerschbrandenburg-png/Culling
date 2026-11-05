@@ -311,6 +311,28 @@ def test_waehrend_eines_schritts_liest_der_reiter_nichts(app, tmp_path, quelle, 
     f.close()
 
 
+def test_lesefehler_stoert_das_fenster_nicht(app, tmp_path, quelle, ziel, monkeypatch):
+    """Laesst sich die Datenbank gerade nicht lesen (gesperrt, Platte weg),
+    zeigen Balken und Reiter das ruhig an - kein Absturz einer Fensterfunktion."""
+    import sqlite3
+    _schritte(quelle, ziel, "scan", "analyse", "kopieren")
+    f = _fenster(app, tmp_path, ziel)
+    assert f.haupt.wohin.isVisibleTo(f)
+
+    def kaputt(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(f.ab, "wohin_lesen", kaputt)
+    monkeypatch.setattr(f.ab, "wohin_suchen", kaputt)
+    f.wohin_auffrischen()                                  # nach einem Schritt
+    assert not f.haupt.wohin.isVisibleTo(f)
+    f.reiter_wechseln("wohin")
+    assert "database is locked" in f.wohin.stand.text() and f.wohin.ansicht is None
+    f.wohin.suchen("urlaub")
+    assert "database is locked" in f.wohin.treffer_info.text() and not f.wohin.treffer.isVisibleTo(f.wohin)
+    f.close()
+
+
 # ------------------------------------------------------ Zeichnen und Farben ----
 
 

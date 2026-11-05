@@ -785,9 +785,10 @@ class WohinSeite(QWidget):
                                                            b.schicksal, b.n))
         try:
             dateien, gesamt = self.f.ab.wohin_band(a, band)
-        except FotosortFehler as fehler:
+        except (FotosortFehler, OSError, sqlite3.Error) as fehler:
             dateien, gesamt = [], 0
-            self.band_hinweis.setText(str(fehler))
+            self.band_hinweis.setText(str(fehler) if isinstance(fehler, FotosortFehler)
+                                      else meldungen.wohin_lesefehler(fehler))
         else:
             self.band_hinweis.setText(meldungen.wohin_liste_gekuerzt(len(dateien), gesamt) if gesamt > len(dateien) else "")
         self.band_liste = dateien
@@ -867,9 +868,11 @@ class WohinSeite(QWidget):
             self.treffer_info.setText("")
             return
         try:
-            dateien, gesamt = self.f.ab.wohin_suchen(text)
-        except FotosortFehler as fehler:
-            self.treffer_info.setText(str(fehler))
+            with self.f.beschaeftigt():          # bei sehr vielen Dateien ein, zwei Sekunden
+                dateien, gesamt = self.f.ab.wohin_suchen(text)
+        except (FotosortFehler, OSError, sqlite3.Error) as fehler:
+            self.treffer_info.setText(str(fehler) if isinstance(fehler, FotosortFehler)
+                                      else meldungen.wohin_lesefehler(fehler))
             self.treffer.hide()
             return
         self.treffer_liste = dateien

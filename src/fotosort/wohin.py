@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -464,20 +465,38 @@ def band_dateien(dbank: db.Datenbank, ziel: Path, a: Ansicht, band: int, grenze:
     return dateien, gesamt
 
 
+def _falten(text) -> str:
+    """Fuer die Suche: Gross-/Kleinschreibung egal (auch bei Umlauten, „ß“ wie
+    „ss“) und ein Umlaut gleich, ob als ein Zeichen oder - wie auf dem Mac - als
+    zwei gespeichert."""
+    if text is None:
+        return ""
+    t = str(text)
+    if t.startswith(_ROH):
+        t = db.text_pfad(t)
+    try:
+        return unicodedata.normalize("NFC", t).casefold()
+    except (TypeError, ValueError):
+        return t.casefold()
+
+
 def suchen(dbank: db.Datenbank, ziel: Path, text: str, grenze: int = 200) -> tuple[list[Datei], int]:
-    """Dateien, deren Quellpfad den Text enthaelt (Gross-/Kleinschreibung egal):
-    woher, wohin, was passiert ist. Hoechstens grenze Stueck und die Gesamtzahl."""
+    """Dateien, deren Quellpfad den Text enthaelt (Schreibweise egal, siehe
+    _falten; % und _ woertlich): woher, wohin, was passiert ist. Hoechstens
+    grenze Stueck und die Gesamtzahl."""
     text = text.strip()
     if not text:
         return [], 0
     einordnen = _Einordner(ziel)
     dbank.stapel_schreiben()
-    muster = "%" + _like(text) + "%"
-    gesamt = int(dbank.verbindung.execute(
-        "SELECT COUNT(*) FROM dateien WHERE quellpfad LIKE ? ESCAPE '\\'", (muster,)).fetchone()[0])
+    v = dbank.verbindung
+    v.create_function("fotosort_falten", 1, _falten, deterministic=True)
+    muster = _falten(text)
+    gesamt = int(v.execute(
+        "SELECT COUNT(*) FROM dateien WHERE instr(fotosort_falten(quellpfad), ?) > 0", (muster,)).fetchone()[0])
     dateien = []
-    for z in dbank.verbindung.execute(
-            f"SELECT {_SPALTEN}, fehlergrund FROM dateien WHERE quellpfad LIKE ? ESCAPE '\\'"
+    for z in v.execute(
+            f"SELECT {_SPALTEN}, fehlergrund FROM dateien WHERE instr(fotosort_falten(quellpfad), ?) > 0"
             " ORDER BY quellpfad LIMIT ?", (muster, int(grenze))):
         _w, _q, s, _z = einordnen(*z[:5], z[6])
         dateien.append(Datei(db.text_pfad(z[1]), db.text_pfad(z[2]) if z[2] else "", s, z[3], z[7] or "",
