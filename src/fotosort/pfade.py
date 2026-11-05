@@ -335,6 +335,9 @@ def _liegt_in_nach_kennung(kind: Path, eltern: Path) -> bool:
 #: Wo ein Archiv seine Kennung ablegt (wie db.ARCHIV_UNTERORDNER / db.ARCHIV_ID_DATEI;
 #: hier noch einmal, weil db dieses Modul benutzt und nicht umgekehrt).
 ARCHIV_MARKE = (".fotosortierer", "archiv-id.txt")
+#: Marke eines Ordners mit Testbildern (testbilder.py); der Scan ueberspringt
+#: einen solchen Ordner unterhalb einer Quelle (seit v0.14).
+TESTBILDER_MARKE = ".fotosort_testbilder.json"
 
 
 def archiv_kennung_in(ordner: Path) -> str:
@@ -458,8 +461,14 @@ def _schreibgeschuetzt(pfad: Path) -> bool:
 
 
 def _schreibschutz_setzen(pfad: Path, an: bool) -> None:
+    """Nur an der Datei selbst, nie am Ziel einer Verknuepfung: Seit Python
+    3.13 folgt os.chmod unter Windows sonst der Verknuepfung (v0.14)."""
     import stat as _stat
-    os.chmod(lang(pfad), _stat.S_IREAD if an else _stat.S_IREAD | _stat.S_IWRITE)
+    modus = _stat.S_IREAD if an else _stat.S_IREAD | _stat.S_IWRITE
+    if os.chmod in os.supports_follow_symlinks:
+        os.chmod(lang(pfad), modus, follow_symlinks=False)
+    else:
+        os.chmod(lang(pfad), modus)
 
 
 def datei_entfernen(pfad: Path, unveraendert=None) -> None:

@@ -81,7 +81,7 @@ STATUS_REIHE: tuple[str, ...] = (
     "fehler",
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Anhebungen des Schemas: von Version -> SQL-Anweisungen, die eine Datenbank
 #: dieser Version auf Version + 1 heben. Eine aeltere Datenbank wird beim
@@ -109,6 +109,17 @@ MIGRATIONEN: dict[int, tuple[str, ...]] = {
     # inhaltsgleichen Dateien kommt die ohne „ - Kopie“ ins Archiv. Noch nicht
     # kopierte Zeilen bekommen ihn zu Beginn des Kopierens nachgetragen.
     7: ("ALTER TABLE dateien ADD COLUMN kopie_rang INTEGER NOT NULL DEFAULT 0",),
+    # v0.14 (Befund F6): war die Datei ein Duplikat, als sie aus der Quelle
+    # entfernt wurde? Danach stehen Original und Duplikat beide auf
+    # quelle_geloescht - Bericht, Listen und der Reiter „Wohin?“ zaehlten sonst
+    # alle als kopiert. Nachgetragen: aus dem Status, fuer schon Entfernte aus
+    # dem Ereignis "duplikat", das das Kopieren je Datei schreibt.
+    8: (
+        "ALTER TABLE dateien ADD COLUMN war_duplikat INTEGER NOT NULL DEFAULT 0",
+        "UPDATE dateien SET war_duplikat = 1 WHERE status IN ('duplikat', 'duplikat_bestaetigt')",
+        "UPDATE dateien SET war_duplikat = 1 WHERE status = 'quelle_geloescht' AND EXISTS"
+        " (SELECT 1 FROM lauf_ereignisse e WHERE e.art = 'duplikat' AND e.pfad = dateien.quellpfad)",
+    ),
 }
 VOR_SCHEMA = "fotosort.db.vor_schema_"   # Sicherung vor einer Anhebung, nie geloescht
 
@@ -145,7 +156,8 @@ CREATE TABLE IF NOT EXISTS dateien (
     gefunden_in_lauf        INTEGER,
     zuletzt_gesehen_in_lauf INTEGER,
     schon_im_archiv         INTEGER NOT NULL DEFAULT 0,
-    kopie_rang              INTEGER NOT NULL DEFAULT 0
+    kopie_rang              INTEGER NOT NULL DEFAULT 0,
+    war_duplikat            INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS dateien_status  ON dateien (status);
@@ -883,7 +895,7 @@ class Datenbank:
         quellwurzel = pfad_text(quellwurzel)
         self._beginnen()
         zeile = self.verbindung.execute(
-            "SELECT groesse, mtime, quellwurzel, status FROM dateien WHERE quellpfad = ?", (quellpfad,)
+            "SELECT groesse, mtime, quellwurzel, status, dateityp FROM dateien WHERE quellpfad = ?", (quellpfad,)
         ).fetchone()
 
         if zeile is None:
@@ -915,6 +927,17 @@ class Datenbank:
             )
             self._vielleicht_schreiben()
             return "veraendert"
+        if (unveraendert and zeile["status"] == "uebersprungen" and zeile["dateityp"] == dateitypen.SONSTIGES
+                and dateityp != dateitypen.SONSTIGES):
+            # Seit v0.14: Die Endung wurde unter [dateitypen] ergaenzt (wie der
+            # Bericht es vorschlaegt). Die Datei wird jetzt erst Kandidat - wie neu.
+            self.verbindung.execute(
+                "UPDATE dateien SET quellwurzel = ?, dateityp = ?, status = 'gefunden', fehlergrund = '',"
+                " zuletzt_gesehen_in_lauf = ?, gefunden_in_lauf = ?, schon_im_archiv = 0 WHERE quellpfad = ?",
+                (quellwurzel, dateityp, lauf, lauf, quellpfad),
+            )
+            self._vielleicht_schreiben()
+            return "neu"
         if unveraendert:
             # Die Zeile bleibt, wie sie ist. Nur das Gesehen-Datum wandert mit;
             # die Quellwurzel (in zwei Indizes) nur, wenn sie sich aendert.
@@ -1326,7 +1349,8 @@ class Datenbank:
         self._beginnen()
         self.verbindung.execute(
             "UPDATE dateien SET status = 'kopiert', zielpfad = ?, schreibpfad = '', hash = ?,"
-            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0 WHERE quellpfad = ?",
+            " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0, war_duplikat = 0"
+            " WHERE quellpfad = ?",
             (pfad_text(zielpfad), hash_, lauf, pfad_text(quellpfad)),
         )
         self._abgelegt_merken(zielpfad, lauf)
@@ -1363,7 +1387,7 @@ class Datenbank:
         self.verbindung.execute(
             "UPDATE dateien SET status = 'duplikat', zielpfad = ?, schreibpfad = '', hash = ?,"
             " kopiert_in_lauf = ?, fehlergrund = '', bestaetigt_in_lauf = NULL, umbenannt = 0,"
-            " schon_im_archiv = ? WHERE quellpfad = ?",
+            " schon_im_archiv = ?, war_duplikat = 1 WHERE quellpfad = ?",
             (partner, hash_, lauf, schon, pfad_text(quellpfad)),
         )
         if schon:
@@ -1374,6 +1398,23 @@ class Datenbank:
                 (pfad_text(quellpfad),),
             )
         self._vielleicht_schreiben()
+
+    def begleitdateien_nachziehen(self) -> int:
+        """Seit v0.14: Begleitdateien (XMP) eines bereits importierten Bildes
+        gelten ebenfalls als bereits importiert - auch wenn sie erst spaeter
+        dazukamen (Lightroom schreibt sie nach). Sie bleiben mit dem Bild in
+        der Quelle (Entscheidung des Nutzers vom 27.10.2026). Vor dem Kopieren
+        und vor dem Aufraeumen aufgerufen; liefert die Zahl nachgezogener."""
+        self.stapel_schreiben()
+        self._beginnen()
+        cursor = self.verbindung.execute(
+            "UPDATE dateien SET schon_im_archiv = 1 WHERE dateityp = 'sidecar' AND schon_im_archiv = 0"
+            " AND gruppe != '' AND (gruppe IN (SELECT gruppe FROM dateien WHERE schon_im_archiv = 1"
+            "   AND dateityp != 'sidecar' AND gruppe != '')"
+            " OR gruppe IN (SELECT quellpfad FROM dateien WHERE schon_im_archiv = 1 AND dateityp != 'sidecar'))"
+        )
+        self.stapel_schreiben()
+        return int(cursor.rowcount)
 
     def gruppe_bereits_importiert(self, gruppe: str) -> bool:
         """Liegt ein Bild dieser Gruppe schon im Archiv (bereits importiert)?"""
@@ -1556,9 +1597,14 @@ class Datenbank:
     # Das "+" vor status und hash haelt SQLite davon ab, das ODER ueber die
     # Indizes auf status und hash aufzuloesen (dann muesste jede Seite neu
     # sortiert werden); so laeuft die Abfrage ueber (zielpfad, quellpfad).
+    # Seit v0.14 auch verschobene Dateien, deren Groesse nach dem Umbenennen
+    # nicht passte: Sie liegen im Archiv, die Quelle ist weg - bisher sah sie
+    # danach niemand mehr an.
     ZU_PRUEFEN_SQL = (
         "zielpfad != '' AND (+status IN ('kopiert', 'duplikat')"
-        " OR (+status = 'verschoben' AND +hash = ''))"
+        " OR (+status = 'verschoben' AND +hash = '')"
+        " OR (+status = 'fehler' AND +fehlergrund LIKE '"
+        + meldungen.GRUND_VERSCHIEBEN_NACHSEHEN.replace("'", "''") + "%'))"
     )
 
     def zu_pruefen_summe(self) -> tuple[int, int]:
@@ -1648,6 +1694,17 @@ class Datenbank:
         )
         self._vielleicht_schreiben()
 
+    def verschoben_nachtragen(self, quellpfad, hash_: str, groesse: int) -> None:
+        """Verschobene Datei, deren Groesse nach dem Umbenennen nicht passte:
+        Sie liegt im Archiv - Inhalt und wahre Groesse nachtragen (seit v0.14).
+        Die Quelle ist schon weg; geloescht wird hier nie etwas."""
+        self._beginnen()
+        self.verbindung.execute(
+            "UPDATE dateien SET status = 'verschoben', hash = ?, groesse = ?, fehlergrund = '' WHERE quellpfad = ?",
+            (hash_, int(groesse), pfad_text(quellpfad)),
+        )
+        self._vielleicht_schreiben()
+
     def verschoben_hash_setzen(self, quellpfad, hash_: str) -> None:
         """Umbenannte Datei: Hash aus der Zieldatei nachgetragen (Phase 4)."""
         self._beginnen()
@@ -1656,6 +1713,14 @@ class Datenbank:
             (hash_, pfad_text(quellpfad)),
         )
         self._vielleicht_schreiben()
+
+    def verwaiste_begleitdateien(self) -> list[sqlite3.Row]:
+        """Begleitdateien, die ohne Hauptdatei uebersprungen wurden (Analyse)."""
+        self.stapel_schreiben()
+        return self.verbindung.execute(
+            "SELECT quellpfad FROM dateien WHERE status = 'uebersprungen' AND dateityp = 'sidecar'"
+            " AND fehlergrund = ? ORDER BY quellpfad", (meldungen.GRUND_SIDECAR_OHNE_HAUPT,),
+        ).fetchall()
 
     def zeilen_mit_fehlergrund(self, praefix: str) -> list[sqlite3.Row]:
         """Zeilen im Status fehler, deren Grund mit praefix beginnt."""
@@ -1729,7 +1794,8 @@ class Datenbank:
         """Nach dem Entfernen. schreibpfad: wo die Datei im Papierkorb liegt, sonst leer."""
         self._beginnen()
         self.verbindung.execute(
-            "UPDATE dateien SET status = 'quelle_geloescht', schreibpfad = ?, fehlergrund = ''"
+            "UPDATE dateien SET status = 'quelle_geloescht', schreibpfad = ?, fehlergrund = '',"
+            " war_duplikat = CASE WHEN status = 'duplikat_bestaetigt' THEN 1 ELSE 0 END"
             " WHERE quellpfad = ?",
             (pfad_text(neuer_pfad) if neuer_pfad else "", pfad_text(quellpfad)),
         )
@@ -1768,6 +1834,13 @@ class Datenbank:
 
     # -- Bericht (SPEC Abschnitt 10) ----------------------------------------
 
+    def duplikate_gesamt(self) -> int:
+        """Duplikate - auch die schon aus der Quelle entfernten (seit v0.14)."""
+        self.stapel_schreiben()
+        return int(self.verbindung.execute(
+            "SELECT COUNT(*) FROM dateien WHERE status IN ('duplikat', 'duplikat_bestaetigt')"
+            " OR (status = 'quelle_geloescht' AND war_duplikat = 1)").fetchone()[0])
+
     def bericht_zahlen(self) -> dict[str, dict[str, int]]:
         """Zahlen je Quelle und gesamt: gefunden (echter Dateityp), kopiert,
         verschoben, geprueft, duplikate, ohne_datum, fehler, geloescht,
@@ -1779,9 +1852,9 @@ class Datenbank:
         )}
         ergebnis: dict[str, dict[str, int]] = {"gesamt": leer()}
         for z in self.verbindung.execute(
-            "SELECT quellwurzel, status, datum_sicher, dateityp, (zielpfad != '') AS eingeordnet,"
+            "SELECT quellwurzel, status, datum_sicher, dateityp, (zielpfad != '') AS eingeordnet, war_duplikat,"
             " COUNT(*) AS n, COALESCE(SUM(groesse), 0) AS b"
-            " FROM dateien GROUP BY quellwurzel, status, datum_sicher, dateityp, eingeordnet"
+            " FROM dateien GROUP BY quellwurzel, status, datum_sicher, dateityp, eingeordnet, war_duplikat"
         ):
             for schluessel in (z["quellwurzel"], "gesamt"):
                 e = ergebnis.setdefault(schluessel, leer())
@@ -1792,13 +1865,15 @@ class Datenbank:
                 e["gefunden"] += n
                 e["bytes"] += int(z["b"])
                 st = z["status"]
-                if st in ("kopiert", "geprueft", "quelle_geloescht"):
+                # Seit v0.14: ein entferntes Duplikat bleibt ein Duplikat (war_duplikat).
+                doppelt = st in ("duplikat", "duplikat_bestaetigt") or (st == "quelle_geloescht" and z["war_duplikat"])
+                if st in ("kopiert", "geprueft", "quelle_geloescht") and not doppelt:
                     e["kopiert"] += n
                 if st == "verschoben":
                     e["verschoben"] += n
-                if st in ("geprueft", "quelle_geloescht"):
+                if st in ("geprueft", "quelle_geloescht") and not doppelt:
                     e["geprueft"] += n
-                if st in ("duplikat", "duplikat_bestaetigt"):
+                if doppelt:
                     e["duplikate"] += n
                 if st == "fehler":
                     e["fehler"] += n

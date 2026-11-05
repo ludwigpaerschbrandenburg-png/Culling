@@ -39,7 +39,8 @@ ABGESTUERZT_NACH = 5 * steuerung.HERZSCHLAG
 LOG_GRENZE = 5 * 1024 * 1024
 LISTEN = {
     "fehler": ("status = 'fehler'", ()),
-    "duplikate": ("status IN ('duplikat', 'duplikat_bestaetigt')", ()),
+    # Seit v0.14 auch nach dem Aufraeumen (war_duplikat, Befund F6).
+    "duplikate": ("(status IN ('duplikat', 'duplikat_bestaetigt') OR (status = 'quelle_geloescht' AND war_duplikat = 1))", ()),
     "ohne_datum": ("datum_sicher = 0 AND zielpfad != ''", ()),
 }
 SEITENGROESSE = 100
@@ -80,6 +81,10 @@ def kette_naechster(fertig: str, zustand: str, hinweis: str, stand: dict, versch
         return "ende", "nicht_fertig"
     if fertig == "pruefen" and zustand == steuerung.ZUSTAND_FEHLER:
         return "ende", "pruefen_befunde"
+    if fertig == "aufraeumen" and zustand == steuerung.ZUSTAND_FEHLER:
+        # Verweigerte Loeschungen (Archivkopie fehlt oder weicht ab): nicht
+        # "Alles erledigt" melden (Befund F3, v0.14).
+        return "ende", "aufraeumen_befunde"
     arbeit = {
         "analyse": stand["analyse"] > 0,
         "kopieren": stand["kopieren"][0] > 0,
@@ -1421,11 +1426,15 @@ class Ablauf:
                     if zaehler.get("kopiert", 0):
                         zeilen.append(["noch nicht geprüft", meldungen.anzahl(zaehler.get("kopiert", 0))])
                 elif schritt == "aufraeumen":
-                    zeilen.append(["entfernt in diesem Durchgang", meldungen.anzahl(int(zahlen.get("dateien", 0)))])
-                    zeilen.append([meldungen.OB_ZEILE_QUELLE_ENTFERNT, meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
+                    # Entfernt, nicht bloss bearbeitet (Befund F3): verweigerte zaehlen nicht mit.
+                    zeilen.append(["entfernt in diesem Durchgang",
+                                   meldungen.anzahl(int(zahlen.get("entfernt", zahlen.get("dateien", 0))))])
+                    # "davon" gehoert direkt unter die Zahl desselben Durchgangs
+                    # (seit v0.14; vorher stand es unter der Gesamtzahl).
                     n = ereignis("quelle_in_geloescht_ordner")
                     if n:
                         zeilen.append([meldungen.OB_ZEILE_IM_GELOESCHT_ORDNER, meldungen.anzahl(n)])
+                    zeilen.append([meldungen.OB_ZEILE_QUELLE_ENTFERNT, meldungen.anzahl(zaehler.get("quelle_geloescht", 0))])
                     n = ereignis("leerer_ordner_entfernt")
                     if n:
                         zeilen.append(["leere Ordner entfernt", meldungen.anzahl(n)])
@@ -1472,7 +1481,7 @@ class Ablauf:
                 return {
                     "schritt": schritt, "name": self._schritt_name(schritt), "zeilen": zeilen,
                     "fehler": zaehler.get("fehler", 0),
-                    "duplikate": zaehler.get("duplikat", 0) + zaehler.get("duplikat_bestaetigt", 0),
+                    "duplikate": d.duplikate_gesamt(),
                     "phase": meldungen.ob_phase_kurz(niedrigster, sum(zaehler.values()) > 0),
                     "zaehler": zaehler, **extra,
                 }

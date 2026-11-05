@@ -550,6 +550,20 @@ def scan_besonderheiten(
     return "\n".join(zeilen)
 
 
+EREIGNIS_TESTBILDER_UEBERSPRUNGEN = "Ordner mit Testbildern - nie ins Archiv"
+
+
+def scan_testbilder_uebersprungen(ordner: list) -> str:
+    zeilen = ["Ordner mit Testbildern uebersprungen - Testbilder kommen nie in ein echtes Archiv:"]
+    zeilen += [f"  {o}" for o in ordner[:_BEISPIEL_ORDNER]]
+    if len(ordner) > _BEISPIEL_ORDNER:
+        zeilen.append(f"  und {anzahl(len(ordner) - _BEISPIEL_ORDNER)} weitere")
+    return "\n".join(zeilen)
+
+
+_BEISPIEL_ORDNER = 5
+
+
 def scan_strang_fehler(grund: str) -> str:
     return f"Durchlauf dieser Quelle unerwartet abgebrochen ({grund}) - nicht alles gesehen"
 
@@ -997,6 +1011,11 @@ EXIFTOOL_STUERZT_WIEDERHOLT = (
     " Die Dateien bekommen den Status fehler und werden beim naechsten Lauf erneut versucht"
 )
 EXIFTOOL_NICHT_STARTBAR = "ExifTool laesst sich nicht starten"
+
+
+def analyse_verwaiste_zugeordnet(n: int) -> str:
+    return (f"{anzahl(n)} Begleitdateien (XMP und aehnliche) hatten beim letzten Mal keine Hauptdatei;"
+            " jetzt ist sie da - sie werden ihr zugeordnet.")
 
 
 def analyse_erneut_versucht(n: int) -> str:
@@ -1474,6 +1493,13 @@ def sicherung_fehlgeschlagen(fehler: OSError) -> str:
             " Sync, Virenscanner) den Ordner .fotosortierer im Ziel offen, bitte kurz schliessen.")
 
 
+def aufraeumen_ziel_weg(ziel) -> str:
+    return (f"Das Archiv ist mitten im Aufraeumen nicht mehr erreichbar: {ziel}\n"
+            "Wahrscheinlich wurde die Platte abgezogen, ist eingeschlafen, oder die Netzverbindung ist weg."
+            " Ab da wurde nichts mehr entfernt und nichts umgestellt. Bitte das Archiv wieder anschliessen"
+            " und das Aufraeumen erneut starten.")
+
+
 def pruefen_ziel_weg(ziel) -> str:
     return (f"Das Ziel ist mitten im Pruefen nicht mehr erreichbar: {ziel}\n"
             "Wahrscheinlich wurde die Platte abgezogen, ist eingeschlafen, oder die Netzverbindung ist weg."
@@ -1614,6 +1640,13 @@ GRUND_PAPIERKORB_KOPIE = "Loeschung verweigert: Kopie in den Ordner _geloescht_ 
 GRUND_QUELLE_FEHLT_LOESCHEN = "Loeschung verweigert: Quelldatei nicht mehr vorhanden"
 GRUND_ZIEL_FEHLT_LOESCHEN = "Loeschung verweigert: Zieldatei nicht mehr vorhanden"
 GRUND_VERSCHIEBEN_GROESSE = "Verschieben: Zieldatei nach dem Umbenennen nicht vorhanden oder Groesse weicht ab"
+# Gemeinsamer Anfang: Solche Zeilen sieht "Pruefen" bei jedem Lauf wieder an (seit v0.14).
+GRUND_VERSCHIEBEN_NACHSEHEN = "Verschieben: Zieldatei nach dem Umbenennen"
+
+
+def grund_verschoben_nicht_im_archiv(zielpfad) -> str:
+    return (f"{GRUND_VERSCHIEBEN_NACHSEHEN} nicht im Archiv unter {zielpfad}. Die Quelle ist schon weg -"
+            " bitte im Archiv und im Ordner der Quelle nachsehen")
 GRUND_DIESELBE_DATEI = "Loeschung verweigert: Quelle und Ziel sind dieselbe Datei (derselbe Speicherort ueber zwei Pfade)"
 GRUND_LESUNG_FREMDER_LAUF = "Loeschung verweigert: Frischlesung stammt nicht aus dem laufenden Lauf"
 EREIGNIS_VERSCHOBEN_NACHGETRAGEN = "Umbenennen aus abgebrochenem Lauf war fertig (Quelle weg, Zieldatei mit passender Groesse da) - Status verschoben nachgetragen"
@@ -1639,10 +1672,13 @@ def grund_lesung(art: str) -> str:
     }.get(art, f"Loeschung verweigert: {art}")
 
 
+GRUND_ZIEL_GROESSE_FALSCH = "Loeschung verweigert: Zieldatei hat die falsche Groesse"
+
+
 def grund_groesse_abweichung(erwartet: int, quelle: int, ziel: int) -> str:
     if quelle == erwartet:
         return (
-            f"Loeschung verweigert: Zieldatei hat die falsche Groesse (gespeichert {anzahl(erwartet)} Byte,"
+            f"{GRUND_ZIEL_GROESSE_FALSCH} (gespeichert {anzahl(erwartet)} Byte,"
             f" Ziel {anzahl(ziel)}); die Quelle ist in Ordnung"
         )
     return (
@@ -2715,7 +2751,8 @@ OB_ABLAUF_AUTOMATISCH = "Alles automatisch"
 OB_ABLAUF_EINZELN = "Schritt für Schritt"
 OB_ABLAUF_TEXT_AUTOMATISCH = (
     "Nach „Los geht's“ und einem Bestätigungswort laufen alle Schritte von selbst bis zum Aufräumen "
-    "(nur in den Ordner _geloescht_). Kameranamen lassen sich dann erst am Ende ändern."
+    "(nur in den Ordner _geloescht_). Eigene Ordnernamen für Kameras gelten nur für noch nicht "
+    "Kopiertes – wer sie vorher festlegen will, nimmt „Schritt für Schritt“."
 )
 OB_ABLAUF_TEXT_EINZELN = "Nach jedem Schritt zeigt das Programm das Ergebnis und wartet auf Ihren Klick."
 OB_KETTE_TITEL = "Alles automatisch"
@@ -2780,6 +2817,11 @@ def ob_kette_ende(grund: str, sekunden: float, offen: str = "", fehler: str = ""
     if grund == "offen":
         return (f"Erledigt, was ging ({zeit}). Noch offen: {offen} – etwa Dateien einer Quelle, die gerade "
                 "nicht erreichbar ist. „Automatisch weiter“ macht dort weiter.")
+    if grund == "aufraeumen_befunde":
+        return (f"Fertig bis zum Aufräumen ({zeit}) – aber nicht alle Originale wurden entfernt: Bei manchen "
+                "fehlt die Kopie im Archiv oder weicht ab, oder das Archiv war nicht erreichbar. Sie bleiben in "
+                "ihrer Quelle, nichts ist verloren. Bitte die Liste „Fehler“ ansehen; „Automatisch weiter“ "
+                "kopiert sie neu ins Archiv.")
     if grund == "pruefen_befunde":
         return ("Der automatische Ablauf hat vor dem Aufräumen angehalten: Prüfen hat Abweichungen gefunden. "
                 "Bitte die Liste „Fehler“ ansehen. In der Quelle wurde nichts angefasst.")
@@ -2836,7 +2878,7 @@ def ob_vermutlich_importiert(quelle) -> str:
 # statt der Statuswoerter aus der Datenbank (v0.12.1).
 OB_ZEILE_GEPRUEFT = "geprüft (Kopie stimmt)"
 OB_ZEILE_DUPLIKAT_BESTAETIGT = "Doppelte bestätigt (Partnerdatei stimmt)"
-OB_ZEILE_QUELLE_ENTFERNT = "aus der Quelle entfernt (gesamt)"
+OB_ZEILE_QUELLE_ENTFERNT = "aus der Quelle entfernt (alle Durchgänge zusammen)"
 OB_ZEILE_IM_GELOESCHT_ORDNER = "davon im Ordner _geloescht_"
 OB_ZEILE_NOCH_IN_DER_QUELLE = "noch in der Quelle (geprüft)"
 
@@ -3236,3 +3278,25 @@ def tb_p_gleich_wie(nr: int, datei: str) -> str:
     wer = f"Testbild {nr} ({datei})" if nr else f"die Datei {datei}"
     return (f"fehlt am erwarteten Platz – derselbe Inhalt liegt schon als {wer} im Archiv;"
             " die beiden Dateien sind gleich")
+
+
+# ---------------------------------------------- Reiter „Wohin?“ (v0.14) ----
+
+WOHIN_SCHICKSAL = {
+    "kopiert": "Im Archiv",
+    "geplant": "Geplant, noch nicht kopiert",
+    "doppelt": "Doppelt – liegt schon dort",
+    "schon_da": "War schon im Archiv",
+    "bleibt": "Bleibt in der Quelle",
+    "offen": "Noch nicht analysiert",
+    "fehler": "Fehler",
+    "anderswo": "Archiv an anderem Ort",
+}
+
+
+def wohin_direkt(ordner: str) -> str:
+    return f"direkt in „{ordner}“"
+
+
+def wohin_weitere(n: int) -> str:
+    return f"weitere {anzahl(n)} Ordner"

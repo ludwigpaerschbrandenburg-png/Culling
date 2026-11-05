@@ -79,6 +79,9 @@ def ausfuehren(
     ergebnis.erneut_versucht = _fehler_erneut_versuchen(dbank, lauf)
     if ergebnis.erneut_versucht and konsole is not None:
         konsole.print(meldungen.analyse_erneut_versucht(ergebnis.erneut_versucht))
+    verwaiste = _verwaiste_erneut(dbank, konf, trenner)
+    if verwaiste and konsole is not None:
+        konsole.print(meldungen.analyse_verwaiste_zugeordnet(verwaiste))
     gesamt = dbank.anzahl_zu_analysieren()
     anzeige = _Anzeige(konsole, gesamt)
 
@@ -529,6 +532,32 @@ def _fehler_erneut_versuchen(dbank, lauf: int) -> int:
             continue
         if zuruecksetzen(z):
             n += 1
+    dbank.stapel_schreiben()
+    return n
+
+
+def _verwaiste_erneut(dbank, konf, trenner: str) -> int:
+    """Seit v0.14: Begleitdateien, die beim letzten Mal ohne Hauptdatei waren
+    ("uebersprungen: Sidecar ohne Hauptdatei"), zurueck auf gefunden, wenn im
+    selben Ordner jetzt eine passende Hauptdatei steht (sie kam spaeter, etwa
+    nach einem abgebrochenen Scan). Die Analyse ordnet sie ihr dann zu."""
+    hauptdateien: dict[str, list[str]] = {}
+    n = 0
+    for z in dbank.verwaiste_begleitdateien():
+        pfad = Path(db.text_pfad(z["quellpfad"]))
+        ordner = db.pfad_text(pfad.parent)
+        if ordner not in hauptdateien:
+            hauptdateien[ordner] = [Path(db.text_pfad(r["quellpfad"])).name
+                                    for r in dbank.ordner_inhalt(ordner, trenner)
+                                    if r["dateityp"] != dateitypen.SIDECAR]
+        if not any(dateitypen.sidecar_gehoert_zu(pfad.name, h, konf) for h in hauptdateien[ordner]):
+            continue
+        try:
+            st = os.stat(pfade.lang(pfad))
+        except OSError:
+            continue
+        dbank.zurueck_auf_gefunden(z["quellpfad"], st.st_size, st.st_mtime)
+        n += 1
     dbank.stapel_schreiben()
     return n
 

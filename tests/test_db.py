@@ -83,6 +83,7 @@ def test_dateien_hat_alle_spalten_aus_der_spec(datenbank):
         "zuletzt_gesehen_in_lauf",
         "schon_im_archiv",          # seit v0.9 (bereits importiert, nie aus der Quelle entfernt)
         "kopie_rang",               # seit v0.12.1 (Name ohne „ - Kopie“ kommt ins Archiv)
+        "war_duplikat",             # seit v0.14 (entferntes Duplikat bleibt im Bericht ein Duplikat)
     }
 
 
@@ -831,12 +832,13 @@ def test_echte_anhebung_von_v08_bringt_die_spalte_schon_im_archiv(tmp_path):
     d.stapel_schreiben()
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
     d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN war_duplikat")   # gab es vor v0.14 nicht
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")      # gab es in v0.8 noch nicht
     d.verbindung.execute("PRAGMA user_version=6")
     d.schliessen()
     d = db.Datenbank.oeffnen(ordner)
     try:
-        assert d.angehoben_von == 6 and db.SCHEMA_VERSION == 8
+        assert d.angehoben_von == 6 and db.SCHEMA_VERSION >= 8
         assert d.zeile("/q/a.jpg")["schon_im_archiv"] == 0
         assert d.zeile("/q/a.jpg")["kopie_rang"] == 0
     finally:
@@ -855,6 +857,7 @@ def test_echte_anhebung_von_v012_bringt_die_spalte_kopie_rang(tmp_path):
         d.datei_gesehen(f"/q/{name}", "/q", 100, 1000.0, "foto", lauf)
     d.stapel_schreiben()
     d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN war_duplikat")   # gab es vor v0.14 nicht
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")
     d.verbindung.execute("UPDATE dateien SET status = 'analysiert', gruppe = quellpfad, zielpfad = '/z/x.jpg'")
     d.verbindung.execute("UPDATE dateien SET status = 'kopiert' WHERE quellpfad = '/q/Fertig - Kopie.jpg'")
@@ -948,6 +951,7 @@ def test_anhebung_von_v08_markiert_vorher_vorhandene_duplikate(tmp_path):
     d.verbindung.execute("DROP TABLE abgelegt")
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN schon_im_archiv")
     d.verbindung.execute("DROP INDEX dateien_kopie_reihe")
+    d.verbindung.execute("ALTER TABLE dateien DROP COLUMN war_duplikat")   # gab es vor v0.14 nicht
     d.verbindung.execute("ALTER TABLE dateien DROP COLUMN kopie_rang")      # gab es in v0.8 noch nicht
     d.verbindung.execute("PRAGMA user_version=6")
     d.verbindung.commit()

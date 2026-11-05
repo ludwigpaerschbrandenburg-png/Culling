@@ -169,6 +169,27 @@ def _verbuchen(z, L: _Lesung, dbank: db.Datenbank, lauf: int, e: Ergebnis, anzei
         raise ZielWeg
     e.bearbeitet += 1
     anzeige.weiter(1, L.groesse if (L.art == "ok" and gelesen) else 0)
+    # Verschoben, Groesse passte nach dem Umbenennen nicht (ZU_PRUEFEN_SQL): Die
+    # Datei ist, was jetzt im Archiv liegt - nachtragen, sonst nachsehen lassen.
+    nachtrag = z["status"] == "fehler"
+    if nachtrag:
+        if L.art == "ok":
+            if gelesen:
+                e.bytes_gelesen += L.groesse
+            dbank.verschoben_nachtragen(quellpfad, L.hash, L.groesse)
+            dbank.ziel_index_setzen(zielpfad, L.groesse, L.mtime, L.hash, lauf)
+            e.verschoben_gehasht += 1
+            return
+        grund = meldungen.grund_verschoben_nicht_im_archiv(zielpfad) if L.art == "fehlt" else (
+            L.grund or meldungen.GRUND_PRUEFUNG_LESEN)
+        e.fehler += 1
+        if L.art == "fehlt":
+            e.fehler_fehlt += 1
+        else:
+            e.fehler_lesen += 1
+        dbank.status_setzen(quellpfad, "fehler", grund)
+        dbank.ereignis(lauf, ART_PRUEFUNG_FEHLGESCHLAGEN, quellpfad, 1, f"{db.pfad_text(zielpfad)} | {grund}")
+        return
     if L.art == "ok" and L.groesse != int(z["groesse"]):
         # Die Groesse muss fuer JEDE Zeile stimmen - auch fuer ein Duplikat
         # (gleicher Inhalt heisst gleiche Groesse) und fuer eine verschobene

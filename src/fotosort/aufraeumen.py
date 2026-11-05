@@ -61,6 +61,7 @@ class Ergebnis:
     reste_verweigert: int = 0
     sekunden: float = 0.0
     abgebrochen: bool = False
+    ziel_weg: bool = False          # das ganze Archiv war mitten im Lauf nicht mehr erreichbar (v0.14)
     dry_run: bool = False
     weise: str = loeschen.WEISE_PAPIERKORB
     quellen_uebersprungen: list[str] = field(default_factory=list)
@@ -69,11 +70,27 @@ class Ergebnis:
     dry_run_ordner: dict[str, list[Path]] = field(default_factory=dict)
 
 
+_ARCHIVKOPIE_SCHLECHT = (
+    meldungen.GRUND_ZIEL_ABWEICHUNG, meldungen.GRUND_ZIEL_FEHLT_LOESCHEN, meldungen.GRUND_BYTEVERGLEICH,
+    meldungen.GRUND_ZIEL_NACH_LESUNG_GEAENDERT, meldungen.GRUND_ZIEL_GROESSE_FALSCH,
+)
+
+
+class ZielWeg(Exception):
+    """Das ganze Archiv ist nicht mehr erreichbar - nicht bloss eine Datei."""
+
+
 # ----------------------------------------------------------- Planen -----
 
 
-def planen(dbank: db.Datenbank, quellen_filter: list | None, lauf: int = 0, ergebnis=None) -> Plan:
+def planen(dbank: db.Datenbank, quellen_filter: list | None, lauf: int = 0, ergebnis=None,
+           nachziehen: bool = False) -> Plan:
     plan = Plan()
+    if nachziehen:
+        # Auch fuer Datenbanken von vor v0.14: Begleitdateien eines bereits
+        # importierten Bildes bleiben mit ihm in der Quelle. Nur mit Sperre
+        # (nicht im Probelauf - der schreibt nichts).
+        dbank.begleitdateien_nachziehen()
     bekannte = {z["wurzel"]: z for z in dbank.quellen_liste()}
     gewuenscht: list[str] | None = None
     if quellen_filter:
@@ -152,7 +169,8 @@ def ausfuehren(
                         anzeige = fortschritt.Fortschritt(konsole, e.geplant, 2 * sum(b for _, b in plan.je_quelle.values()),
                                                           meldungen.aufraeumen_laeuft)
                     papierkorb = loeschen.papierkorb_ordner(pfad, heute)
-                    _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_vergleich, papierkorb)
+                    _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_vergleich, papierkorb,
+                                       ziel)
             if leere_ordner:
                 # Vorlauf: zaehlen und melden, nichts anfassen. Ernstfall erst
                 # nach Bestaetigung; dort wird nur noch entfernt, nicht gezaehlt.
@@ -163,8 +181,9 @@ def ausfuehren(
                         konsole.print(meldungen.aufraeumen_uebersprungen(wurzel))
                 elif liste:
                     _ordner_leeren(pfad, pfad, ziel, reste, konf, dbank, lauf, e, False, [], melden=False)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ZielWeg) as grund:
         e.abgebrochen = True
+        e.ziel_weg = isinstance(grund, ZielWeg)
         stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
     finally:
@@ -176,7 +195,8 @@ def ausfuehren(
     return e
 
 
-def _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_vergleich, papierkorb) -> None:
+def _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_vergleich, papierkorb,
+                       ziel: Path | None = None) -> None:
     offen: deque[tuple[object, Future]] = deque()
     max_offen = max(4, pool._max_workers * 4)
     ab = ""
@@ -199,13 +219,18 @@ def _quelle_aufraeumen(wurzel, dbank, lauf, e, pool, stop, anzeige, weise, byte_
         wait([offen[0][1]], timeout=1.0)
         while offen and offen[0][1].done():
             z, zukunft = offen.popleft()
-            _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige, weise, byte_vergleich, papierkorb)
+            _verbuchen(z, zukunft.result(), dbank, lauf, e, anzeige, weise, byte_vergleich, papierkorb, ziel)
 
 
-def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergleich, papierkorb) -> None:
+def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergleich, papierkorb,
+               ziel: Path | None = None) -> None:
     quellpfad = z["quellpfad"]
     if L.art == "abgebrochen":
         return
+    if L.art in ("ziel_fehlt", "fehler") and ziel is not None and not db.ziel_erreichbar(ziel):
+        # Nicht die Archivdatei fehlt, sondern das ganze Archiv (Platte
+        # abgezogen, Netz weg): anhalten, nichts umstellen (seit v0.14).
+        raise ZielWeg
     e.bearbeitet += 1
     gelesen = (L.quell_groesse if L.quell_groesse > 0 else 0) + (L.ziel_groesse if L.ziel_groesse > 0 else 0)
     e.bytes_gelesen += gelesen
@@ -239,6 +264,12 @@ def _verbuchen(z, L: loeschen.Lesung, dbank, lauf, e, anzeige, weise, byte_vergl
             dbank.ereignis(lauf, loeschen.ART_QUELLE_SEIT_KOPIEREN_GEAENDERT, quellpfad, 1, grund)
             e.quelle_veraendert += 1
             return
+        if grund.startswith(_ARCHIVKOPIE_SCHLECHT):
+            # Die Archivkopie fehlt oder weicht ab (Befund F2, v0.14): Der
+            # Ziel-Index darf sie nicht mehr als heile Kopie fuehren - sonst
+            # hielte das naechste Kopieren sie fuer den Partner dieser Datei.
+            # Neu kopiert wird beim naechsten Kopieren (kopieren.NEU_NACH_VERWEIGERUNG).
+            dbank.ziel_index_entfernen(Path(db.text_pfad(z["zielpfad"])))
         dbank.status_setzen(quellpfad, "fehler", grund)
         dbank.ereignis(lauf, loeschen.ART_LOESCHUNG_VERWEIGERT, quellpfad, 1, grund)
         e.verweigert += 1

@@ -36,6 +36,8 @@ ART_ABGEBROCHEN = "abgebrochen"
 ART_QUELLE_NICHT_ERREICHBAR = "quelle_nicht_erreichbar"
 ART_QUELLE_ABGELEHNT = "quelle_abgelehnt"
 ART_NICHT_MEHR_VORHANDEN = "quelle_nicht_mehr_vorhanden"
+ART_TESTBILDER = "testbilder_uebersprungen"      # seit v0.14
+ART_PAPIERKORB = "ordner_geloescht_uebersprungen"  # seit v0.14 (vorher als "ausgeschlossen" gezaehlt)
 
 TEXT_QUELLE_VERAENDERT = meldungen.TEXT_QUELLE_VERAENDERT
 
@@ -71,6 +73,7 @@ class Ergebnis:
     fehler: int = 0
     ordner_nicht_lesbar: int = 0
     nicht_lesbare_ordner: list = field(default_factory=list)
+    testbilder_ordner: list = field(default_factory=list)   # uebersprungen (seit v0.14)
     sekunden: float = 0.0
     abgebrochen: bool = False
     ziel_ausgeschlossen: bool = False
@@ -90,6 +93,7 @@ class Ergebnis:
         for ordner in anderes.nicht_lesbare_ordner:
             if len(self.nicht_lesbare_ordner) < _BEISPIELE:
                 self.nicht_lesbare_ordner.append(ordner)
+        self.testbilder_ordner.extend(anderes.testbilder_ordner)
         self.abgebrochen = self.abgebrochen or anderes.abgebrochen
         self.ziel_ausgeschlossen = self.ziel_ausgeschlossen or anderes.ziel_ausgeschlossen
 
@@ -182,7 +186,7 @@ def _ist_verknuepfung(eintrag: os.DirEntry) -> bool:
 class Fund:
     """Ein Fund des Dateisystem-Durchlaufs, noch nicht verbucht."""
 
-    art: str  # "datei" | "ordner_fehler" | "verknuepfung" | "ausgeschlossen" | "ins_ziel"
+    art: str  # "datei" | "ordner_fehler" | "verknuepfung" | "ausgeschlossen" | "ins_ziel" | "testbilder" | "papierkorb"
     pfad: Path
     text: str = ""
     typ: str = ""
@@ -245,6 +249,11 @@ def _ablaufen(
             # Einhaengung derselben Freigabe): nie als Quelle erfassen.
             yield Fund("ins_ziel", ordner)
             continue
+        if ordner != quelle_auf and any(e.name == pfade.TESTBILDER_MARKE for e in gesammelt):
+            # Ein Ordner mit Testbildern unterhalb einer Quelle (Desktop, D:\):
+            # Testbilder gehoeren nie in ein echtes Archiv (Befund F4, v0.14).
+            yield Fund("testbilder", ordner)
+            continue
 
         for eintrag in gesammelt:
             name = eintrag.name
@@ -266,7 +275,7 @@ def _ablaufen(
                     # (SPEC §4 Phase 5): Sonst wuerden die dorthin geraeumten
                     # Dateien als neue Quelldateien erfasst und beim naechsten
                     # Aufraeumen ein zweites Mal entfernt.
-                    yield Fund("ausgeschlossen", pfad, "Ordner _geloescht_")
+                    yield Fund("papierkorb", pfad, "Ordner _geloescht_")
                     continue
                 if ist_ausgeschlossen(relativ, muster, ordner=True):
                     yield Fund("ausgeschlossen", pfad, "Ordner")
@@ -331,6 +340,13 @@ def _verbuchen(fund: Fund, quelle_auf: Path, dbank, lauf: int, ergebnis: Ergebni
     if fund.art == "ausgeschlossen":
         ergebnis.ausgeschlossen += 1
         dbank.ereignis(lauf, ART_AUSGESCHLOSSEN, fund.pfad, 1, fund.text)
+        return
+    if fund.art == "papierkorb":
+        dbank.ereignis(lauf, ART_PAPIERKORB, fund.pfad, 1, fund.text)
+        return
+    if fund.art == "testbilder":
+        ergebnis.testbilder_ordner.append(str(fund.pfad))
+        dbank.ereignis(lauf, ART_TESTBILDER, fund.pfad, 1, meldungen.EREIGNIS_TESTBILDER_UEBERSPRUNGEN)
         return
     if fund.art == "ins_ziel":
         dbank.ereignis(lauf, ART_INS_ZIEL, fund.pfad, 1, meldungen.EREIGNIS_ZIEL_AUSGESCHLOSSEN)

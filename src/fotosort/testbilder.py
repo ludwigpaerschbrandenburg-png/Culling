@@ -51,7 +51,7 @@ from . import FotosortFehler, __version__, hashes, meldungen, pfade, prozesse
 from . import testbilder_formate as formate
 
 FORMAT = 1
-MARKE = ".fotosort_testbilder.json"
+MARKE = pfade.TESTBILDER_MARKE         # ".fotosort_testbilder.json"
 TESTBAUM_MARKE = ".fotosort_testbaum"     # wie oberflaeche/desktop.py (--durchlauf)
 QUELLE, ZIEL = "Quelle", "Ziel"
 STANDARD_ANZAHL = 5000

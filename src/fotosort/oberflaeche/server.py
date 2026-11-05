@@ -4,8 +4,9 @@ Jede Anfrage ist klein und liefert nur Zusammenfassungen oder eine Seite
 einer Liste (SPEC Abschnitt 8). Alle Endpunkte laufen synchron und greifen
 ueber die Sperre des Ablaufs nacheinander auf die Datenbank zu.
 
-Der Server hoert nur auf 127.0.0.1. Anfragen, die eine fremde Seite im
-Browser ausloest (Origin passt nicht zum eigenen Host), werden abgelehnt;
+Der Server hoert nur auf 127.0.0.1. Anfragen an einen fremden Namen (Host)
+und Anfragen, die eine fremde Seite im Browser ausloest (Origin passt nicht
+zum eigenen Host, auch "null"), werden abgelehnt;
 alle Aenderungen laufen ausserdem ueber JSON-Anfragen, die ein fremder
 Ursprung nicht ohne Vorabfrage stellen kann.
 """
@@ -33,6 +34,21 @@ STATISCHE_DATEIEN = {
 }
 
 
+#: Unter diesen Namen ist der eigene Rechner erreichbar. Jeder andere Host
+#: wird abgelehnt (DNS-Rebinding: ein fremder Name, der auf 127.0.0.1 zeigt).
+#: Fuer die spaetere Fassung auf dem TrueNAS kommen dessen Namen hier dazu.
+ERLAUBTE_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+
+
+def _hostname(host: str) -> str:
+    """Host-Kopfzeile ohne Port: "127.0.0.1:8765" -> "127.0.0.1", "[::1]:8765" -> "[::1]"."""
+    host = host.strip().lower()
+    if host.startswith("["):
+        ende = host.find("]")
+        return host[: ende + 1] if ende != -1 else host
+    return host.split(":", 1)[0]
+
+
 def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     app = FastAPI(title="fotosort", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -40,7 +56,11 @@ def app_bauen(ab: ablauf_modul.Ablauf) -> FastAPI:
     async def herkunft_pruefen(request: Request, call_next):
         herkunft = request.headers.get("origin")
         host = request.headers.get("host", "")
-        if herkunft and herkunft.lower() not in (f"http://{host}".lower(), "null"):
+        # Seit v0.14: nur die eigenen Namen des Rechners, und die Herkunft muss
+        # genau dieser Host sein - "null" (lokal geoeffnete Datei, abgeschotteter
+        # Rahmen) gilt als fremd.
+        if _hostname(host) not in ERLAUBTE_HOSTS or (
+                herkunft is not None and herkunft.lower() != f"http://{host}".lower()):
             return JSONResponse({"fehler": meldungen.ob_herkunft_abgelehnt()}, status_code=403)
         antwort = await call_next(request)
         antwort.headers["Cache-Control"] = "no-store"

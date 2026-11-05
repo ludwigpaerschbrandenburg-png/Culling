@@ -24,6 +24,8 @@ from fotosort.oberflaeche import ablauf as ablauf_modul
 from fotosort.oberflaeche import server as server_modul
 from test_kopieren import _zeilen
 
+ADRESSE = "http://127.0.0.1:8765"
+
 ENDE = {"fertig", "abgebrochen", "fehler", "abgestuerzt"}
 
 
@@ -39,7 +41,8 @@ def ob(tmp_path, monkeypatch):
     monkeypatch.setattr(ablauf_modul.kopieren.pfade, "laufwerksart", lambda p: "")
     ab = ablauf_modul.Ablauf(ordner=tmp_path / "oberflaeche")
     ab.geoeffnet = geoeffnet
-    client = TestClient(server_modul.app_bauen(ab))
+    # Die Seite laeuft unter 127.0.0.1 - andere Namen lehnt der Server ab (v0.14).
+    client = TestClient(server_modul.app_bauen(ab), base_url=ADRESSE)
     return ab, client
 
 
@@ -332,8 +335,30 @@ def test_fremde_herkunft_wird_abgelehnt(ob):
     ab, client = ob
     r = client.post("/api/ziel", json={"ziel": "x"}, headers={"origin": "http://boese.example"})
     assert r.status_code == 403
-    r = client.get("/api/zustand", headers={"origin": "http://testserver"})
+    r = client.get("/api/zustand", headers={"origin": ADRESSE})
     assert r.status_code == 200
+
+
+def test_herkunft_null_und_fremder_hostname_werden_abgelehnt(tmp_path):
+    """Pruefung v0.14 (Browser-Fassung, fuer spaeter auf dem TrueNAS):
+    - Herkunft "null" senden lokal geoeffnete HTML-Dateien und abgeschottete
+      Rahmen - sie wurde bisher durchgelassen.
+    - DNS-Rebinding: Ein fremder Name zeigt auf 127.0.0.1; Host und Herkunft
+      passen dann zueinander, die bisherige Pruefung sah nichts. Erlaubt sind
+      nur die eigenen Namen des Rechners."""
+    app = server_modul.app_bauen(ablauf_modul.Ablauf(ordner=tmp_path / "oberflaeche"))
+    for adresse in ("http://127.0.0.1:8765", "http://localhost:8765", "http://[::1]:8765"):
+        client = TestClient(app, base_url=adresse)
+        assert client.get("/api/zustand").status_code == 200, adresse
+        assert client.get("/api/zustand", headers={"origin": adresse}).status_code == 200, adresse
+    eigen = TestClient(app, base_url="http://127.0.0.1:8765")
+    r = eigen.post("/api/ziel", json={"ziel": "x"}, headers={"origin": "null"})
+    assert r.status_code == 403 and "abgelehnt" in r.json()["fehler"]
+    boese = TestClient(app, base_url="http://boese.example:8765")
+    assert boese.get("/api/zustand").status_code == 403
+    r = boese.post("/api/ziel", json={"ziel": "x"}, headers={"origin": "http://boese.example:8765"})
+    assert r.status_code == 403
+    assert boese.get("/").status_code == 403
 
 
 # ------------------------------------------------------- der ganze Ablauf --
@@ -430,7 +455,7 @@ def test_ganzer_ablauf_ueber_die_oberflaeche(ob, quelle, ziel, nachschauen, arch
     assert all(not Path(q).exists() for q in nachher)
     assert any(p.is_dir() and p.name.startswith("_geloescht_") for p in quelle.iterdir())
     zf = client.get("/api/zusammenfassung?schritt=aufraeumen").json()
-    assert any(z[0] == "aus der Quelle entfernt (gesamt)" for z in zf["zeilen"])
+    assert any(z[0] == "aus der Quelle entfernt (alle Durchgänge zusammen)" for z in zf["zeilen"])
     assert any(z[0] == "davon im Ordner _geloescht_" for z in zf["zeilen"])
     assert not _roh(zf["zeilen"]), zf["zeilen"]
     for schritt in ("scan", "analyse", "kopieren"):
@@ -457,7 +482,7 @@ def test_weitermachen_erkennt_angefangenes_archiv(ob, quelle, ziel, tmp_path):
     assert _warten(client)["zustand"] == "fertig"
     # Neues Fenster, anderer Ordner der Oberflaeche - nur das Ziel ist bekannt.
     neu = ablauf_modul.Ablauf(ziel=str(ziel), ordner=tmp_path / "anderes_fenster")
-    client2 = TestClient(server_modul.app_bauen(neu))
+    client2 = TestClient(server_modul.app_bauen(neu), base_url=ADRESSE)
     z = client2.get("/api/zustand").json()
     assert z["archiv"]["da"] and z["archiv"]["naechster"] == "analyse" and "Analyse" in z["archiv"]["phase"]
     n = client2.get("/api/naechster").json()

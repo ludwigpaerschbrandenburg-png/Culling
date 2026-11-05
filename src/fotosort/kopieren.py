@@ -40,6 +40,8 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import blake3
+
 from . import FotosortFehler, db, fortschritt, hashes, loeschen, meldungen, pfade, steuerung
 from .scan import ART_QUELLE_NICHT_ERREICHBAR, ART_QUELLE_VERAENDERT, TEXT_QUELLE_VERAENDERT
 
@@ -158,9 +160,34 @@ def profil_erkennen(wege) -> tuple[str, list[tuple[str, str]]]:
 # --------------------------------------------------------- Bausteine ----
 
 
+#: Laengster Dateiname der ueblichen Dateisysteme: 255 Byte (Linux, TrueNAS)
+#: bzw. 255 UTF-16-Zeichen (NTFS, exFAT unter Windows).
+NAME_GRENZE = 255
+
+
+def _name_laenge(name: str) -> int:
+    """Laenge eines Dateinamens so, wie das Dateisystem sie zaehlt."""
+    if os.name == "nt":
+        return len(name.encode("utf-16-le", "surrogatepass")) // 2
+    return len(os.fsencode(name))
+
+
 def part_pfad(zielpfad: Path) -> Path:
-    """Vollstaendiger Zielname plus .part (SPEC Abschnitt 5)."""
-    return zielpfad.with_name(zielpfad.name + PART)
+    """Vollstaendiger Zielname plus .part (SPEC Abschnitt 5).
+
+    Passt das nicht mehr in einen Dateinamen (Namen ab 251 Zeichen, Befund F5
+    v0.14), wird nur die Zwischendatei kuerzer benannt: Anfang des Namens,
+    "~", zehn Zeichen BLAKE3 des vollen Namens, ".part". Immer gleich fuer
+    denselben Namen - der naechste Start findet eine liegengebliebene wieder -
+    und verschieden fuer verschiedene Namen. Der Endname bleibt unveraendert."""
+    voll = zielpfad.name + PART
+    if _name_laenge(voll) <= NAME_GRENZE:
+        return zielpfad.with_name(voll)
+    kennung = "~" + blake3.blake3(os.fsencode(zielpfad.name)).hexdigest()[:10] + PART
+    kopf = zielpfad.name
+    while kopf and _name_laenge(kopf + kennung) > NAME_GRENZE:
+        kopf = kopf[:-1]
+    return zielpfad.with_name(kopf + kennung)
 
 
 def mit_anhang(zielpfad: Path, k: int, stamm: str = "") -> Path:
@@ -1381,6 +1408,18 @@ def _quellen(dbank: db.Datenbank, lauf: int, ergebnis) -> dict[str, list[_Quelle
     return je_laufwerk
 
 
+#: Seit v0.14 (Befund F2): Das Aufraeumen verweigerte die Loeschung, weil die
+#: Kopie im Archiv fehlt, beschaedigt ist oder sich veraendert hat - die
+#: Quelle war in Ordnung. Solche Dateien werden wie nach einer fehlgeschlagenen
+#: Pruefung neu kopiert; die schlechte Archivdatei bleibt liegen (nie
+#: ueberschreiben), eine heile unter dem Namen wird als Duplikat erkannt.
+NEU_NACH_VERWEIGERUNG = (
+    meldungen.GRUND_ZIEL_ABWEICHUNG, meldungen.GRUND_ZIEL_FEHLT_LOESCHEN, meldungen.GRUND_BYTEVERGLEICH,
+    meldungen.GRUND_ZIEL_NACH_LESUNG_GEAENDERT, meldungen.GRUND_ZIEL_NICHT_LESBAR,
+    meldungen.GRUND_ZIEL_GROESSE_FALSCH,
+)
+
+
 def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: int) -> int:
     """Zeilen, deren Zielpruefung fehlschlug (Phase 4), wieder zum Kopieren
     freigeben. Ihr zielpfad zeigt auf die fehlerhafte Zieldatei oder die
@@ -1392,7 +1431,8 @@ def _nach_pruefung_zuruecksetzen(ziel: Path, konf, dbank: db.Datenbank, lauf: in
     """
     from . import ziel as ziel_modul
 
-    zeilen = dbank.zeilen_mit_fehlergrund(meldungen.GRUND_PRUEFUNG)
+    zeilen = [z for grund in (meldungen.GRUND_PRUEFUNG, *NEU_NACH_VERWEIGERUNG)
+              for z in dbank.zeilen_mit_fehlergrund(grund)]
     if not zeilen:
         return 0
     struktur = ziel_modul.Zielstruktur(ziel)
@@ -1477,6 +1517,9 @@ def ausfuehren(ziel: Path, konf, dbank: db.Datenbank, lauf: int, konsole=None,
     except OSError as fehler:
         raise FotosortFehler(meldungen.ziel_nicht_beschreibbar(ziel, fehler.strerror or str(fehler))) from fehler
     direkt = not pfade.kann_ohne_ueberschreiben(ziel)
+    # Spaet dazugekommene XMP eines bereits importierten Bildes bleiben wie das
+    # Bild in der Quelle - auch beim Verschieben (seit v0.14).
+    dbank.begleitdateien_nachziehen()
     lauf_zustand = _Lauf(ziel, konf, dbank, lauf, konsole, kw, hw, direkt, verschieben)
     e = lauf_zustand.ergebnis
     e.kopier_worker, e.hash_worker, e.profil = kw, hw, prof

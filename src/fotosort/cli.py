@@ -412,6 +412,9 @@ def befehl_scan(args, konsole) -> int:
         if text:
             konsole.print("")
             konsole.print(text)
+        if ergebnis.testbilder_ordner:
+            konsole.print("")
+            konsole.print(meldungen.scan_testbilder_uebersprungen(ergebnis.testbilder_ordner))
         # Bestand des Archivs (seit v0.9): was schon im Ziel liegt, auch in einem
         # von Hand angelegten Archiv - nur Namen und Groessen, nichts wird gelesen.
         bestand_e = None
@@ -805,7 +808,7 @@ def befehl_aufraeumen(args, konsole) -> int:
     try:
         _profil_aufloesen(args, archiv, konsole)
         kopieren.worker_zahlen(archiv.konf, args.profil, None, args.hash_worker)
-        plan = aufraeumen.planen(datenbank, args.quelle)
+        plan = aufraeumen.planen(datenbank, args.quelle, nachziehen=not probelauf)
         if plan.unbekannt:
             for q in plan.unbekannt:
                 konsole.print(meldungen.quelle_unbekannt(q))
@@ -845,6 +848,12 @@ def befehl_aufraeumen(args, konsole) -> int:
         except FotosortFehler:
             _lauf_sauber_abbrechen(datenbank, lauf)
             raise
+        if ergebnis.ziel_weg:
+            # Keine Sicherung und kein Bericht ins Archiv - es ist ja nicht da.
+            konsole.print("")
+            konsole.print(meldungen.aufraeumen_ziel_weg(archiv.ziel))
+            _lauf_sauber_abbrechen(datenbank, lauf)
+            return FEHLER
         konsole.print("")
         konsole.print(meldungen.aufraeumen_ergebnis(ergebnis))
         if ergebnis.abgebrochen:
@@ -854,6 +863,7 @@ def befehl_aufraeumen(args, konsole) -> int:
             return ABGEBROCHEN
         _abschliessen(archiv, konsole, lauf, {
             "dateien": ergebnis.bearbeitet, "bytes": ergebnis.bytes_gelesen, "sekunden": ergebnis.sekunden,
+            "entfernt": ergebnis.geloescht + ergebnis.in_papierkorb,
         })
         return FEHLER if (ergebnis.verweigert or ergebnis.quelle_veraendert or ergebnis.nicht_erreichbar) else OK
     finally:
