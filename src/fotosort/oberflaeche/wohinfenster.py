@@ -127,12 +127,25 @@ class FlussGrafik(QWidget):
         name = f"{ZEICHEN[k.art]} {k.name}" if k.art in ZEICHEN else k.name
         return name, meldungen.anzahl(k.n) + (" ›" if k.tiefer else "")
 
+    LUECKE = 6.0       # Luft in der Spalte: nie auf den Pixel genau
+
     def _spalte(self, fm: QFontMetrics, knoten: list[wohin.Knoten]) -> float:
         breiteste = 0.0
         for k in knoten:
             name, zahl = self.beschriftung(k)
-            breiteste = max(breiteste, fm.horizontalAdvance(name) + fm.horizontalAdvance("  " + zahl))
+            breiteste = max(breiteste, fm.horizontalAdvance(name) + fm.horizontalAdvance("  " + zahl) + self.LUECKE)
         return min(breiteste, max(120.0, self.width() * 0.30))
+
+    def text_fuer(self, k: wohin.Knoten, seite: str) -> tuple[str, str]:
+        """Was neben einem Knoten steht: der Name - in der Mitte gekuerzt nur,
+        wenn er nicht in die Spalte passt - und die Zahl."""
+        fm = QFontMetrics(self.font())
+        name, zahl = self.beschriftung(k)
+        spalte = self.spalte_links if seite == "links" else self.spalte_rechts
+        platz = int(max(20.0, spalte - fm.horizontalAdvance("  " + zahl)))
+        if fm.horizontalAdvance(name) > platz:
+            name = fm.elidedText(name, Qt.TextElideMode.ElideMiddle, platz)
+        return name, zahl
 
     def lage_holen(self) -> wohin.Lage | None:
         if not self.ansicht or not self.ansicht.baender:
@@ -233,7 +246,6 @@ class FlussGrafik(QWidget):
         grau = QColor(stil.gedaempft_farbe(pal))
         p.setPen(Qt.PenStyle.NoPen)
         for seite, knoten, lagen in (("links", self.ansicht.links, lage.links), ("rechts", self.ansicht.rechts, lage.rechts)):
-            spalte = self.spalte_links if seite == "links" else self.spalte_rechts
             for i, (k, kl) in enumerate(zip(knoten, lagen)):
                 c = farbe(pal, k.art if k.art in wohin.KAESTEN else "knoten")
                 if self.ueber == (seite, i):
@@ -241,10 +253,8 @@ class FlussGrafik(QWidget):
                 p.setBrush(c)
                 h = max(kl.h, 2.0)
                 p.drawRoundedRect(QRectF(kl.x, kl.mitte - h / 2 if kl.h < 2 else kl.y, kl.b, h), 2, 2)
-                name, zahl = self.beschriftung(k)
-                zahl_breite = fm.horizontalAdvance("  " + zahl)
-                name = fm.elidedText(name, Qt.TextElideMode.ElideMiddle, int(max(20.0, spalte - zahl_breite)))
-                breite = fm.horizontalAdvance(name) + zahl_breite
+                name, zahl = self.text_fuer(k, seite)
+                breite = fm.horizontalAdvance(name) + fm.horizontalAdvance("  " + zahl)
                 y = kl.mitte + (fm.ascent() - fm.descent()) / 2
                 x = kl.x - self.LUFT - breite if seite == "links" else kl.x + kl.b + self.LUFT
                 p.setPen(text)

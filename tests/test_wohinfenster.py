@@ -353,6 +353,23 @@ def test_baender_tragen_ihre_farbe(app, modus):
     assert abstand(bild2.pixelColor(p1), grund) < abstand(bild.pixelColor(p1), grund)
 
 
+def test_kurze_namen_bleiben_ganz(app):
+    """Passt ein Name in seine Spalte, steht er ganz da - frueher wurde „Quelle“
+    zu „Q…e“, weil die Spalte auf den Pixel genau so breit war wie der Text."""
+    eintraege = [wohin.Eintrag("/x/Quelle", ("A",), wohin.KOPIERT, ("2026", "2026-01 Januar"), 15, 100),
+                 wohin.Eintrag("/x/Quelle", ("A",), wohin.DOPPELT, ("2026", "2026-02 Februar"), 5, 100),
+                 wohin.Eintrag("/x/Karte", ("B",), wohin.KOPIERT, ("2026", "2026-12 Dezember"), 1, 100)]
+    g = wohinfenster.FlussGrafik()
+    g.setzen(wohin.ansicht(_daten(eintraege), rechts=("2026",)))
+    for breite in (700, 900, 1168, 1600):
+        g.resize(breite, g.height())
+        g.lage_holen()
+        for seite, knoten in (("links", g.ansicht.links), ("rechts", g.ansicht.rechts)):
+            for k in knoten:
+                gezeigt, _zahl = g.text_fuer(k, seite)
+                assert gezeigt == g.beschriftung(k)[0], (breite, gezeigt)
+
+
 def test_lange_namen_werden_gekuerzt_nicht_abgeschnitten(app):
     lang = "Ein sehr langer Ordnername " * 6
     eintraege = [wohin.Eintrag("/Q", (lang + "Ende",), wohin.KOPIERT, ("2019",), 10, 100)]
@@ -362,10 +379,8 @@ def test_lange_namen_werden_gekuerzt_nicht_abgeschnitten(app):
     g.lage_holen()
     assert g.spalte_links <= 700 * 0.30 + 1
     # Was gezeichnet wird, passt in die Spalte (Mitte gekuerzt, Anfang und Ende bleiben).
-    from PySide6.QtGui import QFontMetrics
-    fm = QFontMetrics(g.font())
-    name, zahl = g.beschriftung(g.ansicht.links[0])
-    gekuerzt = fm.elidedText(name, Qt.TextElideMode.ElideMiddle, int(g.spalte_links - fm.horizontalAdvance("  " + zahl)))
+    name, _zahl = g.beschriftung(g.ansicht.links[0])
+    gekuerzt, _zahl = g.text_fuer(g.ansicht.links[0], "links")
     assert gekuerzt != name and gekuerzt.startswith("Ein") and gekuerzt.endswith("Ende") and "…" in gekuerzt
     g.grab()                                                # zeichnet ohne Fehler
 
